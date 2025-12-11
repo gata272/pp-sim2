@@ -28,7 +28,6 @@ body {
     width: 95%; 
     min-width: 300px;
     
-    /* 縦方向のサイズを確保し、子要素を引き伸ばす */
     flex-grow: 1; 
     align-items: flex-start;
 }
@@ -39,10 +38,10 @@ body {
     --puyo-cell-size: 30px; 
     
     display: grid;
-    /* ★ 厳密に 12 行 (高さ: 360px) に固定 ★ */
+    /* 縦方向は 12 行で固定 */
     grid-template-rows: repeat(12, var(--puyo-cell-size)); 
-    /* ★ 厳密に 6 列 (幅: 180px) に固定 ★ */
-    grid-template-columns: repeat(6, var(--puyo-cell-size)); 
+    /* ★ 横方向を 6 列で固定し、!important で強制 ★ */
+    grid-template-columns: repeat(6, var(--puyo-cell-size)) !important; 
     
     border: 3px solid #666;
     background-color: #000;
@@ -53,7 +52,7 @@ body {
     background-position: -1px -1px; 
     
     /* 盤面全体の固定幅を計算: 6列 * 30px = 180px */
-    width: calc(6 * var(--puyo-cell-size)); 
+    width: calc(6 * var(--puyo-cell-size)) !important; /* ★ 幅も 6 列に合わせて強制 ★ */
     /* 盤面全体の固定高さを計算: 12行 * 30px = 360px */
     height: calc(12 * var(--puyo-cell-size)); 
     
@@ -62,7 +61,6 @@ body {
     min-width: calc(6 * var(--puyo-cell-size)); 
     margin: 0;
     
-    /* 画面が狭いときは縮小を許可し、全体を縮小表示 */
     max-width: 100%; 
     max-height: 90vh; 
 }
@@ -93,7 +91,6 @@ body {
     display: flex;
     flex-direction: column; 
     gap: 5px; 
-    /* ★ 情報パネル: flex: 1 (全体の約 25%) ★ */
     flex: 1 1 auto; 
     min-width: 80px; 
     max-width: 200px; 
