@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ぷよぷよ連鎖シミュレーション</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="wrapper"> <div id="puyo-board"></div>
+
+        <div id="info-panel">
+            
+            <div id="play-next-info" class="info-box play-info info-group-a">
+                <h2>NEXT</h2>
+                <div id="next-puyo-1"></div>
+                <div id="next-puyo-2"></div>
+            </div>
+            
+            <div id="play-stats-info" class="play-info info-group-b">
+                <div id="play-score-info" class="info-box">
+                    <h2>SCORE</h2>
+                    <div id="score">0</div>
+                </div>
+                <div id="play-chain-info" class="info-box">
+                    <h2>CHAIN</h2>
+                    <div id="chain-count">0</div>
+                </div>
+            </div>
+
+            <div id="edit-palette-info" class="info-box edit-info edit-group-a">
+                <h2>パレット (タップで選択)</h2>
+                <div id="color-palette">
+                    <div class="puyo puyo-1 palette-color" data-color="1"></div> <div class="puyo puyo-2 palette-color" data-color="2"></div> <div class="puyo puyo-3 palette-color" data-color="3"></div> <div class="puyo puyo-4 palette-color" data-color="4"></div> <div class="puyo puyo-5 palette-color" data-color="5"></div> <div class="puyo puyo-0 palette-color" data-color="0"></div> </div>
+            </div>
+
+            <div id="edit-next-settings" class="info-box edit-info edit-group-b">
+                <h2>ネクスト設定 (タップで色変更)</h2>
+                <div id="edit-next-container">
+                    <div id="edit-next-1" class="edit-next-slot"></div>
+                    <div id="edit-next-2" class="edit-next-slot"></div>
+                </div>
+                <button id="apply-next-button" onclick="applyNextPuyos()">ネクスト設定を反映</button>
+            </div>
+            
+            <div id="controls-group-c" class="common-control">
+                <button id="mode-toggle-button" onclick="toggleMode()">
+                    </button>
+                
+                <button id="reset-button" onclick="resetGame()">盤面リセット</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="mobile-controls">
+        <button id="btn-left" class="mobile-btn move-btn">←</button>
+        <button id="btn-hard-drop" class="mobile-btn drop-btn">↓</button>
+        <button id="btn-right" class="mobile-btn move-btn">→</button>
+        <button id="btn-rotate-ccw" class="mobile-btn rotate-btn">B</button>
+        <button id="btn-rotate-cw" class="mobile-btn rotate-btn">A</button>
+    </div>
+
+    <script src="puyoSim.js"></script>
+</body>
+</html>
