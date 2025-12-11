@@ -59,13 +59,15 @@ body {
 .puyo-4 { background-color: #fca311; } /* 黄 */
 .puyo-5 { background-color: #ccc; } /* おじゃまぷよ */
 
-/* Empty cell or Ghost Puyo (透明/枠線のみ) */
+/* Empty cell */
 .puyo-0 { 
     background-color: transparent !important;
     box-shadow: none !important;
 }
+
+/* --- ★ 修正箇所：ゴーストぷよのスタイル ★ --- */
 .puyo-ghost {
-    background-color: transparent !important;
+    /* background-color: transparent !important; を削除 */ 
     box-shadow: none !important;
     border: 2px dashed #999;
     opacity: 0.5;
