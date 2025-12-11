@@ -1,0 +1,236 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-color: #111;
+    color: #fff;
+    margin: 0;
+    padding: 20px;
+}
+
+#wrapper {
+    /* 盤面と情報パネルを縦に並べるためのコンテナ */
+    display: flex;
+    flex-direction: column; 
+    gap: 20px;
+    background-color: #222;
+    padding: 20px;
+    border-radius: 0;
+    box-shadow: none;
+    max-width: fit-content; 
+}
+
+/* 盤面: 幅を固定 */
+#puyo-board {
+    display: grid;
+    grid-template-rows: repeat(12, 30px); 
+    grid-template-columns: repeat(6, 30px); 
+    border: 3px solid #666;
+    background-color: #000;
+    
+    background-image: linear-gradient(to right, #1a1a1a 1px, transparent 1px),
+                      linear-gradient(to bottom, #1a1a1a 1px, transparent 1px);
+    background-size: 30px 30px; 
+    background-position: -1px -1px; 
+    
+    width: calc(30px * 6); /* 180px */
+    margin: 0 auto;
+}
+
+/* --- 【重要】ぷよの基本スタイルと色の定義 --- */
+
+/* Puyo base style (盤面用) */
+.puyo {
+    width: 30px; 
+    height: 30px; 
+    border-radius: 50%;
+    /* 影をつけて立体感を出す */
+    box-shadow: inset 0 -4px 0 rgba(0,0,0,0.3), 0 2px 2px rgba(0,0,0,0.2); 
+    display: inline-block; 
+    box-sizing: border-box;
+    transition: transform 0.1s ease-out; /* 落下時のアニメーション用 */
+}
+
+/* Puyo Color Definitions */
+.puyo-1 { background-color: #e63946; } /* 赤 */
+.puyo-2 { background-color: #457b9d; } /* 青 */
+.puyo-3 { background-color: #8ac926; } /* 緑 */
+.puyo-4 { background-color: #fca311; } /* 黄 */
+.puyo-5 { background-color: #ccc; } /* おじゃまぷよ */
+
+/* Empty cell or Ghost Puyo (透明/枠線のみ) */
+.puyo-0 { 
+    background-color: transparent !important;
+    box-shadow: none !important;
+}
+.puyo-ghost {
+    background-color: transparent !important;
+    box-shadow: none !important;
+    border: 2px dashed #999;
+    opacity: 0.5;
+}
+
+/* --- 情報パネルのレイアウト --- */
+
+/* 情報パネル: 盤面と同じ幅で横並び */
+#info-panel {
+    display: flex;
+    flex-direction: row; /* 横並び */
+    gap: 10px;
+    width: calc(30px * 6 + 10px); /* 盤面幅 + 隙間分 */
+    flex-wrap: wrap; 
+    justify-content: flex-start;
+}
+
+/* 全情報ボックス共通スタイル */
+.info-box {
+    padding: 10px;
+    border: 1px solid #444; 
+    background-color: #333; 
+    border-radius: 0;
+    text-align: center;
+}
+.info-box h2 {
+    margin: 0 0 5px 0;
+    font-size: 1.1em;
+    color: #ccc;
+}
+#score, #chain-count {
+    font-size: 1.5em; 
+    font-weight: bold;
+    color: #e63946;
+}
+
+/* --- プレイモードのレイアウトと順序 --- */
+.edit-info { display: none; } 
+.play-info { display: flex; }
+
+/* 1. NEXT (info-group-a): ぷよを縦に並べるコンテナ */
+.info-group-a {
+    flex-direction: column; 
+    flex-basis: 35%; 
+    min-width: 70px; 
+    max-width: 90px;
+    padding: 5px; 
+}
+
+/* NEXT内のぷよのサイズと配置 */
+#play-next-info .puyo {
+    width: 24px;
+    height: 24px;
+}
+#next-puyo-1, #next-puyo-2 {
+    display: flex; /* puyo 2つを横並びにする */
+    justify-content: center;
+    align-items: center;
+    gap: 2px;
+    margin: 3px 0;
+}
+
+
+/* 2. SCORE/CHAIN (info-group-b): 右側の領域を占める */
+#play-stats-info {
+    flex-basis: 60%; 
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+#play-stats-info .info-box {
+    padding: 5px;
+    flex-grow: 1;
+}
+
+/* 3. MODE/RESET (下段) */
+#controls-group-c {
+    width: 100%; 
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 5px;
+}
+#mode-toggle-button, #reset-button {
+    flex-grow: 1;
+    padding: 8px 10px;
+    background-color: #6a0dad; 
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1em;
+    font-weight: bold;
+    text-transform: uppercase; 
+}
+#reset-button {
+    background-color: #e63946;
+}
+
+/* --- エディットモード時のレイアウトと順序 --- */
+.edit-mode-active .play-info,
+.edit-mode-active #reset-button {
+    display: none !important; 
+}
+.edit-mode-active .edit-info {
+    display: block !important; 
+}
+
+/* エディットモードは縦に積み重ねる */
+.edit-mode-active #info-panel {
+    flex-direction: column;
+    gap: 15px;
+}
+.edit-mode-active .edit-group-a,
+.edit-mode-active .edit-group-b {
+    width: 100%;
+}
+.edit-mode-active #controls-group-c {
+    order: 10; 
+    width: 100%;
+}
+
+/* --- パレットのスタイル --- */
+#color-palette {
+    display: flex;
+    justify-content: space-around;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-top: 5px;
+}
+#color-palette .puyo {
+    cursor: pointer;
+    box-shadow: 0 0 5px rgba(0,0,0,0.5);
+    width: 24px; 
+    height: 24px;
+}
+#color-palette .puyo.selected {
+    box-shadow: 0 0 0 3px #fff, 0 0 5px 5px #ffc107; /* 選択中のハイライト */
+}
+
+/* --- モバイル操作ボタンのスタイル --- */
+#mobile-controls {
+    display: none; 
+    margin-top: 20px;
+    width: 100%;
+    max-width: 350px; 
+    flex-direction: row; 
+    justify-content: space-between; 
+    gap: 5px; 
+}
+
+.mobile-btn {
+    width: 65px; 
+    height: 65px; 
+    padding: 0;
+    font-size: 1.5em; 
+    font-weight: bold;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background-color: #457b9d; 
+    transition: background-color 0.1s;
+    touch-action: manipulation;
+    flex-shrink: 0; 
+    flex-grow: 1; 
+    line-height: 1; 
+}
