@@ -1,5 +1,10 @@
 /* style.css の全体を以下の内容に置き換えてください */
 
+html, body {
+    height: 100%; /* HTMLとBodyの高さをビューポートいっぱいに設定 */
+    margin: 0;
+}
+
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     display: flex;
@@ -7,14 +12,13 @@ body {
     align-items: center;
     background-color: #111;
     color: #fff;
-    margin: 0;
     padding: 10px;
 }
 
 /* --- 【重要】レイアウトの強制横並びと幅の比率 (3:1) --- */
 #wrapper {
     display: flex;
-    flex-direction: row; /* 横並びを強制 */
+    flex-direction: row; 
     gap: 5px;
     background-color: #222;
     padding: 10px;
@@ -22,16 +26,18 @@ body {
     max-width: 100%;
     margin: 0 auto;
     width: 95%; /* 画面幅の95%を使用 */
-    min-width: 300px; /* 最小幅を設定 */
+    min-width: 300px;
+    
+    /* 縦方向のサイズを確保し、子要素を引き伸ばす */
+    flex-grow: 1; 
+    align-items: stretch; /* 子要素の #puyo-board と #info-panel の高さを揃える */
 }
 
-/* ぷよのセルサイズを縮小 (20pxを維持) */
+/* ぷよのセルサイズ */
 .puyo {
-    width: 20px; 
-    height: 20px; 
     border-radius: 50%;
     box-shadow: inset 0 -3px 0 rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2); 
-    display: inline-block; 
+    display: block; 
     box-sizing: border-box;
     transition: transform 0.1s ease-out;
 }
@@ -39,22 +45,34 @@ body {
 /* 盤面: 左側3/4を占めるように flex: 3 を設定 */
 #puyo-board {
     display: grid;
-    grid-template-rows: repeat(12, 20px); 
-    grid-template-columns: repeat(6, 20px); 
+    /* 縦方向はグリッドの行数 (12行) が決める。利用可能な高さを12等分。 */
+    grid-template-rows: repeat(12, 1fr); 
+    /* 横方向はグリッドの列数 (6列) が決める。利用可能な幅を6等分。 */
+    grid-template-columns: repeat(6, 1fr); 
+    
     border: 3px solid #666;
     background-color: #000;
     
     background-image: linear-gradient(to right, #1a1a1a 1px, transparent 1px),
                       linear-gradient(to bottom, #1a1a1a 1px, transparent 1px);
-    background-size: 20px 20px; 
+    background-size: auto; 
     background-position: -1px -1px; 
     
-    width: 120px; 
-    /* ★ 盤面: flex: 3 (全体の約 75%) を設定 ★ */
-    flex: 3 0 120px; 
+    /* ★ 盤面: flex: 3 (全体の約 75%) に再修正 ★ */
+    flex: 3 1 auto; 
     min-width: 120px; 
     margin: 0;
+    
+    /* 縦横比が極端に崩れるのを防ぐために、高さを制限（画面の高さに依存） */
+    max-height: 90vh; 
+    
+    /* 縦横比を6:12 (1:2) に近づけるためのトリック：
+       幅に対して高さが2倍になることを期待するが、Flexboxが引き伸ばすため、
+       高さは親(#wrapper)に揃えられる。
+       grid-template-rows: 1fr で縦横比を維持しつつ、高さを使うことが重要。
+    */
 }
+
 
 /* --- 情報パネルのレイアウト調整 (右側1/4を占める) --- */
 
@@ -62,10 +80,15 @@ body {
     display: flex;
     flex-direction: column; 
     gap: 5px; 
-    /* ★ 情報パネル: flex: 1 (全体の約 25%) を設定 ★ */
+    /* ★ 情報パネル: flex: 1 (全体の約 25%) に再修正 ★ */
     flex: 1 1 auto; 
     min-width: 80px; 
+    max-width: 200px; 
+    
+    height: 100%; 
 }
+
+/* ... (情報パネル内部のスタイルは前回から維持) ... */
 
 .info-box {
     padding: 5px;
@@ -74,6 +97,7 @@ body {
     border-radius: 0;
     text-align: center;
     width: 100%; 
+    flex-shrink: 0; 
 }
 .info-box h2 {
     margin: 0 0 3px 0;
@@ -101,9 +125,10 @@ body {
 /* 2. SCORE/CHAIN (info-group-b) --- 縦並びを維持 --- */
 #play-stats-info {
     display: flex;
-    flex-direction: column; /* 縦並びを維持 */
+    flex-direction: column; 
     gap: 5px;
     width: 100%;
+    flex-shrink: 0;
 }
 #play-stats-info .info-box {
     padding: 3px;
@@ -116,9 +141,10 @@ body {
 #controls-group {
     width: 100%; 
     display: flex;
-    flex-direction: column; /* ボタン全体は縦に並べる */
+    flex-direction: column; 
     gap: 5px;
-    margin-top: 5px;
+    margin-top: auto; 
+    flex-shrink: 0;
 }
 
 /* モード切り替えとリセットボタンのスタイル共通 */
@@ -134,9 +160,9 @@ body {
 }
 
 #mode-toggle-button {
-    background-color: #457b9d; /* 青色に変更 */
+    background-color: #457b9d; 
     color: white;
-    order: 10; /* 最下部に配置 */
+    order: 10; 
 }
 
 /* リセットボタンの色 */
@@ -146,31 +172,23 @@ body {
 }
 
 /* --- モードによる要素の表示/非表示 --- */
-/* .edit-info はデフォルトで非表示 */
 .edit-info { display: none; } 
-/* .play-info と #play-controls はFlexコンテナとして表示 */
-.play-info, #play-controls { display: flex; flex-direction: column; gap: 5px; }
+.play-info { display: flex; } 
 
-.edit-mode-active .play-info,
-.edit-mode-active #play-controls {
+.edit-mode-active .play-info {
     display: none !important; 
 }
-
-/* ★ 修正: エディットモード時の表示 ★ */
 .edit-mode-active .edit-info {
-    display: flex !important; /* edit-info も Flexコンテナとして表示 */
-    flex-direction: column; /* 子要素を縦並びにするため */
+    display: flex !important; 
+    flex-direction: column; 
     gap: 5px;
-}
-/* #edit-controls もFlexコンテナとして表示 */
-.edit-mode-active #edit-controls {
-    display: flex !important;
-    flex-direction: column;
-    gap: 5px;
+    flex-grow: 1; 
 }
 
-
-/* --- エディットモードのパレット --- */
+/* パレットのぷよも調整 */
+#color-palette {
+    flex-grow: 1; 
+}
 #color-palette .puyo {
     cursor: pointer;
     box-shadow: 0 0 5px rgba(0,0,0,0.5);
@@ -181,13 +199,14 @@ body {
     box-shadow: 0 0 0 2px #fff, 0 0 4px 4px #ffc107; 
 }
 
+
 /* --- Puyo Color Definitions (色定義は変更なし) --- */
 
-.puyo-1 { background-color: #e63946; } /* 赤 */
-.puyo-2 { background-color: #457b9d; } /* 青 */
-.puyo-3 { background-color: #8ac926; } /* 緑 */
-.puyo-4 { background-color: #fca311; } /* 黄 */
-.puyo-5 { background-color: #ccc; } /* おじゃまぷよ */
+.puyo-1 { background-color: #e63946; } 
+.puyo-2 { background-color: #457b9d; } 
+.puyo-3 { background-color: #8ac926; } 
+.puyo-4 { background-color: #fca311; } 
+.puyo-5 { background-color: #ccc; } 
 .puyo-0 { 
     background-color: transparent !important;
     box-shadow: none !important;
@@ -229,19 +248,27 @@ body {
     line-height: 1; 
 }
 
+/* グリッド内のぷよの縦横比を調整 */
+#puyo-board > div {
+    display: flex; 
+    justify-content: center;
+    align-items: center;
+}
+
+#puyo-board > div > .puyo {
+    /* グリッドセルサイズに合わせてぷよのサイズを調整 */
+    width: 90%; 
+    height: 90%;
+}
+
 /* iPhone SEなどの極端に狭い画面への最後の調整 */
 @media (max-width: 350px) {
     #wrapper {
         gap: 2px;
     }
     #puyo-board {
-        width: calc(18px * 6); 
-        grid-template-columns: repeat(6, 18px);
-        flex: 3 0 108px; 
         min-width: 108px;
+        flex: 3 0 108px; 
     }
-    .puyo {
-        width: 18px;
-        height: 18px;
-    }
+    /* ぷよのサイズは grid-template-columns/rows の 1fr によって動的に決定される */
 }
