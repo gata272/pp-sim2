@@ -210,12 +210,13 @@ body {
 
 /* --- モードによる要素の表示/非表示 --- */
 .edit-info { 
-    display: none !important; 
+    display: none !important; /* デフォルトで非表示を強制 */
     flex-grow: 0;
 } 
 .play-info { 
-    display: flex; 
+    display: flex; /* プレイ時は Flex で表示 */
     flex-grow: 1;
+    flex-direction: column; 
 } 
 
 .edit-mode-active .play-info {
@@ -223,7 +224,7 @@ body {
     flex-grow: 0;
 }
 .edit-mode-active .edit-info {
-    display: flex !important; 
+    display: flex !important; /* エディットモード時に Flex で表示を強制 */
     flex-direction: column; 
     gap: 5px;
     flex-grow: 1; 
