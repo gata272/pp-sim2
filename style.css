@@ -30,29 +30,18 @@ body {
     
     /* 縦方向のサイズを確保し、子要素を引き伸ばす */
     flex-grow: 1; 
-    align-items: stretch; 
+    align-items: flex-start; /* 高さを揃えるのではなく、コンテンツの高さに合わせる */
 }
 
-/* ぷよのセルサイズ */
-.puyo {
-    border-radius: 50%;
-    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2); 
-    display: block; 
-    box-sizing: border-box;
-    transition: transform 0.1s ease-out;
-}
-
-/* 盤面: 左側3/4を占めるように flex: 3 を設定 */
+/* ぷよのセルサイズの基準を 30px に設定 */
 #puyo-board {
-    /* 盤面のサイズを厳密に計算するために、Flexboxではなく固定幅をベースにする */
-    
-    /* 1セルの基準サイズを 20px から 24px に拡大 (視認性向上のため) */
-    --puyo-cell-size: 24px; 
+    /* 1セルの基準サイズを 30px に拡大 */
+    --puyo-cell-size: 30px; 
     
     display: grid;
-    /* ★ 厳密に 12 行に設定 ★ */
+    /* ★ 厳密に 12 行 (高さ: 360px) に固定 ★ */
     grid-template-rows: repeat(12, var(--puyo-cell-size)); 
-    /* ★ 厳密に 6 列に設定 ★ */
+    /* ★ 厳密に 6 列 (幅: 180px) に固定 ★ */
     grid-template-columns: repeat(6, var(--puyo-cell-size)); 
     
     border: 3px solid #666;
@@ -63,20 +52,39 @@ body {
     background-size: var(--puyo-cell-size) var(--puyo-cell-size); 
     background-position: -1px -1px; 
     
-    /* 盤面全体の固定幅を計算: 6列 * セルサイズ + 境界線 */
+    /* 盤面全体の固定幅を計算: 6列 * 30px = 180px */
     width: calc(6 * var(--puyo-cell-size)); 
-    /* 盤面全体の固定高さを計算: 12行 * セルサイズ + 境界線 */
+    /* 盤面全体の固定高さを計算: 12行 * 30px = 360px */
     height: calc(12 * var(--puyo-cell-size)); 
     
-    /* Flexbox設定: 3:1の比率を維持しつつ、盤面の幅を優先 */
-    flex: 3 0 auto; /* 成長比率3、縮小しない、基準幅は自動 (固定幅が優先される) */
+    /* Flexbox設定: 成長比率3、縮小しない、基準幅は固定幅が優先 */
+    flex: 3 0 auto; 
     min-width: calc(6 * var(--puyo-cell-size)); 
     margin: 0;
     
-    /* 画面が狭いときは縮小を許可 */
+    /* 画面が狭いときは縮小を許可し、全体を縮小表示 */
     max-width: 100%; 
-    /* 画面に収まらない場合は、全体を縮小 */
-    align-self: flex-start;
+    max-height: 90vh; /* 画面の高さに対する最大値 */
+}
+
+
+/* --- ぷよのセルサイズ (盤面内) --- */
+.puyo {
+    border-radius: 50%;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2); 
+    display: block; 
+    box-sizing: border-box;
+    transition: transform 0.1s ease-out;
+}
+#puyo-board > div {
+    display: flex; 
+    justify-content: center;
+    align-items: center;
+}
+#puyo-board > div > .puyo {
+    /* グリッドセルサイズに合わせてぷよのサイズを調整 */
+    width: 90%; 
+    height: 90%;
 }
 
 
@@ -93,8 +101,6 @@ body {
     
     height: 100%; 
 }
-
-/* ... (情報パネル内部のスタイルは前回から維持) ... */
 
 .info-box {
     padding: 5px;
@@ -124,8 +130,8 @@ body {
 
 /* NEXT内のぷよのサイズと配置 */
 #play-next-info .puyo {
-    width: 16px; 
-    height: 16px; 
+    width: 20px; /* 拡大 */
+    height: 20px; /* 拡大 */
 }
 
 /* 2. SCORE/CHAIN (info-group-b) --- 縦並びを維持 --- */
@@ -198,8 +204,8 @@ body {
 #color-palette .puyo {
     cursor: pointer;
     box-shadow: 0 0 5px rgba(0,0,0,0.5);
-    width: 20px; 
-    height: 20px;
+    width: 30px; /* 盤面と合わせるか、適当なサイズ */
+    height: 30px; 
 }
 #color-palette .puyo.selected {
     box-shadow: 0 0 0 2px #fff, 0 0 4px 4px #ffc107; 
@@ -252,17 +258,4 @@ body {
     flex-shrink: 0; 
     flex-grow: 1; 
     line-height: 1; 
-}
-
-/* グリッド内のぷよの縦横比を調整 */
-#puyo-board > div {
-    display: flex; 
-    justify-content: center;
-    align-items: center;
-}
-
-#puyo-board > div > .puyo {
-    /* グリッドセルサイズに合わせてぷよのサイズを調整 */
-    width: 90%; 
-    height: 90%;
 }
