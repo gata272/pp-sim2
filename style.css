@@ -35,13 +35,10 @@ body {
 
 /* ぷよのセルサイズの基準を 30px に設定 */
 #puyo-board {
-    /* 1セルの基準サイズを 30px に拡大 */
     --puyo-cell-size: 30px; 
     
     display: grid;
-    /* ★ 厳密に 12 行 (高さ: 360px) に固定 ★ */
     grid-template-rows: repeat(12, var(--puyo-cell-size)); 
-    /* ★ 厳密に 6 列 (幅: 180px) に固定 ★ */
     grid-template-columns: repeat(6, var(--puyo-cell-size)); 
     
     border: 3px solid #666;
@@ -57,14 +54,12 @@ body {
     /* 盤面全体の固定高さを計算: 12行 * 30px = 360px */
     height: calc(12 * var(--puyo-cell-size)); 
     
-    /* Flexbox設定: 成長比率3、縮小しない、基準幅は固定幅が優先 */
     flex: 3 0 auto; 
     min-width: calc(6 * var(--puyo-cell-size)); 
     margin: 0;
     
-    /* 画面が狭いときは縮小を許可し、全体を縮小表示 */
     max-width: 100%; 
-    max-height: 90vh; /* 画面の高さに対する最大値 */
+    max-height: 90vh; 
 }
 
 
@@ -82,7 +77,6 @@ body {
     align-items: center;
 }
 #puyo-board > div > .puyo {
-    /* グリッドセルサイズに合わせてぷよのサイズを調整 */
     width: 90%; 
     height: 90%;
 }
@@ -94,12 +88,27 @@ body {
     display: flex;
     flex-direction: column; 
     gap: 5px; 
-    /* ★ 情報パネル: flex: 1 (全体の約 25%) に再修正 ★ */
     flex: 1 1 auto; 
     min-width: 80px; 
     max-width: 200px; 
     
     height: 100%; 
+}
+
+/* プレイモード情報のコンテナ: ネクスト、スコア、コントロールを縦に並べる */
+#play-info-container {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 100%;
+}
+
+/* エディットモード情報のコンテナ: パレット、ネクスト設定、コントロールを縦に並べる */
+#edit-info-container {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 100%;
 }
 
 .info-box {
@@ -122,19 +131,33 @@ body {
     color: #e63946;
 }
 
-/* 1. NEXT (info-group-a) */
+/* 1. NEXT ぷよの横並び設定 (修正箇所) */
 .info-group-a {
-    flex-direction: column; 
+    flex-direction: column; /* info-box全体としては縦のまま */
     padding: 5px; 
 }
 
-/* NEXT内のぷよのサイズと配置 */
-#play-next-info .puyo {
-    width: 20px; /* 拡大 */
-    height: 20px; /* 拡大 */
+.next-puyo-row {
+    display: flex; /* ネクストぷよの2組を横に並べる */
+    justify-content: center;
+    gap: 10px;
+    margin-top: 5px;
 }
 
-/* 2. SCORE/CHAIN (info-group-b) --- 縦並びを維持 --- */
+.next-puyo-slot {
+    display: flex;
+    flex-direction: column; /* 1組のぷよ（2個）は縦に並ぶ */
+    gap: 2px;
+    align-items: center;
+}
+
+/* NEXT内のぷよのサイズ */
+#play-next-info .puyo, #edit-next-info .puyo {
+    width: 20px; 
+    height: 20px; 
+}
+
+/* 2. SCORE/CHAIN (縦並びを維持) */
 #play-stats-info {
     display: flex;
     flex-direction: column; 
@@ -150,13 +173,17 @@ body {
 
 
 /* --- 3. コントロールボタンのレイアウト --- */
-#controls-group {
+#play-controls, #edit-controls, #mode-toggle-container {
     width: 100%; 
     display: flex;
     flex-direction: column; 
     gap: 5px;
-    margin-top: auto; 
     flex-shrink: 0;
+}
+
+#mode-toggle-container {
+    margin-top: auto; /* 最下部に配置 */
+    order: 10;
 }
 
 /* モード切り替えとリセットボタンのスタイル共通 */
@@ -174,7 +201,6 @@ body {
 #mode-toggle-button {
     background-color: #457b9d; 
     color: white;
-    order: 10; 
 }
 
 /* リセットボタンの色 */
@@ -184,6 +210,7 @@ body {
 }
 
 /* --- モードによる要素の表示/非表示 --- */
+/* play-info, edit-info, common-control の flex/none の切り替えは以前のまま */
 .edit-info { display: none; } 
 .play-info { display: flex; } 
 
@@ -204,7 +231,7 @@ body {
 #color-palette .puyo {
     cursor: pointer;
     box-shadow: 0 0 5px rgba(0,0,0,0.5);
-    width: 30px; /* 盤面と合わせるか、適当なサイズ */
+    width: 30px; 
     height: 30px; 
 }
 #color-palette .puyo.selected {
