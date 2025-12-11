@@ -1,7 +1,7 @@
 /* style.css の全体を以下の内容に置き換えてください */
 
 html, body {
-    height: 100%; /* HTMLとBodyの高さをビューポートいっぱいに設定 */
+    height: 100%; 
     margin: 0;
 }
 
@@ -25,12 +25,12 @@ body {
     box-shadow: none;
     max-width: 100%;
     margin: 0 auto;
-    width: 95%; /* 画面幅の95%を使用 */
+    width: 95%; 
     min-width: 300px;
     
     /* 縦方向のサイズを確保し、子要素を引き伸ばす */
     flex-grow: 1; 
-    align-items: stretch; /* 子要素の #puyo-board と #info-panel の高さを揃える */
+    align-items: stretch; 
 }
 
 /* ぷよのセルサイズ */
@@ -44,33 +44,39 @@ body {
 
 /* 盤面: 左側3/4を占めるように flex: 3 を設定 */
 #puyo-board {
+    /* 盤面のサイズを厳密に計算するために、Flexboxではなく固定幅をベースにする */
+    
+    /* 1セルの基準サイズを 20px から 24px に拡大 (視認性向上のため) */
+    --puyo-cell-size: 24px; 
+    
     display: grid;
-    /* 縦方向はグリッドの行数 (12行) が決める。利用可能な高さを12等分。 */
-    grid-template-rows: repeat(12, 1fr); 
-    /* 横方向はグリッドの列数 (6列) が決める。利用可能な幅を6等分。 */
-    grid-template-columns: repeat(6, 1fr); 
+    /* ★ 厳密に 12 行に設定 ★ */
+    grid-template-rows: repeat(12, var(--puyo-cell-size)); 
+    /* ★ 厳密に 6 列に設定 ★ */
+    grid-template-columns: repeat(6, var(--puyo-cell-size)); 
     
     border: 3px solid #666;
     background-color: #000;
     
     background-image: linear-gradient(to right, #1a1a1a 1px, transparent 1px),
                       linear-gradient(to bottom, #1a1a1a 1px, transparent 1px);
-    background-size: auto; 
+    background-size: var(--puyo-cell-size) var(--puyo-cell-size); 
     background-position: -1px -1px; 
     
-    /* ★ 盤面: flex: 3 (全体の約 75%) に再修正 ★ */
-    flex: 3 1 auto; 
-    min-width: 120px; 
+    /* 盤面全体の固定幅を計算: 6列 * セルサイズ + 境界線 */
+    width: calc(6 * var(--puyo-cell-size)); 
+    /* 盤面全体の固定高さを計算: 12行 * セルサイズ + 境界線 */
+    height: calc(12 * var(--puyo-cell-size)); 
+    
+    /* Flexbox設定: 3:1の比率を維持しつつ、盤面の幅を優先 */
+    flex: 3 0 auto; /* 成長比率3、縮小しない、基準幅は自動 (固定幅が優先される) */
+    min-width: calc(6 * var(--puyo-cell-size)); 
     margin: 0;
     
-    /* 縦横比が極端に崩れるのを防ぐために、高さを制限（画面の高さに依存） */
-    max-height: 90vh; 
-    
-    /* 縦横比を6:12 (1:2) に近づけるためのトリック：
-       幅に対して高さが2倍になることを期待するが、Flexboxが引き伸ばすため、
-       高さは親(#wrapper)に揃えられる。
-       grid-template-rows: 1fr で縦横比を維持しつつ、高さを使うことが重要。
-    */
+    /* 画面が狭いときは縮小を許可 */
+    max-width: 100%; 
+    /* 画面に収まらない場合は、全体を縮小 */
+    align-self: flex-start;
 }
 
 
@@ -259,16 +265,4 @@ body {
     /* グリッドセルサイズに合わせてぷよのサイズを調整 */
     width: 90%; 
     height: 90%;
-}
-
-/* iPhone SEなどの極端に狭い画面への最後の調整 */
-@media (max-width: 350px) {
-    #wrapper {
-        gap: 2px;
-    }
-    #puyo-board {
-        min-width: 108px;
-        flex: 3 0 108px; 
-    }
-    /* ぷよのサイズは grid-template-columns/rows の 1fr によって動的に決定される */
 }
