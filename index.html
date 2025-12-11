@@ -8,8 +8,6 @@
 </head>
 <body>
 
-    <h1>ぷよぷよシミュレーター</h1>
-
     <div id="wrapper">
         
         <div id="puyo-board">
@@ -21,8 +19,9 @@
                 
                 <div id="play-next-info" class="info-box info-group-a">
                     <h2>NEXT</h2>
-                    <div id="next-puyo-1" class="next-puyo-slot"></div>
-                    <div id="next-puyo-2" class="next-puyo-slot"></div>
+                    <div class="next-puyo-row"> <div id="next-puyo-1" class="next-puyo-slot"></div>
+                        <div id="next-puyo-2" class="next-puyo-slot"></div>
+                    </div>
                 </div>
 
                 <div id="play-stats-info">
@@ -52,8 +51,9 @@
 
                 <div id="edit-next-info" class="info-box edit-group-b">
                     <h2>ネクスト設定 (クリックで色変更)</h2>
-                    <div id="edit-next-1" class="next-puyo-slot"></div>
-                    <div id="edit-next-2" class="next-puyo-slot"></div>
+                    <div class="next-puyo-row"> <div id="edit-next-1" class="next-puyo-slot"></div>
+                        <div id="edit-next-2" class="next-puyo-slot"></div>
+                    </div>
                     <button onclick="applyNextPuyos()">ネクスト設定を保存</button>
                 </div>
                 
