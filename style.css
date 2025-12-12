@@ -58,7 +58,6 @@ body {
     height: 360px; 
     
     /* ★ 修正 4 (最重要): Flexbox設定の成長比率をゼロにし、基準幅を180pxに固定 ★ */
-    /* これにより、親コンテナ (#wrapper) が広がっても、この要素は広がらない */
     flex: 0 0 180px; 
     min-width: 180px; 
     margin: 0;
@@ -185,7 +184,7 @@ body {
 }
 
 /* モード切り替えとリセットボタンのスタイル共通 */
-#mode-toggle-button, #reset-button-play, #reset-button-edit {
+#mode-toggle-button, #reset-button-play, #reset-button-edit, #auto-drop-toggle-button {
     width: 100%;
     padding: 6px 5px;
     border: none;
@@ -205,6 +204,16 @@ body {
 #reset-button-play, #reset-button-edit {
     background-color: #e63946;
     color: white;
+}
+
+/* ★ 変更点: 自動落下ON/OFFボタンのスタイル ★ */
+#auto-drop-toggle-button {
+    background-color: #2a9d8f; /* ON時の色 */
+    color: white;
+}
+#auto-drop-toggle-button.disabled {
+    background-color: #555; /* OFF時の色 */
+    color: #bbb;
 }
 
 /* --- モードによる要素の表示/非表示 --- */
