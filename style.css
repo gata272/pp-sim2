@@ -40,8 +40,8 @@ body {
     display: grid;
     /* 縦方向は 12 行で固定 */
     grid-template-rows: repeat(12, var(--puyo-cell-size)); 
-    /* 横方向は 6 列で固定 */
-    grid-template-columns: repeat(6, var(--puyo-cell-size)); 
+    /* ★ 横方向を 6 列で固定し、!important で強制 ★ */
+    grid-template-columns: repeat(6, var(--puyo-cell-size)) !important; 
     
     border: 3px solid #666;
     background-color: #000;
@@ -52,7 +52,7 @@ body {
     background-position: -1px -1px; 
     
     /* 盤面全体の固定幅を計算: 6列 * 30px = 180px */
-    width: calc(6 * var(--puyo-cell-size)); 
+    width: calc(6 * var(--puyo-cell-size)) !important; /* ★ 幅も 6 列に合わせて強制 ★ */
     /* 盤面全体の固定高さを計算: 12行 * 30px = 360px */
     height: calc(12 * var(--puyo-cell-size)); 
     
@@ -62,6 +62,9 @@ body {
     
     max-width: 100%; 
     max-height: 90vh; 
+    
+    /* ★ 描画されているだけの余分な2列を隠す (6列固定の対策) ★ */
+    overflow: hidden !important; 
 }
 
 
@@ -85,6 +88,7 @@ body {
 
 
 /* --- 情報パネルのレイアウト調整 (右側1/4を占める) --- */
+
 #info-panel {
     display: flex;
     flex-direction: column; 
@@ -92,6 +96,7 @@ body {
     flex: 1 1 auto; 
     min-width: 80px; 
     max-width: 200px; 
+    
     height: 100%; 
 }
 
@@ -191,8 +196,9 @@ body {
     text-transform: uppercase; 
 }
 
+/* ★ モード変更ボタンの色を紫系に (回転ボタンと交換) ★ */
 #mode-toggle-button {
-    background-color: #457b9d; /* 青系 */
+    background-color: #6a0dad; 
     color: white;
 }
 
@@ -204,11 +210,11 @@ body {
 
 /* --- モードによる要素の表示/非表示 --- */
 .edit-info { 
-    display: none !important; 
+    display: none !important; /* デフォルトで非表示を強制 */
     flex-grow: 0;
 } 
 .play-info { 
-    display: flex; 
+    display: flex; /* プレイ時は Flex で表示 */
     flex-grow: 1;
     flex-direction: column; 
 } 
@@ -218,7 +224,7 @@ body {
     flex-grow: 0;
 }
 .edit-mode-active .edit-info {
-    display: flex !important; 
+    display: flex !important; /* エディットモード時に Flex で表示を強制 */
     flex-direction: column; 
     gap: 5px;
     flex-grow: 1; 
@@ -279,7 +285,7 @@ body {
     border: none;
     border-radius: 8px;
     cursor: pointer;
-    background-color: #457b9d; 
+    background-color: #457b9d; /* 移動ボタンは青系を維持 */
     transition: background-color 0.1s;
     touch-action: manipulation;
     flex-shrink: 0; 
@@ -287,7 +293,7 @@ body {
     line-height: 1; 
 }
 
-/* Bボタン（右回転）とAボタン（左回転）のスタイル */
+/* ★ Bボタン（右回転）とAボタン（左回転）の色を青系に (モード変更ボタンと交換) ★ */
 #btn-rotate-cw, #btn-rotate-ccw {
-    background-color: #6a0dad; 
+    background-color: #457b9d; 
 }
