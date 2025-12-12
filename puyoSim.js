@@ -193,7 +193,7 @@ window.toggleMode = function() {
 
         boardElement.removeEventListener('click', handleBoardClickEditMode);
         
-        // ★ DOMを確実にリフレッシュ (描画バグ対策)
+        // ★ 修正箇所：プレイモード復帰時にDOMを確実にリセット
         createBoardDOM(); 
         
         currentPuyo = null; 
@@ -686,7 +686,7 @@ function renderBoard() {
             } 
             // 2. ゴーストぷよ (操作中ぷよがなければ)
             else {
-                const puyoGhost = ghostPuyoCoords.find(p => p.x === x && puyo.y === y);
+                const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
                 if (puyoGhost) {
                     cellColor = puyoGhost.color; 
                     puyoClasses = `puyo puyo-${cellColor} puyo-ghost`;
