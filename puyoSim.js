@@ -42,7 +42,7 @@ let editingNextPuyos = [];
 // --- 落下ループのための変数 ---
 let dropInterval = 1000; // 1秒ごとに落下
 let dropTimer = null; 
-let autoDropEnabled = true; 
+let autoDropEnabled = false; // ★変更点: 初期状態で自動落下をOFF (false) に設定★
 
 
 // --- 初期化関数 ---
@@ -115,13 +115,19 @@ function initializeGame() {
     // 自動落下ボタンの初期化
     const autoDropButton = document.getElementById('auto-drop-toggle-button');
     if (autoDropButton) {
-        autoDropEnabled = true;
-        autoDropButton.textContent = '自動落下: ON';
-        autoDropButton.classList.remove('disabled');
+        // ★変更点: autoDropEnabledの初期値に合わせてボタン表示を更新★
+        if (autoDropEnabled) {
+            autoDropButton.textContent = '自動落下: ON';
+            autoDropButton.classList.remove('disabled');
+        } else {
+            autoDropButton.textContent = '自動落下: OFF';
+            autoDropButton.classList.add('disabled');
+        }
     }
 
     // 最初のぷよを生成
     generateNewPuyo(); 
+    // autoDropEnabled=false のため、タイマーはここでは開始されない
     startPuyoDropLoop(); 
     
     updateUI();
@@ -839,7 +845,10 @@ function handleInput(event) {
         case 'ArrowDown':
             clearInterval(dropTimer);
             movePuyo(0, -1); 
-            startPuyoDropLoop(); 
+            // 自動落下OFF時は、手動落下後はタイマーを再開しない
+            if (autoDropEnabled) { 
+                startPuyoDropLoop(); 
+            }
             break;
         case ' ': 
             event.preventDefault(); 
