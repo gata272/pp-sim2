@@ -31,7 +31,7 @@ body {
     align-items: flex-start;
 }
 
-/* --- 盤面 (Puyo Board) --- */
+/* ぷよのセルサイズの基準を 40px に拡大 */
 #puyo-board {
     /* ★ 変更維持: 1セルの基準サイズを 40px に拡大 ★ */
     --puyo-cell-size: 40px; 
@@ -46,7 +46,6 @@ body {
     border: 3px solid #666;
     background-color: #000;
     
-    /* グリッド線の描画 */
     background-image: linear-gradient(to right, #1a1a1a 1px, transparent 1px),
                       linear-gradient(to bottom, #1a1a1a 1px, transparent 1px);
     background-size: var(--puyo-cell-size) var(--puyo-cell-size); 
@@ -56,6 +55,7 @@ body {
     /* ★ 変更維持: 盤面全体の高さを絶対値 560px に拡張 (14行 * 40px) ★ */
     height: 560px; 
     
+    /* Flexbox設定の成長比率をゼロにし、基準幅を240pxに固定 */
     flex: 0 0 240px; 
     min-width: 240px; 
     margin: 0;
@@ -63,32 +63,23 @@ body {
     max-width: 100%; 
     max-height: 90vh; 
     position: relative; 
-    overflow: hidden; /* プヨが隠し領域をはみ出すのを防ぐ */
-}
-
-/* 盤面内のセル */
-#puyo-board > div {
-    display: flex; 
-    justify-content: center;
-    align-items: center;
-    position: relative; /* ぷよ要素を絶対配置するための基準 */
 }
 
 /* --- 隠し領域の視覚化 (13列目と14列目) --- */
 
 /* ★ 変更維持: 14列目 (grid-row: 1) と 13列目 (grid-row: 2) に半透明の背景とボーダーを適用 ★ */
-#puyo-board > div:nth-child(-n+6), /* 14列目 (1-6番目のセル, データ上Y=13) */
-#puyo-board > div:nth-child(n+7):nth-child(-n+12) /* 13列目 (7-12番目のセル, データ上Y=12) */
+#puyo-board > div:nth-child(-n+6), /* 14列目 (1-6番目のセル) */
+#puyo-board > div:nth-child(n+7):nth-child(-n+12) /* 13列目 (7-12番目のセル) */
 {
     opacity: 0.5;
     background-color: rgba(50, 50, 50, 0.5); 
-    border-bottom: 1px solid rgba(255, 0, 0, 0.5); /* 隠し領域の境界線 */
+    border-bottom: 1px solid rgba(255, 0, 0, 0.5); 
 }
 
-/* --- 赤いバツ印の設置 (ゲームオーバーライン, Y=11) --- */
+/* --- 赤いバツ印の設置 (ゲームオーバーライン) --- */
 
 /* ★ 変更維持: 12列目 (grid-row: 3, Y=11) の中央（3列目, X=2）にバツ印を設置 ★ */
-#puyo-board > div:nth-child(15) { 
+#puyo-board > div:nth-child(15) {
     position: relative;
     opacity: 1 !important; 
     background-color: transparent !important;
@@ -109,41 +100,22 @@ body {
 }
 
 
-/* --- ぷよの基本スタイル --- */
+/* --- ぷよのセルサイズ (盤面内) --- */
 .puyo {
     border-radius: 50%;
     box-shadow: inset 0 -3px 0 rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2); 
     display: block; 
     box-sizing: border-box;
     transition: transform 0.1s ease-out;
-    position: absolute; /* 親セルの中で位置を制御 */
 }
-
-/* 盤面内のぷよのサイズ */
+#puyo-board > div {
+    display: flex; 
+    justify-content: center;
+    align-items: center;
+}
 #puyo-board > div > .puyo {
-    width: 90%; /* 40pxセルの90% = 36px */
+    width: 90%; 
     height: 90%;
-}
-
-
-/* --- Puyo Color Definitions (色定義) --- */
-.puyo-1 { background-color: #e63946; } /* Red */
-.puyo-2 { background-color: #457b9d; } /* Blue */
-.puyo-3 { background-color: #8ac926; } /* Green */
-.puyo-4 { background-color: #fca311; } /* Yellow */
-.puyo-5 { background-color: #ccc; } /* Garbage */
-
-.puyo-0 { /* Empty/Eraser */
-    background-color: transparent !important;
-    box-shadow: none !important;
-    border: 2px dashed #666; 
-}
-
-/* --- ゴーストぷよのスタイル --- */
-.puyo-ghost {
-    box-shadow: none !important;
-    border: 1px dashed #999; 
-    opacity: 0.5;
 }
 
 
@@ -156,9 +128,6 @@ body {
     flex: 1; /* 以前の Flex: 1 に戻す */
     min-width: 150px; /* 以前の min-width に戻す */
     max-width: 200px; /* 以前の max-width に戻す */
-    width: 100%;
-    height: 560px; /* 盤面に高さを合わせる */
-    padding-top: 5px;
 }
 
 /* プレイモード情報とエディットモード情報コンテナのスタイル */
@@ -205,8 +174,7 @@ body {
 
 .next-puyo-slot {
     display: flex;
-    /* ネクストぷよを縦に積むために column に設定 */
-    flex-direction: column-reverse; /* 下のぷよが先にDOMに来るため reverse が一般的 */
+    flex-direction: column; 
     gap: 3px; /* 以前の gap に戻す */
     align-items: center;
 }
@@ -215,7 +183,6 @@ body {
 #play-next-info .puyo, #edit-next-info .puyo {
     width: 30px; 
     height: 30px; 
-    position: static; /* slot内で絶対配置を解除 */
 }
 
 /* 2. SCORE/CHAIN (縦並びを維持) */
@@ -245,8 +212,6 @@ body {
 #mode-toggle-container {
     margin-top: auto; 
     order: 10;
-    padding-top: 10px;
-    border-top: 1px solid #444;
 }
 
 /* モード切り替えとリセットボタンのスタイル共通 */
@@ -313,14 +278,34 @@ body {
     box-shadow: 0 0 5px rgba(0,0,0,0.5);
     width: 40px; /* 以前のパレットサイズに戻す (ネクストより少し大きいサイズ) */
     height: 40px; 
-    position: static; /* パレット内で絶対配置を解除 */
 }
 #color-palette .puyo.selected {
     box-shadow: 0 0 0 2px #fff, 0 0 4px 4px #ffc107; 
 }
 
 
-/* --- モバイル操作ボタン (スマホ向けレイアウト調整) --- */
+/* --- Puyo Color Definitions (色定義) --- */
+/* (色は変更なし) */
+.puyo-1 { background-color: #e63946; } 
+.puyo-2 { background-color: #457b9d; } 
+.puyo-3 { background-color: #8ac926; } 
+.puyo-4 { background-color: #fca311; } 
+.puyo-5 { background-color: #ccc; } 
+
+.puyo-0 { 
+    background-color: transparent !important;
+    box-shadow: none !important;
+    border: 2px dashed #666; 
+}
+
+/* --- ゴーストぷよのスタイル --- */
+.puyo-ghost {
+    box-shadow: none !important;
+    border: 1px dashed #999; 
+    opacity: 0.5;
+}
+
+/* --- モバイル操作ボタン --- */
 #mobile-controls {
     display: none; 
     margin-top: 10px;
@@ -328,14 +313,14 @@ body {
     max-width: 400px; 
     flex-direction: row; 
     justify-content: space-between; 
-    gap: 10px; 
+    gap: 10px; /* 以前の広い gap に戻す */
 }
 
 .mobile-btn {
-    width: 70px; 
+    width: 70px; /* 以前の広いサイズに戻す */
     height: 70px; 
     padding: 0;
-    font-size: 1.6em; 
+    font-size: 1.6em; /* 以前の大きなフォントサイズに戻す */
     font-weight: bold;
     color: white;
     border: none;
@@ -352,23 +337,4 @@ body {
 /* Bボタン（右回転）とAボタン（左回転）のスタイル */
 #btn-rotate-cw, #btn-rotate-ccw {
     background-color: #6a0dad; 
-}
-
-/* 650px以下でのモバイルレイアウト適用 */
-@media (max-width: 650px) {
-    #wrapper {
-        flex-direction: column; /* 盤面と情報を縦並び */
-        max-width: 400px;
-    }
-    #info-panel {
-        height: auto; 
-        max-width: 100%;
-        width: 100%;
-    }
-    #puyo-board {
-        margin: 0 auto;
-    }
-    #mobile-controls {
-        display: flex; /* モバイルサイズで表示 */
-    }
 }
