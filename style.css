@@ -40,8 +40,9 @@ body {
     display: grid;
     /* 縦方向は 12 行で固定 */
     grid-template-rows: repeat(12, var(--puyo-cell-size)); 
-    /* ★ 横方向を 6 列で固定し、!important で強制 ★ */
-    grid-template-columns: repeat(6, var(--puyo-cell-size)) !important; 
+    
+    /* ★ 修正 1: grid-template-columns を絶対値 30px で固定 (6列 * 30px = 180px) ★ */
+    grid-template-columns: repeat(6, 30px) !important; 
     
     border: 3px solid #666;
     background-color: #000;
@@ -51,14 +52,15 @@ body {
     background-size: var(--puyo-cell-size) var(--puyo-cell-size); 
     background-position: -1px -1px; 
     
-    /* 盤面全体の固定幅を計算: 6列 * 30px = 180px */
-    width: calc(6 * var(--puyo-cell-size)) !important; /* ★ 幅も 6 列に合わせて強制 ★ */
-    /* 盤面全体の固定高さを計算: 12行 * 30px = 360px */
-    height: calc(12 * var(--puyo-cell-size)); 
+    /* ★ 修正 2: 盤面全体の幅を絶対値 180px で固定 ★ */
+    width: 180px !important; 
+    /* ★ 修正 3: 盤面全体の高さを絶対値 360px で固定 ★ */
+    height: 360px; 
     
-    /* Flexbox設定: 成長比率3、縮小しない、基準幅は固定幅が優先 */
-    flex: 3 0 auto; 
-    min-width: calc(6 * var(--puyo-cell-size)); 
+    /* ★ 修正 4: Flexbox設定の成長比率をゼロにし、基準幅を180pxに固定 ★ */
+    /* 変更前: flex: 3 0 auto; */
+    flex: 0 0 180px; 
+    min-width: 180px; /* 基準幅と一致させる */
     margin: 0;
     
     max-width: 100%; 
