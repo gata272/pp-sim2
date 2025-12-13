@@ -283,7 +283,7 @@ body.edit-mode-active #mode-toggle-button-play-only,
 }
 
 
-/* --- ★ネクスト設定 (50手先) 用の追加CSS★ --- */
+/* --- ネクスト設定 (50手先) 用の追加CSS --- */
 
 #edit-next-list-container {
     /* スクロールを有効にする */
@@ -364,13 +364,19 @@ body.edit-mode-active #mode-toggle-button-play-only,
 
 /* --- モバイル操作ボタン --- */
 #mobile-controls {
-    display: none; 
+    display: flex; /* デフォルトはflex (プレイモード) */
     margin-top: 10px;
     width: 100%;
     max-width: 400px; 
     flex-direction: row; 
     justify-content: space-between; 
     gap: 10px;
+}
+
+/* ★修正: エディットモード時に非表示にする★ */
+body.edit-mode-active #mobile-controls,
+.edit-mode-active #mobile-controls {
+    display: none !important; 
 }
 
 .mobile-btn {
