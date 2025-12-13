@@ -357,27 +357,22 @@ body.edit-mode-active #mode-toggle-button-play-only,
 }
 
 /* ------------------------------------- */
-/* ★ ゴーストぷよの修正 ★ */
+/* ★ ゴーストぷよの修正: 半透明の背景色で表現 ★ */
 /* ------------------------------------- */
 
 .puyo-ghost {
-    /* 既存の背景色と影を無効化し、透明にする */
-    box-shadow: none !important;
-    background-color: transparent !important; 
-    opacity: 0.45; /* 不透明度を調整 */
-    border-style: solid; /* 枠線を実線にする */
-    border-width: 3px; /* 枠線を太くして見やすくする */
+    /* 枠線と影はそのまま維持 */
+    box-shadow: none !important; 
+    border: 1px dashed #999;
+    /* opacityを0.5にして、元のpuyo-Nの背景色を半透明にする */
+    opacity: 0.5;
 }
 
-/* 色付きの枠線を適用 */
-.puyo-1.puyo-ghost { border-color: #e63946; } /* 赤 */
-.puyo-2.puyo-ghost { border-color: #457b9d; } /* 青 */
-.puyo-3.puyo-ghost { border-color: #8ac926; } /* 緑 */
-.puyo-4.puyo-ghost { border-color: #fca311; } /* 黄 */
-.puyo-5.puyo-ghost { border-color: #ccc; }    /* おじゃま */
+/* 以下の定義は、.puyo-ghostのopacityが適用されるため、色を上書きする必要はない */
+/* ただし、万が一のオーバーライドに備えて、!importantは削除 */
 
 /* ------------------------------------- */
-/* ★ モバイル操作ボタンの修正 ★ */
+/* ★ モバイル操作ボタンの修正: 文字描画の再開 ★ */
 /* ------------------------------------- */
 
 #mobile-controls {
@@ -396,10 +391,11 @@ body.edit-mode-active #mode-toggle-button-play-only,
     width: 70px;
     height: 70px; 
     padding: 0;
-    font-size: 0; /* 元の文字を非表示 */
+    /* ★修正: font-sizeを大きくし、文字が見えるようにする */
+    font-size: 1.6em; 
     font-weight: bold;
     color: white;
-    border: 3px solid #222; /* 枠線を追加して見た目を改善 */
+    border: 3px solid #222; 
     border-radius: 8px;
     cursor: pointer;
     background-color: #457b9d; 
@@ -408,34 +404,16 @@ body.edit-mode-active #mode-toggle-button-play-only,
     flex-shrink: 0; 
     flex-grow: 1; 
     line-height: 1; 
-    position: relative; /* A/Bラベル配置のため */
+    position: relative; 
+    /* A/Bラベル用の::after要素を削除したため、元に戻す */
+    text-align: center;
+    line-height: 70px; /* 縦方向の中央寄せ */
 }
 
-/* ★ Bボタン（左側、反時計回り）のラベル設定 */
-#btn-rotate-ccw {
+/* 回転ボタンの色 */
+#btn-rotate-ccw, #btn-rotate-cw {
     background-color: #6a0dad; 
-}
-#btn-rotate-ccw::after {
-    content: 'B';
-    font-size: 1.6em;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-}
-
-
-/* ★ Aボタン（右側、時計回り）のラベル設定 */
-#btn-rotate-cw {
-    background-color: #6a0dad; 
-}
-#btn-rotate-cw::after {
-    content: 'A';
-    font-size: 1.6em;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    line-height: 70px;
 }
 
 /* 左右移動ボタン */
@@ -443,6 +421,11 @@ body.edit-mode-active #mode-toggle-button-play-only,
     background-color: #3f88c5;
 }
 
+/* ★修正: 以前追加した::afterラベルを削除 */
+#btn-rotate-ccw::after,
+#btn-rotate-cw::after {
+    content: none;
+}
 
 /* ★修正: エディットモード時に非表示にする★ */
 body.edit-mode-active #mobile-controls,
