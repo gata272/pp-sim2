@@ -357,26 +357,46 @@ body.edit-mode-active #mode-toggle-button-play-only,
 }
 
 /* ------------------------------------- */
-/* ★ ゴーストぷよの修正: 半透明の背景色で表現 ★ */
+/* ★ ゴーストぷよの修正: RGBaによる色付き半透明表現 ★ */
 /* ------------------------------------- */
 
 .puyo-ghost {
-    /* 枠線と影はそのまま維持 */
+    /* 影を無効化 */
     box-shadow: none !important; 
-    border: 1px dashed #999;
-    /* opacityを0.5にして、元のpuyo-Nの背景色を半透明にする */
-    opacity: 0.5;
+    /* 枠線を点線に変更 */
+    border: 2px dashed #fff; 
+    /* 全体のopacityは使用しない (RGBaで背景色のみ透明化) */
+    opacity: 1; 
 }
 
-/* 以下の定義は、.puyo-ghostのopacityが適用されるため、色を上書きする必要はない */
-/* ただし、万が一のオーバーライドに備えて、!importantは削除 */
+/* RGBaで半透明の色を適用 (アルファ値: 0.4) */
+.puyo-1.puyo-ghost { 
+    background-color: rgba(230, 57, 70, 0.4); /* 赤 */
+    border-color: #e63946;
+} 
+.puyo-2.puyo-ghost { 
+    background-color: rgba(69, 123, 157, 0.4); /* 青 */
+    border-color: #457b9d;
+} 
+.puyo-3.puyo-ghost { 
+    background-color: rgba(138, 201, 38, 0.4); /* 緑 */
+    border-color: #8ac926;
+} 
+.puyo-4.puyo-ghost { 
+    background-color: rgba(252, 163, 17, 0.4); /* 黄 */
+    border-color: #fca311;
+} 
+.puyo-5.puyo-ghost { 
+    background-color: rgba(204, 204, 204, 0.4); /* おじゃま */
+    border-color: #ccc;
+} 
+
 
 /* ------------------------------------- */
 /* ★ モバイル操作ボタンの修正: 文字描画の再開 ★ */
 /* ------------------------------------- */
 
 #mobile-controls {
-    /* デフォルトの配置はそのまま利用（左: CCW/B, 右: CW/A） */
     display: flex; 
     margin-top: 10px;
     width: 100%;
@@ -403,11 +423,10 @@ body.edit-mode-active #mode-toggle-button-play-only,
     touch-action: manipulation;
     flex-shrink: 0; 
     flex-grow: 1; 
-    line-height: 1; 
-    position: relative; 
-    /* A/Bラベル用の::after要素を削除したため、元に戻す */
+    /* ★修正: テキストが中央にくるように調整 */
     text-align: center;
-    line-height: 70px; /* 縦方向の中央寄せ */
+    line-height: 70px; 
+    position: relative; 
 }
 
 /* 回転ボタンの色 */
@@ -421,13 +440,7 @@ body.edit-mode-active #mode-toggle-button-play-only,
     background-color: #3f88c5;
 }
 
-/* ★修正: 以前追加した::afterラベルを削除 */
-#btn-rotate-ccw::after,
-#btn-rotate-cw::after {
-    content: none;
-}
-
-/* ★修正: エディットモード時に非表示にする★ */
+/* エディットモード時の非表示設定（既存） */
 body.edit-mode-active #mobile-controls,
 .edit-mode-active #mobile-controls {
     display: none !important; 
