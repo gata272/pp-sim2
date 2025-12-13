@@ -49,6 +49,7 @@
                 <div id="play-controls" class="common-control">
                     <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
                     <button id="reset-button-play" onclick="resetGame()">盤面リセット</button>
+                    
                     <button id="mode-toggle-button-play-only" onclick="toggleMode()">edit</button>
                 </div>
 
@@ -80,12 +81,10 @@
                 </div>
 
                 <div id="edit-next-info" class="info-box"> 
-                    <h2>ネクスト設定 (クリックで変更)</h2>
-                    <div class="next-puyo-row">
-                        <div id="edit-next-1" class="next-puyo-slot"></div>
-                        <div id="edit-next-2" class="next-puyo-slot"></div>
-                    </div>
-                    <button onclick="applyNextPuyos()" style="margin-top:10px; width:100%; padding:5px;">保存</button>
+                    <h2>ネクスト設定 (50手先まで)</h2>
+                    <div id="edit-next-list-container">
+                        </div>
+                    <button onclick="clearEditNext()" style="margin-top:10px; width:100%; padding:5px; background-color: #e63946; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクストをクリア</button>
                 </div>
 
             </div>
