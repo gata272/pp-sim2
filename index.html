@@ -9,7 +9,6 @@
     <meta name="application-name" content="Puyo Sim">
     
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png.png">
-    
     <link rel="icon" type="image/png" sizes="192x192" href="android-icon-192x192.png.png">
     
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -21,20 +20,9 @@
 
     <div id="wrapper">
         
-        <div id="board-and-next-container"> 
-            <div id="puyo-board">
-            </div>
-
-            <div id="edit-next-info" class="info-box edit-info">
-                <h2>ネクスト設定 (クリックで色変更)</h2>
-                <div class="next-puyo-row">
-                    <div id="edit-next-1" class="next-puyo-slot"></div>
-                    <div id="edit-next-2" class="next-puyo-slot"></div>
-                </div>
-                <button onclick="applyNextPuyos()">ネクスト設定を保存</button>
-            </div>
+        <div id="puyo-board">
         </div>
-        
+
         <div id="info-panel">
             
             <div id="play-info-container" class="play-info">
@@ -61,7 +49,6 @@
                 <div id="play-controls" class="common-control">
                     <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
                     <button id="reset-button-play" onclick="resetGame()">盤面リセット</button>
-                    
                     <button id="mode-toggle-button-play-only" onclick="toggleMode()">edit</button>
                 </div>
 
@@ -90,6 +77,15 @@
                     <div id="reset-button-container">
                         <button id="reset-button-edit" onclick="resetGame()">盤面リセット</button>
                     </div>
+                </div>
+
+                <div id="edit-next-info" class="info-box"> 
+                    <h2>ネクスト設定 (クリックで変更)</h2>
+                    <div class="next-puyo-row">
+                        <div id="edit-next-1" class="next-puyo-slot"></div>
+                        <div id="edit-next-2" class="next-puyo-slot"></div>
+                    </div>
+                    <button onclick="applyNextPuyos()" style="margin-top:10px; width:100%; padding:5px;">保存</button>
                 </div>
 
             </div>
