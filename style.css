@@ -251,28 +251,30 @@ body {
 /* --- モードによる要素の表示/非表示 --- */
 
 /* 1. edit-infoクラスのデフォルト非表示 */
+/* この定義が #edit-next-info に適用され、非表示になってしまう */
 .edit-info { 
     display: none !important; 
     flex-grow: 0;
 } 
 
-/* 2. edit-mode-active時の表示 */
-.edit-mode-active .edit-info {
+/* 2. edit-mode-active時の #edit-info-container の表示 */
+.edit-mode-active #edit-info-container.edit-info { /* セレクタを強化 */
     display: flex !important; 
     flex-direction: column; 
     gap: 10px;
     flex-grow: 1; 
 }
 
-/* ★修正・追加: 盤面下のネクスト設定の独立した制御 ★ */
+/* ★最重要修正: 盤面下のネクスト設定の独立した表示制御を強化★ */
 
 /* 1. プレイモード/通常時に #edit-next-info を確実に非表示にする */
 #board-and-next-container #edit-next-info {
-    display: none; 
+    display: none !important; /* !important を追加して、他の .edit-info を上書き */
 }
 
 /* 2. エディットモード時 (.edit-mode-active) に #edit-next-info を確実に表示する */
-.edit-mode-active #board-and-next-container #edit-next-info {
+/* これで display: none !important; を上書きします。 */
+.edit-mode-active #board-and-next-container #edit-next-info.edit-info {
     display: flex !important; 
     flex-direction: column;
 }
