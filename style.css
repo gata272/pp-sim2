@@ -215,7 +215,7 @@ body {
 #reset-button-container button,
 #reset-button-play, 
 #auto-drop-toggle-button,
-#mode-toggle-button-play-only { /* プレイモードボタンのIDを追加 */
+#mode-toggle-button-play-only {
     width: 100%;
     padding: 10px 10px;
     border: none;
@@ -264,12 +264,18 @@ body {
     flex-grow: 1; 
 }
 
-/* 3. エディットモード時に盤面下のネクスト設定を表示する */
-.edit-mode-active #edit-next-info {
+/* ★修正・追加: 盤面下のネクスト設定の独立した制御 ★ */
+
+/* 1. プレイモード/通常時に #edit-next-info を確実に非表示にする */
+#board-and-next-container #edit-next-info {
+    display: none; 
+}
+
+/* 2. エディットモード時 (.edit-mode-active) に #edit-next-info を確実に表示する */
+.edit-mode-active #board-and-next-container #edit-next-info {
     display: flex !important; 
     flex-direction: column;
 }
-
 
 /* プレイモード情報コンテナの表示設定は維持 */
 .play-info { 
