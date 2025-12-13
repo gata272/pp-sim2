@@ -7,7 +7,8 @@ const WIDTH = 6;
 const HEIGHT = 14; // 可視領域12 + 隠し領域2 (Y=0 から Y=13)
 const VISIBLE_HEIGHT = 12; // 可視領域の高さ (Y=0 から Y=11)
 const TOP_HIDDEN_ROW = HEIGHT - 1; // Y=13 (最上段、隠し領域の上端)
-const START_Y = HEIGHT - 1; // Y=13 からスタートするように修正
+// ★修正1: ぷよの初期位置を Y=12 に設定
+const START_Y = HEIGHT - 2; // Y=12 からスタートするように修正
 const NUM_NEXT_PUYOS = 2; // NEXT 1 と NEXT 2 の 2組
 const NEXT_MAX_COUNT = 50; // エディットモードのネクスト最大数
 
@@ -43,7 +44,7 @@ let editingNextPuyos = [];
 // --- 落下ループのための変数 ---
 let dropInterval = 1000; 
 let dropTimer = null; 
-let autoDropEnabled = false; // ★修正2: 自動落下設定の初期値を 'false' に修正
+let autoDropEnabled = false; 
 
 
 // --- 初期化関数 ---
@@ -122,7 +123,7 @@ function initializeGame() {
     // UIリセット
     document.body.classList.remove('edit-mode-active');
     
-    // ★修正2: 自動落下ボタンの初期化
+    // 自動落下ボタンの初期化
     const autoDropButton = document.getElementById('auto-drop-toggle-button');
     if (autoDropButton) {
         autoDropEnabled = false; 
@@ -132,7 +133,6 @@ function initializeGame() {
 
     // 最初のぷよを生成
     generateNewPuyo(); 
-    // 自動落下OFFなので、タイマーはここでは開始しない
     
     updateUI();
     
@@ -140,9 +140,12 @@ function initializeGame() {
     if (!document.initializedKeyHandler) {
         document.addEventListener('keydown', handleInput);
         
+        // モバイル操作ボタンのイベント設定（Z/Xキーと逆の関係）
         document.getElementById('btn-left')?.addEventListener('click', () => movePuyo(-1, 0));
         document.getElementById('btn-right')?.addEventListener('click', () => movePuyo(1, 0));
+        // CW: Bボタン相当
         document.getElementById('btn-rotate-cw')?.addEventListener('click', rotatePuyoCW); 
+        // CCW: Aボタン相当
         document.getElementById('btn-rotate-ccw')?.addEventListener('click', rotatePuyoCCW); 
         document.getElementById('btn-hard-drop')?.addEventListener('click', hardDrop);
         
@@ -238,13 +241,13 @@ window.toggleAutoDrop = function() {
         button.textContent = '自動落下: ON';
         button.classList.remove('disabled');
         if (gameState === 'playing') {
-            startPuyoDropLoop(); // ONになったらタイマー開始
+            startPuyoDropLoop(); 
         }
     } else {
         button.textContent = '自動落下: OFF';
         button.classList.add('disabled');
         if (dropTimer) {
-            clearInterval(dropTimer); // OFFになったらタイマー停止
+            clearInterval(dropTimer); 
         }
     }
 };
@@ -283,6 +286,7 @@ function selectPaletteColor(color) {
 function handleBoardClickEditMode(event) {
     if (gameState !== 'editing' && !document.body.classList.contains('edit-mode-active')) return;
     
+    // DOMイベントリスナーは createBoardDOM で cell 自体に追加されている前提
     const targetCell = event.currentTarget;
     const x = parseInt(targetCell.id.split('-')[1]);
     const y = parseInt(targetCell.id.split('-')[2]);
@@ -380,7 +384,7 @@ function generateNewPuyo() {
         mainColor: c1,
         subColor: c2,
         mainX: 2, 
-        // ★修正1: 初期Y座標を Y=13 (最上段) に設定
+        // ★修正1: 初期Y座標を Y=12 に設定 (HEIGHT - 2)
         mainY: START_Y, 
         rotation: 0 // 0: 上 (サブぷよがメインぷよの上に乗る状態)
     };
@@ -439,7 +443,6 @@ function getPuyoCoords() {
 
 /**
  * 組ぷよが固定された後、ちぎりが発生した際の個々のぷよの最終落下位置を予測する
- * ★修正3: ゴーストぷよのロジックをより正確に修正
  */
 function getGhostFinalPositions() {
     if (!currentPuyo || gameState !== 'playing') return [];
@@ -447,7 +450,7 @@ function getGhostFinalPositions() {
     const coords = getCoordsFromState(currentPuyo);
     let ghostPositions = [];
     
-    // まず、各ぷよが独立して落下できる最終位置 (y_final) を計算する
+    // 各ぷよが独立して落下できる最終位置 (y_final) を計算するヘルパー関数
     const finalY = (x, y) => {
         let y_final = y;
         for (let dy = y - 1; dy >= 0; dy--) {
@@ -466,42 +469,50 @@ function getGhostFinalPositions() {
 
     // 2. 落下位置を調整し、ゴーストとして成立するかチェック
     
-    // Puyo 1
-    let ghost1 = null;
+    // Puyo 1 (メイン/サブ)
     if (puyo1.y !== y1_final) {
-        ghost1 = { x: puyo1.x, y: y1_final, color: puyo1.color };
+        // Puyo 1 の落下位置が Puyo 2 の操作中位置と重なる場合、その1つ上を最終位置とする
+        if (puyo1.x === puyo2.x && y1_final === puyo2.y) {
+             y1_final = puyo2.y + 1;
+        }
+        // y_finalが元のyより低くなっているか確認
+        if (y1_final < puyo1.y) {
+             ghostPositions.push({ x: puyo1.x, y: y1_final, color: puyo1.color });
+        }
     }
     
-    // Puyo 2
-    let ghost2 = null;
+    // Puyo 2 (メイン/サブ)
     if (puyo2.y !== y2_final) {
-        // Puyo 2 の最終位置が Puyo 1 のゴースト位置と重なる場合、Puyo 1 のゴースト位置の1つ上を最終位置とする
-        if (puyo1.x === puyo2.x && y2_final === y1_final) {
-            y2_final = y1_final + 1;
-        }
-        
-        // Puyo 2 のゴースト位置が Puyo 1 の操作中位置と重なる場合、Puyo 1 の操作中位置の1つ上を最終位置とする (このケースは稀だが念のため)
+        // Puyo 2 の落下位置が Puyo 1 の操作中位置と重なる場合、その1つ上を最終位置とする
         if (puyo2.x === puyo1.x && y2_final === puyo1.y) {
              y2_final = puyo1.y + 1;
         }
+        
+        // Puyo 2 の落下位置が Puyo 1 のゴースト位置と重なる場合、その1つ上を最終位置とする
+        const ghost1 = ghostPositions.find(g => g.x === puyo2.x);
+        if (ghost1 && y2_final === ghost1.y) {
+            y2_final = ghost1.y + 1;
+        }
 
-        // Puyo 2 の新しい最終位置が元の位置より下で、かつ固定ぷよに衝突していないか再チェック
-        if (y2_final < puyo2.y && (y2_final < 0 || board[y2_final][puyo2.x] === COLORS.EMPTY)) {
-            // ゴースト位置が元の操作中位置より上になってしまう場合 (y2_final > puyo2.y) はゴーストは描画しない
-            ghost2 = { x: puyo2.x, y: y2_final, color: puyo2.color };
+        // y_finalが元のyより低くなっているか確認
+        if (y2_final < puyo2.y) {
+             ghostPositions.push({ x: puyo2.x, y: y2_final, color: puyo2.color });
         }
     }
-    
-    if (ghost1) ghostPositions.push(ghost1);
-    if (ghost2) ghostPositions.push(ghost2);
 
-    // 3. ゴースト同士の衝突チェック（同じセルに二つあれば削除）
+    // 3. ゴースト同士の衝突チェック (同じセルに二つあれば削除)
     if (ghostPositions.length === 2 && ghostPositions[0].x === ghostPositions[1].x && ghostPositions[0].y === ghostPositions[1].y) {
         return [];
     }
+    
+    // 4. 操作中のぷよとゴーストが重ならないようにフィルタリング
+    const finalGhosts = ghostPositions.filter(ghost => {
+        return !currentPuyoCoords.some(p => p.x === ghost.x && p.y === ghost.y);
+    });
+
 
     // 可視領域 (Y=0からY=11) のみ描画対象
-    return ghostPositions.filter(p => p.y < VISIBLE_HEIGHT); 
+    return finalGhosts.filter(p => p.y < VISIBLE_HEIGHT); 
 }
 
 function getChildDelta(rotation) {
@@ -582,12 +593,11 @@ function hardDrop() {
     // 落下できる限り落下させる (移動中の描画はしない)
     while (movePuyo(0, -1, undefined, false)); 
 
-    lockPuyo(); // ★修正4: 落下後の固定処理と描画
+    lockPuyo(); 
 }
 
 /**
  * 落下中のぷよを盤面に固定する
- * ★修正4: ぷよ固定後の描画タイミングと連鎖開始を明確化
  */
 function lockPuyo() {
     if (gameState !== 'playing' || !currentPuyo) return;
@@ -605,7 +615,7 @@ function lockPuyo() {
     }
 
     currentPuyo = null;
-    renderBoard(); // ★修正4: ぷよ固定後の盤面を描画 (ここで固定されたぷよが見えるようになる)
+    renderBoard(); // ぷよ固定後の盤面を描画
 
     if (isGameOver) {
         gameState = 'gameover';
@@ -621,8 +631,6 @@ function lockPuyo() {
     // 固定後すぐに連鎖を開始
     setTimeout(runChain, 50); 
 }
-
-// ... (findConnectedPuyos, calculateScore, simulateGravity, gravity 関数は変更なし) ...
 
 function findConnectedPuyos() {
     let disappearingGroups = [];
@@ -665,7 +673,7 @@ function findConnectedPuyos() {
 
 async function runChain() {
     
-    // フェーズ1: 重力処理 (浮いているぷよを落とす)
+    // フェーズ1: 重力処理
     gravity(); 
     renderBoard(); 
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -677,7 +685,7 @@ async function runChain() {
         // 連鎖終了。次のぷよへ
         gameState = 'playing';
         generateNewPuyo(); 
-        if (autoDropEnabled) startPuyoDropLoop(); // ★修正2: 自動落下ONの場合のみタイマー再開
+        if (autoDropEnabled) startPuyoDropLoop(); 
         checkMobileControlsVisibility(); 
         renderBoard();
         return;
@@ -695,10 +703,10 @@ async function runChain() {
         });
     });
 
-    renderBoard(); // 消えるぷよのDOM更新 (アニメーション用だが、ここでは色が消えるのみ)
+    renderBoard(); 
     updateUI();
 
-    await new Promise(resolve => setTimeout(resolve, 300)); // 消去アニメーションの待機時間
+    await new Promise(resolve => setTimeout(resolve, 300)); 
 
     // フェーズ4: 次の連鎖へ
     runChain();
@@ -760,7 +768,7 @@ function gravity() {
 
 /**
  * 盤面全体 (固定ぷよ、操作ぷよ、ゴーストぷよ) を描画する
- * ★修正3: ゴーストぷよの描画ロジックを修正
+ * ★修正3: ゴーストぷよに色情報を使ってクラスを設定
  */
 function renderBoard() {
     const isPlaying = gameState === 'playing' && currentPuyo;
@@ -787,6 +795,7 @@ function renderBoard() {
             else if (cellColor === COLORS.EMPTY) {
                 const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
                 if (puyoGhost) {
+                    // ★修正3: ゴーストぷよに色情報を使用 (puyo-1-ghost, puyo-2-ghost のようになる)
                     cellColor = puyoGhost.color; 
                     puyoClasses = `puyo puyo-${puyoGhost.color} puyo-ghost`;
                 }
@@ -855,14 +864,15 @@ function handleInput(event) {
             break;
         case 'z': 
         case 'Z':
-            rotatePuyoCCW(); 
+            // ★修正2: Z/Aボタンを時計回り (CW) に設定
+            rotatePuyoCW(); 
             break;
         case 'x': 
         case 'X':
-            rotatePuyoCW(); 
+            // ★修正2: X/Bボタンを反時計回り (CCW) に設定
+            rotatePuyoCCW(); 
             break;
         case 'ArrowDown':
-            // タイマーが動いている場合のみ停止
             if (dropTimer) clearInterval(dropTimer); 
             movePuyo(0, -1); 
             if (autoDropEnabled) { 
