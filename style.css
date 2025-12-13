@@ -31,6 +31,16 @@ body {
     align-items: flex-start;
 }
 
+/* ★新規追加: 盤面とネクスト設定を縦にまとめるコンテナ ★ */
+#board-and-next-container {
+    display: flex;
+    flex-direction: column; /* 縦に並べる */
+    gap: 10px;
+    flex: 0 0 240px; /* 盤面と同じ幅に固定 */
+    min-width: 240px;
+}
+
+
 /* ぷよのセルサイズの基準を 40px に拡大 */
 #puyo-board {
     /* ★ 変更維持: 1セルの基準サイズを 40px に拡大 ★ */
@@ -180,7 +190,9 @@ body {
 }
 
 /* ★ NEXT内のぷよのサイズを 30px に維持 (盤面拡大に合わせる) ★ */
-#play-next-info .puyo, #edit-next-info .puyo {
+#play-next-info .puyo, 
+/* ★修正: 盤面下に移動した #edit-next-info も含める ★ */
+#edit-next-info .puyo {
     width: 30px; 
     height: 30px; 
 }
@@ -201,21 +213,29 @@ body {
 
 
 /* --- 3. コントロールボタンのレイアウト --- */
-#play-controls, #edit-controls, #mode-toggle-container {
+#play-controls, 
+/* ★修正: #edit-action-buttons を追加し、ボタンを縦に並べる ★ */
+#edit-action-buttons { 
     width: 100%; 
     display: flex;
     flex-direction: column; 
     gap: 8px; /* 以前の広い gap に戻す */
     flex-shrink: 0;
 }
+/* 旧モード切り替えコンテナのスタイルは #edit-action-buttons 内で統合 */
 
 #mode-toggle-container {
-    margin-top: auto; 
-    order: 10;
+    /* プレイモード用CSSは削除（edit-action-buttons内で処理） */
+    width: 100%; /* edit-action-buttons内でボタンの幅を制御 */
 }
 
+
 /* モード切り替えとリセットボタンのスタイル共通 */
-#mode-toggle-button, #reset-button-play, #reset-button-edit, #auto-drop-toggle-button {
+/* ★修正: reset-button-containerとmode-toggle-container内のボタンにスタイルを適用 ★ */
+#mode-toggle-container button, 
+#reset-button-container button,
+#reset-button-play, 
+#auto-drop-toggle-button {
     width: 100%;
     padding: 10px 10px; /* 以前の広い padding に戻す */
     border: none;
@@ -248,26 +268,42 @@ body {
 }
 
 /* --- モードによる要素の表示/非表示 --- */
+
+/* ★修正: edit-info は #info-panel内と #board-and-next-container外で制御する ★ */
+
+/* 1. edit-infoクラスのデフォルト非表示 */
 .edit-info { 
     display: none !important; 
     flex-grow: 0;
 } 
-.play-info { 
-    display: flex; 
-    flex-grow: 1;
-    flex-direction: column; 
-} 
 
-.edit-mode-active .play-info {
-    display: none !important; 
-    flex-grow: 0;
-}
+/* 2. edit-mode-active時の表示 */
 .edit-mode-active .edit-info {
     display: flex !important; 
     flex-direction: column; 
     gap: 10px; /* 以前の広い gap に戻す */
     flex-grow: 1; 
 }
+
+/* 3. エディットモード時に盤面下のネクスト設定を表示する */
+.edit-mode-active #edit-next-info {
+    display: flex !important; /* HTML構造の変更により、ここで明示的に表示 */
+    flex-direction: column;
+    /* info-boxの共通スタイルを継承 */
+}
+
+
+/* プレイモード情報コンテナの表示設定は維持 */
+.play-info { 
+    display: flex; 
+    flex-grow: 1;
+    flex-direction: column; 
+} 
+.edit-mode-active .play-info {
+    display: none !important; 
+    flex-grow: 0;
+}
+
 
 /* パレットのぷよも調整 */
 #color-palette {
