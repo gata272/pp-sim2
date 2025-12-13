@@ -744,7 +744,7 @@ function renderBoard() {
             else if (cellColor === COLORS.EMPTY) { 
                 const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
                 if (puyoGhost) {
-                    // ★ 色情報を使用してゴーストクラスを設定
+                    // 色情報を使用してゴーストクラスを設定
                     cellColor = puyoGhost.color; 
                     puyoClasses = `puyo puyo-${puyoGhost.color} puyo-ghost`;
                 }
@@ -810,13 +810,13 @@ function handleInput(event) {
             break;
         case 'z': 
         case 'Z':
-            // Zキー (Aボタン相当) で時計回り (CW)
-            rotatePuyoCW(); 
+            // ★ Aボタン (Zキー) で反時計回り (CCW)
+            rotatePuyoCCW(); 
             break;
         case 'x': 
         case 'X':
-            // Xキー (Bボタン相当) で反時計回り (CCW)
-            rotatePuyoCCW(); 
+            // ★ Bボタン (Xキー) で時計回り (CW)
+            rotatePuyoCW(); 
             break;
         case 'ArrowDown':
             if (dropTimer) clearInterval(dropTimer); 
