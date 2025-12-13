@@ -289,9 +289,9 @@ body.edit-mode-active #mode-toggle-button-play-only,
     /* スクロールを有効にする */
     max-height: 250px; 
     overflow-y: scroll;
-    padding-right: 5px; /* スクロールバーのためのスペース */
+    padding-right: 5px; 
     margin-top: 10px;
-    text-align: left; /* リスト番号を左寄せにするため */
+    text-align: left; 
 }
 
 .next-puyo-slot-pair {
@@ -318,7 +318,7 @@ body.edit-mode-active #mode-toggle-button-play-only,
 .next-puyo-slot-pair .next-puyo-row {
     margin: 0; 
     gap: 8px; 
-    justify-content: flex-start; /* 左寄せ */
+    justify-content: flex-start; 
     flex-grow: 1;
     padding-left: 10px;
 }
@@ -356,15 +356,33 @@ body.edit-mode-active #mode-toggle-button-play-only,
     border: 2px dashed #666; 
 }
 
+/* ------------------------------------- */
+/* ★ ゴーストぷよの修正 ★ */
+/* ------------------------------------- */
+
 .puyo-ghost {
+    /* 既存の背景色と影を無効化し、透明にする */
     box-shadow: none !important;
-    border: 1px dashed #999; 
-    opacity: 0.5;
+    background-color: transparent !important; 
+    opacity: 0.45; /* 不透明度を調整 */
+    border-style: solid; /* 枠線を実線にする */
+    border-width: 3px; /* 枠線を太くして見やすくする */
 }
 
-/* --- モバイル操作ボタン --- */
+/* 色付きの枠線を適用 */
+.puyo-1.puyo-ghost { border-color: #e63946; } /* 赤 */
+.puyo-2.puyo-ghost { border-color: #457b9d; } /* 青 */
+.puyo-3.puyo-ghost { border-color: #8ac926; } /* 緑 */
+.puyo-4.puyo-ghost { border-color: #fca311; } /* 黄 */
+.puyo-5.puyo-ghost { border-color: #ccc; }    /* おじゃま */
+
+/* ------------------------------------- */
+/* ★ モバイル操作ボタンの修正 ★ */
+/* ------------------------------------- */
+
 #mobile-controls {
-    display: flex; /* デフォルトはflex (プレイモード) */
+    /* デフォルトの配置はそのまま利用（左: CCW/B, 右: CW/A） */
+    display: flex; 
     margin-top: 10px;
     width: 100%;
     max-width: 400px; 
@@ -373,20 +391,15 @@ body.edit-mode-active #mode-toggle-button-play-only,
     gap: 10px;
 }
 
-/* ★修正: エディットモード時に非表示にする★ */
-body.edit-mode-active #mobile-controls,
-.edit-mode-active #mobile-controls {
-    display: none !important; 
-}
-
+/* モバイルボタン共通スタイル */
 .mobile-btn {
     width: 70px;
     height: 70px; 
     padding: 0;
-    font-size: 1.6em;
+    font-size: 0; /* 元の文字を非表示 */
     font-weight: bold;
     color: white;
-    border: none;
+    border: 3px solid #222; /* 枠線を追加して見た目を改善 */
     border-radius: 8px;
     cursor: pointer;
     background-color: #457b9d; 
@@ -395,8 +408,44 @@ body.edit-mode-active #mobile-controls,
     flex-shrink: 0; 
     flex-grow: 1; 
     line-height: 1; 
+    position: relative; /* A/Bラベル配置のため */
 }
 
-#btn-rotate-cw, #btn-rotate-ccw {
+/* ★ Bボタン（左側、反時計回り）のラベル設定 */
+#btn-rotate-ccw {
     background-color: #6a0dad; 
+}
+#btn-rotate-ccw::after {
+    content: 'B';
+    font-size: 1.6em;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+
+/* ★ Aボタン（右側、時計回り）のラベル設定 */
+#btn-rotate-cw {
+    background-color: #6a0dad; 
+}
+#btn-rotate-cw::after {
+    content: 'A';
+    font-size: 1.6em;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* 左右移動ボタン */
+#btn-left, #btn-right {
+    background-color: #3f88c5;
+}
+
+
+/* ★修正: エディットモード時に非表示にする★ */
+body.edit-mode-active #mobile-controls,
+.edit-mode-active #mobile-controls {
+    display: none !important; 
 }
