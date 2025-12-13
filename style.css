@@ -156,6 +156,7 @@ body {
     margin-top: 5px;
 }
 
+/* ぷよスロット (プレイ・エディット共通) */
 .next-puyo-slot {
     display: flex;
     flex-direction: column; 
@@ -163,6 +164,7 @@ body {
     align-items: center;
 }
 
+/* プレイ/エディットの単体のぷよサイズ */
 #play-next-info .puyo, 
 #edit-next-info .puyo {
     width: 30px; 
