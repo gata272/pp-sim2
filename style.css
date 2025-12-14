@@ -284,7 +284,7 @@ body {
     flex-grow: 1; 
 }
 
-/* --- ★ 修正点1: パレットのレイアウトを2x3グリッドに変更 (HTML構造に合わせて修正) ★ --- */
+/* --- ★ パレットのレイアウト: 横3列グリッド ★ --- */
 #color-palette {
     flex-grow: 1; 
 }
@@ -295,7 +295,7 @@ body {
     grid-template-columns: repeat(3, 1fr); /* 3列に均等分割 */
     gap: 8px; 
     margin-top: 5px; 
-    justify-items: center; /* グリッドアイテムを中央に */
+    justify-items: center; 
 }
 
 #color-palette .puyo {
@@ -403,7 +403,7 @@ body {
     cursor: pointer;
 }
 
-/* --- ★ 修正点2: モバイル操作ボタン (position: fixed を削除してフローに戻す) ★ --- */
+/* --- ★ モバイル操作ボタン ★ --- */
 #mobile-controls {
     display: none; 
     margin-top: 10px;
