@@ -31,13 +31,9 @@
                     <h2>NEXT</h2>
                     <div class="next-puyo-row">
                         <div id="next-puyo-1" class="next-puyo-slot">
-                            <div class="puyo puyo-0"></div> 
-                            <div class="puyo puyo-0"></div>
-                        </div>
+                            </div>
                         <div id="next-puyo-2" class="next-puyo-slot">
-                            <div class="puyo puyo-0"></div> 
-                            <div class="puyo puyo-0"></div>
-                        </div>
+                            </div>
                     </div>
                 </div>
 
@@ -77,6 +73,21 @@
                     </div>
                 </div>
 
+                <div id="edit-next-info" class="info-box"> 
+                    <h2>ネクスト設定 (50手先まで)</h2>
+                    
+                    <div class="next-puyo-row">
+                        <div class="next-puyo-slot" id="edit-next-1"></div>
+                        <div class="next-puyo-slot" id="edit-next-2"></div>
+                    </div>
+                    
+                    <div id="edit-next-list-container">
+                        </div>
+
+                    <button id="apply-next-button" onclick="applyNextPuyos()" style="margin-top:10px; width:100%; padding:8px; background-color: #457b9d; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクスト設定を適用</button>
+                    <button onclick="clearEditNext()" style="margin-top:10px; width:100%; padding:5px; background-color: #e63946; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクストをランダムで再生成</button>
+                </div>
+                
                 <div id="edit-action-buttons" class="common-control">
                     <div id="mode-toggle-container">
                         <button id="mode-toggle-button" onclick="toggleMode()">play</button>
@@ -85,14 +96,6 @@
                         <button id="reset-button-edit" onclick="resetGame()">盤面リセット</button>
                     </div>
                 </div>
-
-                <div id="edit-next-info" class="info-box"> 
-                    <h2>ネクスト設定 (50手先まで)</h2>
-                    <div id="edit-next-list-container">
-                        </div>
-                    <button onclick="clearEditNext()" style="margin-top:10px; width:100%; padding:5px; background-color: #e63946; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクストをクリア</button>
-                </div>
-
             </div>
             
         </div>
