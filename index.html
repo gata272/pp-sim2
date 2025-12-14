@@ -3,79 +3,118 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ぷよぷよ シミュレーター</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Puyo Puyo Simulator</title>
+    
+    <meta name="apple-mobile-web-app-title" content="Puyo Sim">
+    <meta name="application-name" content="Puyo Sim">
+    
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="android-icon-192x192.png.png">
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <link rel="stylesheet" href="style.css"> 
 </head>
 <body>
 
-    <div id="puyo-sim-container">
+    <div id="wrapper">
         
         <div id="puyo-board">
-            </div>
+        </div>
 
         <div id="info-panel">
-            <div id="score-info">
-                <h2>スコア: <span id="score">0</span></h2>
-                <p>連鎖: <span id="chain-count">0</span></p>
-                <button class="mode-toggle-btn" onclick="toggleMode()">edit</button>
-            </div>
             
-            <div id="next-puyo-display">
-                <h3>NEXT</h3>
-                <div id="next-puyo-1" class="next-puyo-slot"></div>
-                <div id="next-puyo-2" class="next-puyo-slot"></div>
-            </div>
+            <div id="play-info-container" class="play-info">
+                
+                <div id="play-next-info" class="info-box info-group-a">
+                    <h2>NEXT</h2>
+                    <div class="next-puyo-row">
+                        <div id="next-puyo-1" class="next-puyo-slot">
+                            </div>
+                        <div id="next-puyo-2" class="next-puyo-slot">
+                            </div>
+                    </div>
+                </div>
 
-            <div id="controls-panel">
-                <div class="control-section">
-                    <h3>履歴操作</h3>
-                    <button id="undo-button" onclick="undoMove()" disabled>一手戻す (Z)</button>
-                    <button id="redo-button" onclick="redoMove()" disabled>一手進む (Y/Shift+Z)</button>
+                <div id="play-stats-info">
+                    <div id="score-box" class="info-box">
+                        <h2>スコア</h2>
+                        <span id="score">0</span>
+                    </div>
+                    <div id="chain-box" class="info-box">
+                        <h2>連鎖数</h2>
+                        <span id="chain-count">0</span>
+                    </div>
                 </div>
                 
-                <div class="control-section">
-                    <h3>設定</h3>
-                    <button id="reset-button" onclick="resetGame()">盤面リセット</button>
-                    <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()" class="disabled">自動落下: OFF</button>
+                <div id="history-controls" class="common-control">
+                    <button id="undo-button" onclick="undoMove()" disabled>一手戻す (Z)</button>
+                    <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
+                </div>
+                
+                <div id="play-controls" class="common-control">
+                    <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
+                    <button id="reset-button-play" onclick="resetGame()">盤面リセット</button>
+                    
+                    <button class="mode-toggle-btn" onclick="toggleMode()">edit</button>
                 </div>
 
-                <div id="edit-controls" class="control-section">
-                    <h3>エディットコントロール</h3>
-                    <div id="color-palette" class="palette-grid">
-                        <div class="palette-color puyo-0" data-color="0" title="消しゴム (Empty)"></div>
-                        <div class="palette-color puyo-1" data-color="1" title="赤 (Red)"></div>
-                        <div class="palette-color puyo-2" data-color="2" title="青 (Blue)"></div>
-                        <div class="palette-color puyo-3" data-color="3" title="緑 (Green)"></div>
-                        <div class="palette-color puyo-4" data-color="4" title="黄 (Yellow)"></div>
-                        <div class="palette-color puyo-5" data-color="5" title="おじゃま (Garbage)"></div>
+            </div>
+            
+            <div id="edit-info-container" class="edit-info">
+                
+                <div id="color-palette" class="info-box edit-group-a">
+                    <h2>パレット (配置するぷよ)</h2>
+                    <div class="palette-row">
+                        <div class="puyo palette-color puyo-1" data-color="1"></div>
+                        <div class="puyo palette-color puyo-2" data-color="2"></div>
+                        <div class="puyo palette-color puyo-3" data-color="3"></div>
+                        <div class="puyo palette-color puyo-4" data-color="4"></div>
+                    </div>
+                    <div class="palette-row">
+                        <div class="puyo palette-color puyo-5" data-color="5"></div>
+                        <div class="puyo palette-color puyo-0" data-color="0"></div> 
+                    </div>
+                </div>
+
+                <div id="edit-next-info" class="info-box"> 
+                    <h2>ネクスト設定 (50手先まで)</h2>
+                    
+                    <div class="next-puyo-row">
+                        <div class="next-puyo-slot" id="edit-next-1"></div>
+                        <div class="next-puyo-slot" id="edit-next-2"></div>
                     </div>
                     
-                    <div class="edit-next-setup">
-                        <h4>NEXT 編集</h4>
-                        <div class="next-puyo-row-edit">
-                            <span class="next-label">N1</span><div id="edit-next-1" class="next-puyo-slot-edit"></div>
-                            <span class="next-label">N2</span><div id="edit-next-2" class="next-puyo-slot-edit"></div>
+                    <div id="edit-next-list-container">
                         </div>
-                        <div id="edit-next-list-container">
-                            </div>
-                        <div class="edit-buttons">
-                            <button onclick="applyNextPuyos()">NEXTを保存</button>
-                            <button onclick="clearEditNext()">NEXTをランダム再生成</button>
-                        </div>
+
+                    <button id="apply-next-button" onclick="applyNextPuyos()" style="margin-top:10px; width:100%; padding:8px; background-color: #457b9d; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクスト設定を適用</button>
+                    <button onclick="clearEditNext()" style="margin-top:10px; width:100%; padding:5px; background-color: #e63946; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクストをランダムで再生成</button>
+                </div>
+                
+                <div id="edit-action-buttons" class="common-control">
+                    <div id="mode-toggle-container">
+                        <button class="mode-toggle-btn" onclick="toggleMode()">play</button>
+                    </div>
+                    <div id="reset-button-container">
+                        <button id="reset-button-edit" onclick="resetGame(); toggleMode();">盤面リセット</button>
                     </div>
                 </div>
             </div>
+            
         </div>
     </div>
     
     <div id="mobile-controls">
-        <button id="btn-rotate-ccw">⟲</button>
-        <button id="btn-left">◀</button>
-        <button id="btn-right">▶</button>
-        <button id="btn-rotate-cw">⟳</button>
-        <button id="btn-hard-drop">DROP</button>
+        <button class="mobile-btn" id="btn-left">←</button>
+        <button class="mobile-btn" id="btn-hard-drop">↓</button>
+        <button class="mobile-btn" id="btn-right">→</button>
+        <button class="mobile-btn" id="btn-rotate-cw">B</button>
+        <button class="mobile-btn" id="btn-rotate-ccw">A</button>
     </div>
 
     <script src="puyoSim.js"></script>
+
 </body>
 </html>
