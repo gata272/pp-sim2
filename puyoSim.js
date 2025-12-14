@@ -307,8 +307,8 @@ function restoreState(state) {
     gameState = 'playing';
     clearInterval(dropTimer);
     
-    // currentPuyoがnull（つまりぷよが固定された後の状態）を復元した場合のみ、
-    // 次の操作ぷよを生成する。操作中の状態を復元した場合は生成しない。
+    // currentPuyoがnullの場合（つまり、ぷよを置いて次の手を打つ直前の状態）
+    // のみ、新しい操作ぷよを生成する。
     if (currentPuyo === null) {
         generateNewPuyo(); 
     }
