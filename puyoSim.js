@@ -193,7 +193,28 @@ function initializeGame() {
  */
 window.resetGame = function() { 
     clearInterval(dropTimer); 
-    initializeGame();
+    
+    if (gameState === 'editing') {
+        // ★修正点1: エディットモードの場合は、盤面とネクストリストのみリセット
+        for (let y = 0; y < HEIGHT; y++) {
+            board[y] = Array(WIDTH).fill(COLORS.EMPTY);
+        }
+        // ネクストリストをランダムで再生成
+        editingNextPuyos = [];
+        for (let i = 0; i < MAX_NEXT_PUYOS; i++) {
+            editingNextPuyos.push(getRandomPair());
+        }
+        
+        renderEditNextPuyos(); 
+        renderBoard();
+        updateUI();
+
+        alert('エディット盤面とネクストリストをリセットしました。');
+        
+    } else {
+        // プレイモードやゲームオーバーの場合は、全体を初期化
+        initializeGame();
+    }
 }
 
 /**
@@ -312,10 +333,10 @@ function restoreState(state) {
         generateNewPuyo(); 
     }
     
-    // 盤面が復元された後、重力処理を実行して浮きぷよを落下させる
+    // 盤面が復元された後、重力処理を実行して浮きぷよを落下させる (Undo時の落下修正)
     gravity(); 
 
-    // 状態復元後、現在の盤面に消えるべきぷよがあるかチェックする
+    // 状態復元後、現在の盤面に消えるべきぷよがあるかチェックする (Redo時の連鎖修正)
     const groups = findConnectedPuyos();
 
     if (groups.length > 0) {
