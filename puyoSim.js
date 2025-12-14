@@ -111,7 +111,7 @@ function initializeGame() {
     chainCount = 0;
     gameState = 'playing';
     
-    // ★追加: 履歴スタックをクリア
+    // 履歴スタックをクリア
     historyStack = []; 
     redoStack = [];
 
@@ -151,14 +151,14 @@ function initializeGame() {
     if (!document.initializedKeyHandler) {
         document.addEventListener('keydown', handleInput);
         
-        // ★追加: Undo/Redoのキーバインド
+        // Undo/Redoのキーバインド
         document.addEventListener('keydown', (event) => {
             if (gameState === 'playing') {
                 if ((event.key === 'z' || event.key === 'Z') && !event.shiftKey) {
                     event.preventDefault(); // ブラウザの戻るを防止
                     undoMove();
                 } else if (event.key === 'y' || event.key === 'Y' || (event.key === 'z' || event.key === 'Z') && event.shiftKey) {
-                    event.preventDefault(); // ブラウザの戻るを防止
+                    event.preventDefault(); // ブラウザの戻る/再読み込みを防止
                     redoMove();
                 }
             }
@@ -184,7 +184,7 @@ function initializeGame() {
     checkMobileControlsVisibility();
     renderBoard();
     
-    // ★追加: 最初の状態を履歴スタックに保存 (最初の操作ぷよが生成された状態)
+    // 最初の状態を履歴スタックに保存 (最初の操作ぷよが生成された状態)
     saveState(false); 
 }
 
@@ -265,6 +265,7 @@ function saveState(clearRedoStack = true) {
         nextPuyoColors: nextPuyoColors.map(pair => [...pair]),
         score: score,
         chainCount: chainCount,
+        // currentPuyoの状態も保存（操作中のぷよか、nullか）
         currentPuyo: currentPuyo ? { 
             mainColor: currentPuyo.mainColor,
             subColor: currentPuyo.subColor,
@@ -295,10 +296,23 @@ function restoreState(state) {
     score = state.score;
     chainCount = state.chainCount;
     
-    currentPuyo = state.currentPuyo; 
+    // ★修正されたロジック: currentPuyoを過去の状態に正確に復元する
+    if (state.currentPuyo) {
+        currentPuyo = { ...state.currentPuyo };
+    } else {
+        currentPuyo = null;
+    }
     
+    // ゲーム状態とタイマーをリセット
     gameState = 'playing';
     clearInterval(dropTimer);
+    
+    // currentPuyoがnull（つまりぷよが固定された後の状態）を復元した場合のみ、
+    // 次の操作ぷよを生成する。操作中の状態を復元した場合は生成しない。
+    if (currentPuyo === null) {
+        generateNewPuyo(); 
+    }
+    
     startPuyoDropLoop();
 
     updateUI();
@@ -531,6 +545,7 @@ function getCoordsFromState(puyoState) {
     let subX = mainX;
     let subY = mainY;
 
+    // rotation: 0=上, 1=左, 2=下, 3=右 (メインぷよ基準)
     if (rotation === 0) subY = mainY + 1; // 上
     if (rotation === 1) subX = mainX - 1; // 左
     if (rotation === 2) subY = mainY - 1; // 下
@@ -603,10 +618,12 @@ function getGhostFinalPositions() {
             const tempColor = tempBoard[y][x];
             const originalColor = board[y][x];
             
+            // オリジナルボードが空、かつシミュレーション後のボードに操作ぷよの色があり、かつそれが操作ぷよの数(2個)以内
             if (originalColor === COLORS.EMPTY && 
                 puyoColors.includes(tempColor) && 
                 puyoCount < 2) 
             {
+                // その位置が操作ぷよの最終到達位置と見なせる
                 ghostPositions.push({ x: x, y: y, color: tempColor });
                 puyoCount++;
             }
@@ -620,8 +637,10 @@ function getGhostFinalPositions() {
 
 function checkCollision(coords) {
     for (const puyo of coords) {
+        // 盤面の左右または下にはみ出したら衝突
         if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0) return true;
 
+        // 既にぷよがあるセルと衝突
         if (puyo.y < HEIGHT && puyo.y >= 0 && board[puyo.y][puyo.x] !== COLORS.EMPTY) {
             return true;
         }
@@ -659,15 +678,19 @@ function movePuyo(dx, dy, newRotation, shouldRender = true) {
 function rotatePuyoCW() {
     if (gameState !== 'playing') return false;
     const newRotation = (currentPuyo.rotation + 1) % 4;
+    
+    // 回転後の座標で衝突する場合、ズラして回転を試みる（壁際回転）
     if (movePuyo(0, 0, newRotation)) return true; 
-    if (movePuyo(1, 0, newRotation)) return true; 
-    if (movePuyo(-1, 0, newRotation)) return true; 
+    if (movePuyo(1, 0, newRotation)) return true; // 右へズラして試行
+    if (movePuyo(-1, 0, newRotation)) return true; // 左へズラして試行
     return false;
 }
 
 function rotatePuyoCCW() {
     if (gameState !== 'playing') return false;
     const newRotation = (currentPuyo.rotation - 1 + 4) % 4;
+
+    // 回転後の座標で衝突する場合、ズラして回転を試みる
     if (movePuyo(0, 0, newRotation)) return true; 
     if (movePuyo(1, 0, newRotation)) return true; 
     if (movePuyo(-1, 0, newRotation)) return true; 
@@ -679,6 +702,7 @@ function hardDrop() {
 
     clearInterval(dropTimer); 
 
+    // 衝突するまで下に移動
     while (movePuyo(0, -1, undefined, false)); 
 
     renderBoard(); 
@@ -712,12 +736,13 @@ function lockPuyo() {
         return;
     }
     
+    // 2. ぷよ固定完了
     currentPuyo = null;
     
-    // 2. ★履歴の保存（新しい手としてRedoスタックをクリア）
+    // 3. 履歴の保存（新しい手としてRedoスタックをクリア）
     saveState(true); 
     
-    // 3. 連鎖開始
+    // 4. 連鎖開始
     gameState = 'chaining';
     chainCount = 0;
     
@@ -743,6 +768,7 @@ function findConnectedPuyos() {
                 const current = stack.pop();
                 group.push(current);
 
+                // 上下左右チェック
                 [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dx, dy]) => {
                     const nx = current.x + dx;
                     const ny = current.y + dy;
@@ -800,7 +826,7 @@ function clearGarbagePuyos(erasedCoords) {
 
 async function runChain() {
     
-    // フェーズ1: 重力処理 (前回の連鎖で空いた穴を埋める)
+    // フェーズ1: 重力処理
     gravity(); 
     renderBoard(); 
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -904,7 +930,8 @@ function gravity() {
 function renderBoard() {
     const isPlaying = gameState === 'playing';
     const currentPuyoCoords = isPlaying ? getPuyoCoords() : [];
-    const ghostPuyoCoords = isPlaying ? getGhostFinalPositions() : []; 
+    // 操作中のぷよがない場合、ゴーストぷよは計算しない
+    const ghostPuyoCoords = isPlaying && currentPuyo ? getGhostFinalPositions() : []; 
 
     for (let y = HEIGHT - 1; y >= 0; y--) { 
         for (let x = 0; x < WIDTH; x++) {
@@ -1065,7 +1092,7 @@ function handleInput(event) {
             break;
         case 'z':
         case 'Z':
-            // Undo/Redoと衝突しないよう、キーバインドのif文で制御済みだが念のため
+            // Undo/Redoと衝突しないよう、キーバインドのif文で制御済み
             if (!event.shiftKey) {
                  rotatePuyoCW(); 
             }
@@ -1082,7 +1109,7 @@ function handleInput(event) {
             }
             break;
         case ' ': 
-            event.preventDefault(); 
+            event.preventDefault(); // スペースキーによるスクロールを防止
             hardDrop(); 
             break;
     }
