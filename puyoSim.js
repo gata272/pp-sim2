@@ -16,7 +16,7 @@ const COLORS = {
     BLUE: 2,
     GREEN: 3,
     YELLOW: 4,
-    GARBAGE: 5
+    GARBAGE: 5 // 灰色のおじゃまぷよ
 };
 
 // スコア計算に必要なボーナス値（ぷよぷよ通準拠）
@@ -57,7 +57,7 @@ function createBoardDOM() {
     const boardElement = document.getElementById('puyo-board');
     boardElement.innerHTML = ''; 
 
-    // 描画は全領域 (HEIGHT = 14行) を行う。y=13からy=0の順で配置
+    // 描画は全領域 (HEIGHT = 14行) を行う (y=13からy=0の順で配置)
     for (let y = HEIGHT - 1; y >= 0; y--) { 
         for (let x = 0; x < WIDTH; x++) {
             const cell = document.createElement('div');
@@ -608,6 +608,7 @@ function findConnectedPuyos() {
         for (let x = 0; x < WIDTH; x++) {
             const color = board[y][x];
             
+            // おじゃまぷよ(5)は連鎖の核にはならないため無視
             if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
 
             let group = [];
@@ -639,9 +640,51 @@ function findConnectedPuyos() {
     return disappearingGroups;
 }
 
+/**
+ * 消去されたぷよの座標リストに基づき、その周囲（上下左右1マス）のおじゃまぷよを消去する。
+ * @param {Array<{x: number, y: number}>} erasedCoords - 連鎖で消えたぷよの座標リスト
+ * @returns {number} 消去されたおじゃまぷよの数
+ */
+function clearGarbagePuyos(erasedCoords) {
+    let clearedGarbageCount = 0;
+    
+    // 消去対象のおじゃまぷよの座標を格納するSet
+    const garbageToClear = new Set(); 
+
+    // 消去されたぷよ一つ一つについて処理
+    erasedCoords.forEach(({ x, y }) => {
+        // 上下左右1マスをチェック
+        [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dx, dy]) => {
+            const nx = x + dx;
+            const ny = y + dy;
+
+            // 盤面の範囲内かチェック
+            if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT) {
+                // その位置がおじゃまぷよ(COLORS.GARBAGE: 5)かチェック
+                if (board[ny][nx] === COLORS.GARBAGE) {
+                    // おじゃまぷよを消去リストに追加 (Setを使うことで重複登録を避ける)
+                    garbageToClear.add(`${nx}-${ny}`); 
+                }
+            }
+        });
+    });
+
+    // 消去リストに基づき、盤面からおじゃまぷよを削除
+    garbageToClear.forEach(coordKey => {
+        const [nx, ny] = coordKey.split('-').map(Number);
+        
+        // 実際に消去する
+        board[ny][nx] = COLORS.EMPTY;
+        clearedGarbageCount++;
+    });
+    
+    return clearedGarbageCount;
+}
+
+
 async function runChain() {
     
-    // フェーズ1: 重力処理
+    // フェーズ1: 重力処理 (前回の連鎖で空いた穴を埋める)
     gravity(); 
     renderBoard(); 
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -665,18 +708,28 @@ async function runChain() {
     let chainScore = calculateScore(groups, chainCount);
     score += chainScore;
 
+    // 今回連鎖で消えるぷよの座標を記録するリスト
+    let erasedCoords = [];
+    
     groups.forEach(({ group }) => {
         group.forEach(({ x, y }) => {
             board[y][x] = COLORS.EMPTY; 
+            erasedCoords.push({ x, y }); // 消去座標を記録
         });
     });
+
+    // --- ★追加ロジック: おじゃまぷよの巻き込み消去 ★ ---
+    clearGarbagePuyos(erasedCoords);
+    // ------------------------------------------------------
 
     renderBoard(); 
     updateUI();
 
+    // ぷよが消えたアニメーション待機
     await new Promise(resolve => setTimeout(resolve, 300));
 
-    // フェーズ4: 次の連鎖へ
+    // フェーズ4: 次の連鎖へ（重力落下と再チェック）
+    // 巻き込みで空いた穴を埋めるために再度gravityが呼ばれ、runChainが再帰的に実行されます。
     runChain();
 }
 
