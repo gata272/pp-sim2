@@ -143,11 +143,6 @@ function initializeGame() {
 
     // 最初のぷよを生成
     generateNewPuyo(); 
-    
-    // ★ 修正 1: 最初のぷよ生成後、必ず1マス落下させる (Y=12 -> Y=11 へ)
-    //           これにより、操作ぷよが最初から接地してしまい、ドロップや回転ができなくなることを防ぐ
-    movePuyo(0, -1, undefined, false); 
-    
     startPuyoDropLoop(); 
     
     updateUI();
@@ -176,27 +171,11 @@ function initializeGame() {
         const btnRotateCCW = document.getElementById('btn-rotate-ccw'); 
         const btnHardDrop = document.getElementById('btn-hard-drop');
 
-        // イベントオブジェクトを受け取り、preventDefault() を呼び出す
-        if (btnLeft) btnLeft.addEventListener('click', (event) => {
-            event.preventDefault(); 
-            movePuyo(-1, 0);
-        });
-        if (btnRight) btnRight.addEventListener('click', (event) => {
-            event.preventDefault();
-            movePuyo(1, 0);
-        });
-        if (btnRotateCW) btnRotateCW.addEventListener('click', (event) => {
-            event.preventDefault();
-            rotatePuyoCW();
-        }); 
-        if (btnRotateCCW) btnRotateCCW.addEventListener('click', (event) => {
-            event.preventDefault();
-            rotatePuyoCCW();
-        }); 
-        if (btnHardDrop) btnHardDrop.addEventListener('click', (event) => {
-            event.preventDefault();
-            hardDrop();
-        });
+        if (btnLeft) btnLeft.addEventListener('click', () => movePuyo(-1, 0));
+        if (btnRight) btnRight.addEventListener('click', () => movePuyo(1, 0));
+        if (btnRotateCW) btnRotateCW.addEventListener('click', rotatePuyoCW); 
+        if (btnRotateCCW) btnRotateCCW.addEventListener('click', rotatePuyoCCW); 
+        if (btnHardDrop) btnHardDrop.addEventListener('click', hardDrop);
         
         setupEditModeListeners(); 
         document.initializedKeyHandler = true;
@@ -262,7 +241,6 @@ window.toggleMode = function() {
         
         currentPuyo = null; 
         generateNewPuyo(); 
-        movePuyo(0, -1, undefined, false); // ★ プレイモード復帰時も1マス落下
         startPuyoDropLoop(); 
         
         // エディットモード後の最初の状態を履歴に保存
@@ -277,6 +255,10 @@ window.toggleMode = function() {
 
 /**
  * 現在の盤面とネクストリストをコード化してBase64文字列として返す。
+ * * 盤面: 6列 * 14行 = 84個のぷよ (0~5 = 3ビットで表現)
+ * ネクスト: 50組 * 2色 = 100個のぷよ (0~5 = 3ビットで表現)
+ * 合計: 84 + 100 = 184個のぷよデータ。 184 * 3ビット = 552ビット。
+ * 552 / 8 = 69バイト。 Base64で約92文字。
  */
 window.copyStageCode = function() {
     if (gameState !== 'editing') {
@@ -685,11 +667,7 @@ function generateNewPuyo() {
     
     // 初期配置で衝突チェック（ゲームオーバー判定）
     const startingCoords = getCoordsFromState(currentPuyo);
-    // 修正されたルールでは、Y=12, X=2 のセルに最初からぷよが配置されているかどうかはチェックしない（操作ぷよが固定されるときのみチェック）
-
-    // 初期配置位置にボードのぷよがあるかチェック
     if (checkCollision(startingCoords)) {
-        // Y=12, X=2 以外の衝突でも配置できない
         gameState = 'gameover';
         alert('ゲームオーバーです！');
         clearInterval(dropTimer); 
@@ -799,17 +777,14 @@ function getGhostFinalPositions() {
     return ghostPositions.filter(p => p.y < HEIGHT - 2); 
 }
 
-// --- 衝突判定の厳密化（前回の修正） ---
+
 function checkCollision(coords) {
     for (const puyo of coords) {
-        // 1. 盤面の左右または下にはみ出したら衝突
+        // 盤面の左右または下にはみ出したら衝突
         if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0) return true;
 
-        // 2. 盤面の上限 (Y=HEIGHT=14) を超えたら衝突
-        if (puyo.y >= HEIGHT) return true;
-
-        // 3. 既にぷよがあるセルと衝突
-        if (board[puyo.y][puyo.x] !== COLORS.EMPTY) {
+        // 既にぷよがあるセルと衝突
+        if (puyo.y < HEIGHT && puyo.y >= 0 && board[puyo.y][puyo.x] !== COLORS.EMPTY) {
             return true;
         }
     }
@@ -844,7 +819,7 @@ function movePuyo(dx, dy, newRotation, shouldRender = true) {
 }
 
 function rotatePuyoCW() {
-    if (gameState !== 'playing' || !currentPuyo) return false;
+    if (gameState !== 'playing') return false;
     const newRotation = (currentPuyo.rotation + 1) % 4;
     
     // 回転後の座標で衝突する場合、ズラして回転を試みる（壁際回転）
@@ -855,7 +830,7 @@ function rotatePuyoCW() {
 }
 
 function rotatePuyoCCW() {
-    if (gameState !== 'playing' || !currentPuyo) return false;
+    if (gameState !== 'playing') return false;
     const newRotation = (currentPuyo.rotation - 1 + 4) % 4;
 
     // 回転後の座標で衝突する場合、ズラして回転を試みる
@@ -865,47 +840,38 @@ function rotatePuyoCCW() {
     return false;
 }
 
-// --- hardDrop 関数のロジック強化 ---
 function hardDrop() {
     if (gameState !== 'playing' || !currentPuyo) return;
 
     clearInterval(dropTimer); 
 
-    let movedCount = 0;
-    while (movePuyo(0, -1, undefined, false)) { 
-        movedCount++;
-        // 無限ループ防止のため、一応の制限を設ける (HEIGHT=14)
-        if (movedCount > HEIGHT) break; 
-    } 
+    // 衝突するまで下に移動
+    while (movePuyo(0, -1, undefined, false)); 
 
     renderBoard(); 
     
-    // hardDropは移動の有無に関わらず、必ずロック処理を行う
     lockPuyo(); 
 }
 
-// --- lockPuyo 関数の修正 ---
+/**
+ * 敗北条件を「X=2, Y=12」に固定された時のみに変更
+ */
 function lockPuyo() {
     if (gameState !== 'playing' || !currentPuyo) return;
 
     const coords = getPuyoCoords();
     let isGameOver = false;
 
-    // 1. 盤面にぷよを固定し、14段目 (Y=13) のぷよをチェック
+    // 1. 盤面にぷよを固定
     for (const puyo of coords) {
         
-        // ★ 新しいゲームオーバー判定: X=2, Y=12 に固定されたらゲームオーバー
+        // ★ 修正後のゲームオーバー判定ロジック: X=2 (3列目), Y=12 (13段目) に固定されたらゲームオーバー
         if (puyo.x === 2 && puyo.y === 12) { 
             isGameOver = true;
         }
 
-        // ★ 14段目 (Y=13, HEIGHT-1) のぷよは配置しない (実質削除)
-        if (puyo.y >= HEIGHT - 1) { 
-            console.log(`Puyo at (${puyo.x}, ${puyo.y}) was automatically deleted.`);
-            continue; // 14段目のぷよは無視
-        }
-
-        if (puyo.y >= 0) {
+        // Y=0 から Y=13 (HEIGHT-1) の範囲でボードに配置
+        if (puyo.y >= 0 && puyo.y < HEIGHT) {
             board[puyo.y][puyo.x] = puyo.color;
         }
     }
@@ -932,13 +898,11 @@ function lockPuyo() {
     runChain();
 }
 
-// --- findConnectedPuyos 関数の修正 ---
 function findConnectedPuyos() {
     let disappearingGroups = [];
     let visited = Array(HEIGHT).fill(0).map(() => Array(WIDTH).fill(false));
 
-    // ★ 修正 3: 連鎖判定の対象を Y=0 から Y=11 (HEIGHT - 2) までに限定する
-    for (let y = 0; y < HEIGHT - 2; y++) { 
+    for (let y = 0; y < HEIGHT; y++) {
         for (let x = 0; x < WIDTH; x++) {
             const color = board[y][x];
             
@@ -958,8 +922,7 @@ function findConnectedPuyos() {
                     const nx = current.x + dx;
                     const ny = current.y + dy;
 
-                    // ★ 修正 3: 連結チェックも Y=12 (HEIGHT-2) 以上は対象外とする
-                    if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT - 2 && // Y=12以上を排除
+                    if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT &&
                         !visited[ny][nx] && board[ny][nx] === color) {
                         
                         visited[ny][nx] = true;
@@ -1024,7 +987,6 @@ async function runChain() {
         // 連鎖終了。次のぷよへ
         gameState = 'playing';
         generateNewPuyo(); 
-        movePuyo(0, -1, undefined, false); // ★ 新しいぷよ生成後、必ず1マス落下
         startPuyoDropLoop(); 
         checkMobileControlsVisibility(); 
         renderBoard();
