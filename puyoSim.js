@@ -171,11 +171,27 @@ function initializeGame() {
         const btnRotateCCW = document.getElementById('btn-rotate-ccw'); 
         const btnHardDrop = document.getElementById('btn-hard-drop');
 
-        if (btnLeft) btnLeft.addEventListener('click', () => movePuyo(-1, 0));
-        if (btnRight) btnRight.addEventListener('click', () => movePuyo(1, 0));
-        if (btnRotateCW) btnRotateCW.addEventListener('click', rotatePuyoCW); 
-        if (btnRotateCCW) btnRotateCCW.addEventListener('click', rotatePuyoCCW); 
-        if (btnHardDrop) btnHardDrop.addEventListener('click', hardDrop);
+        // ★ 修正済み: イベントオブジェクトを受け取り、preventDefault() を呼び出す
+        if (btnLeft) btnLeft.addEventListener('click', (event) => {
+            event.preventDefault(); 
+            movePuyo(-1, 0);
+        });
+        if (btnRight) btnRight.addEventListener('click', (event) => {
+            event.preventDefault();
+            movePuyo(1, 0);
+        });
+        if (btnRotateCW) btnRotateCW.addEventListener('click', (event) => {
+            event.preventDefault();
+            rotatePuyoCW();
+        }); 
+        if (btnRotateCCW) btnRotateCCW.addEventListener('click', (event) => {
+            event.preventDefault();
+            rotatePuyoCCW();
+        }); 
+        if (btnHardDrop) btnHardDrop.addEventListener('click', (event) => {
+            event.preventDefault();
+            hardDrop();
+        });
         
         setupEditModeListeners(); 
         document.initializedKeyHandler = true;
@@ -255,10 +271,6 @@ window.toggleMode = function() {
 
 /**
  * 現在の盤面とネクストリストをコード化してBase64文字列として返す。
- * * 盤面: 6列 * 14行 = 84個のぷよ (0~5 = 3ビットで表現)
- * ネクスト: 50組 * 2色 = 100個のぷよ (0~5 = 3ビットで表現)
- * 合計: 84 + 100 = 184個のぷよデータ。 184 * 3ビット = 552ビット。
- * 552 / 8 = 69バイト。 Base64で約92文字。
  */
 window.copyStageCode = function() {
     if (gameState !== 'editing') {
@@ -781,14 +793,17 @@ function getGhostFinalPositions() {
     return ghostPositions.filter(p => p.y < HEIGHT - 2); 
 }
 
-
+// --- 修正箇所: 衝突判定の厳密化 ---
 function checkCollision(coords) {
     for (const puyo of coords) {
-        // 盤面の左右または下にはみ出したら衝突
+        // 1. 盤面の左右または下にはみ出したら衝突
         if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0) return true;
 
-        // 既にぷよがあるセルと衝突
-        if (puyo.y < HEIGHT && puyo.y >= 0 && board[puyo.y][puyo.x] !== COLORS.EMPTY) {
+        // 2. 盤面の上限 (Y=HEIGHT=14) を超えたら衝突
+        if (puyo.y >= HEIGHT) return true;
+
+        // 3. 既にぷよがあるセルと衝突
+        if (board[puyo.y][puyo.x] !== COLORS.EMPTY) {
             return true;
         }
     }
@@ -823,7 +838,7 @@ function movePuyo(dx, dy, newRotation, shouldRender = true) {
 }
 
 function rotatePuyoCW() {
-    if (gameState !== 'playing') return false;
+    if (gameState !== 'playing' || !currentPuyo) return false;
     const newRotation = (currentPuyo.rotation + 1) % 4;
     
     // 回転後の座標で衝突する場合、ズラして回転を試みる（壁際回転）
@@ -834,7 +849,7 @@ function rotatePuyoCW() {
 }
 
 function rotatePuyoCCW() {
-    if (gameState !== 'playing') return false;
+    if (gameState !== 'playing' || !currentPuyo) return false;
     const newRotation = (currentPuyo.rotation - 1 + 4) % 4;
 
     // 回転後の座標で衝突する場合、ズラして回転を試みる
@@ -844,13 +859,19 @@ function rotatePuyoCCW() {
     return false;
 }
 
+// --- 修正箇所: hardDrop 関数のロジック強化 ---
 function hardDrop() {
     if (gameState !== 'playing' || !currentPuyo) return;
 
     clearInterval(dropTimer); 
 
-    // 衝突するまで下に移動
-    while (movePuyo(0, -1, undefined, false)); 
+    // 衝突するまで下に移動 (レンダリングは最後に一度だけ)
+    let movedCount = 0;
+    while (movePuyo(0, -1, undefined, false)) { 
+        movedCount++;
+        // 無限ループ防止のため、一応の制限を設ける (HEIGHT=14)
+        if (movedCount > HEIGHT) break; 
+    } 
 
     renderBoard(); 
     
@@ -867,12 +888,12 @@ function lockPuyo() {
     // 1. 盤面にぷよを固定し、14段目 (Y=13) のぷよをチェック
     for (const puyo of coords) {
         
-        // ★ 修正 1: 新しいゲームオーバー判定 (X=2, Y=12)
+        // ★ 新しいゲームオーバー判定: X=2, Y=12 に固定されたらゲームオーバー
         if (puyo.x === 2 && puyo.y === 12) { 
             isGameOver = true;
         }
 
-        // ★ 修正 2: 14段目 (Y=13, HEIGHT-1) のぷよは配置しない (実質削除)
+        // ★ 14段目 (Y=13, HEIGHT-1) のぷよは配置しない (実質削除)
         if (puyo.y >= HEIGHT - 1) { 
             console.log(`Puyo at (${puyo.x}, ${puyo.y}) was automatically deleted.`);
             continue; // 14段目のぷよは無視
