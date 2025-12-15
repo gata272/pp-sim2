@@ -40,7 +40,7 @@ let gameState = 'playing'; // 'playing', 'chaining', 'gameover', 'editing'
 let currentEditColor = COLORS.EMPTY; // エディットモードで選択中の色 (デフォルトは消しゴム: 0)
 let editingNextPuyos = []; // エディットモードで使用するNEXT 50組
 
-// ★追加: 履歴管理用スタック
+// ★履歴管理用スタック
 let historyStack = []; // 過去の状態を保存 (Undo用)
 let redoStack = [];    // 戻した状態を保存 (Redo用)
 
@@ -255,10 +255,6 @@ window.toggleMode = function() {
 
 /**
  * 現在の盤面とネクストリストをコード化してBase64文字列として返す。
- * * 盤面: 6列 * 14行 = 84個のぷよ (0~5 = 3ビットで表現)
- * ネクスト: 50組 * 2色 = 100個のぷよ (0~5 = 3ビットで表現)
- * 合計: 84 + 100 = 184個のぷよデータ。 184 * 3ビット = 552ビット。
- * 552 / 8 = 69バイト。 Base64で約92文字。
  */
 window.copyStageCode = function() {
     if (gameState !== 'editing') {
@@ -721,7 +717,6 @@ function getPuyoCoords() {
 
 /**
  * 組ぷよが固定された後、ちぎりが発生した際の個々のぷよの最終落下位置を予測する
- * (ゴーストぷよを描画するために再度有効化)
  */
 function getGhostFinalPositions() {
     if (!currentPuyo || gameState !== 'playing') return [];
@@ -886,7 +881,7 @@ function lockPuyo() {
         return;
     }
     
-    // 2. ★変更点: 14段目 (Y=13, HEIGHT-1) のぷよを即座に削除
+    // 2. 14段目 (Y=13, HEIGHT-1) のぷよを即座に削除
     for (let x = 0; x < WIDTH; x++) {
         if (board[HEIGHT - 1][x] !== COLORS.EMPTY) {
             board[HEIGHT - 1][x] = COLORS.EMPTY;
@@ -906,11 +901,19 @@ function lockPuyo() {
     runChain();
 }
 
+/**
+ * 盤面から連結したぷよのグループを見つける
+ * 修正済み: Y=12 (13段目) は連鎖判定の探索対象外とする
+ */
 function findConnectedPuyos() {
     let disappearingGroups = [];
+    // HEIGHT-2 (Y=12) まで探索対象に含めるため、HEIGHT (14) 行で初期化
     let visited = Array(HEIGHT).fill(0).map(() => Array(WIDTH).fill(false));
 
-    for (let y = 0; y < HEIGHT; y++) {
+    // 探索範囲を Y=0 から Y=11 (12段目) までに制限する
+    const MAX_SEARCH_Y = HEIGHT - 2; // = 12 (13段目) 
+
+    for (let y = 0; y < MAX_SEARCH_Y; y++) {
         for (let x = 0; x < WIDTH; x++) {
             const color = board[y][x];
             
@@ -929,10 +932,12 @@ function findConnectedPuyos() {
                 [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dx, dy]) => {
                     const nx = current.x + dx;
                     const ny = current.y + dy;
-
+                    
+                    // 連結チェックの条件: ny < MAX_SEARCH_Y (Y=12 未満) を追加
                     if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT &&
-                        !visited[ny][nx] && board[ny][nx] === color) {
-                        
+                        !visited[ny][nx] && board[ny][nx] === color && 
+                        ny < MAX_SEARCH_Y) 
+                    {
                         visited[ny][nx] = true;
                         stack.push({ x: nx, y: ny });
                     }
@@ -1087,7 +1092,6 @@ function gravity() {
 function renderBoard() {
     const isPlaying = gameState === 'playing';
     const currentPuyoCoords = isPlaying ? getPuyoCoords() : [];
-    // ゴーストぷよの描画を復活
     const ghostPuyoCoords = isPlaying && currentPuyo ? getGhostFinalPositions() : []; 
 
     for (let y = HEIGHT - 1; y >= 0; y--) { 
@@ -1100,7 +1104,7 @@ function renderBoard() {
             let cellColor = board[y][x]; 
             let puyoClasses = `puyo puyo-${cellColor}`;
             
-            // 優先順位: 1. 操作中ぷよ (通常のぷよとは異なる見た目の可能性)
+            // 優先順位: 1. 操作中ぷよ
             const puyoInFlight = currentPuyoCoords.find(p => p.x === x && p.y === y);
             if (puyoInFlight) {
                 cellColor = puyoInFlight.color; 
