@@ -143,6 +143,11 @@ function initializeGame() {
 
     // 最初のぷよを生成
     generateNewPuyo(); 
+    
+    // ★ 修正 1: 最初のぷよ生成後、必ず1マス落下させる (Y=12 -> Y=11 へ)
+    //           これにより、操作ぷよが最初から接地してしまい、ドロップや回転ができなくなることを防ぐ
+    movePuyo(0, -1, undefined, false); 
+    
     startPuyoDropLoop(); 
     
     updateUI();
@@ -171,7 +176,7 @@ function initializeGame() {
         const btnRotateCCW = document.getElementById('btn-rotate-ccw'); 
         const btnHardDrop = document.getElementById('btn-hard-drop');
 
-        // ★ 修正済み: イベントオブジェクトを受け取り、preventDefault() を呼び出す
+        // イベントオブジェクトを受け取り、preventDefault() を呼び出す
         if (btnLeft) btnLeft.addEventListener('click', (event) => {
             event.preventDefault(); 
             movePuyo(-1, 0);
@@ -257,6 +262,7 @@ window.toggleMode = function() {
         
         currentPuyo = null; 
         generateNewPuyo(); 
+        movePuyo(0, -1, undefined, false); // ★ プレイモード復帰時も1マス落下
         startPuyoDropLoop(); 
         
         // エディットモード後の最初の状態を履歴に保存
@@ -793,7 +799,7 @@ function getGhostFinalPositions() {
     return ghostPositions.filter(p => p.y < HEIGHT - 2); 
 }
 
-// --- 修正箇所: 衝突判定の厳密化 ---
+// --- 衝突判定の厳密化（前回の修正） ---
 function checkCollision(coords) {
     for (const puyo of coords) {
         // 1. 盤面の左右または下にはみ出したら衝突
@@ -859,13 +865,12 @@ function rotatePuyoCCW() {
     return false;
 }
 
-// --- 修正箇所: hardDrop 関数のロジック強化 ---
+// --- hardDrop 関数のロジック強化 ---
 function hardDrop() {
     if (gameState !== 'playing' || !currentPuyo) return;
 
     clearInterval(dropTimer); 
 
-    // 衝突するまで下に移動 (レンダリングは最後に一度だけ)
     let movedCount = 0;
     while (movePuyo(0, -1, undefined, false)) { 
         movedCount++;
@@ -875,6 +880,7 @@ function hardDrop() {
 
     renderBoard(); 
     
+    // hardDropは移動の有無に関わらず、必ずロック処理を行う
     lockPuyo(); 
 }
 
@@ -1018,6 +1024,7 @@ async function runChain() {
         // 連鎖終了。次のぷよへ
         gameState = 'playing';
         generateNewPuyo(); 
+        movePuyo(0, -1, undefined, false); // ★ 新しいぷよ生成後、必ず1マス落下
         startPuyoDropLoop(); 
         checkMobileControlsVisibility(); 
         renderBoard();
@@ -1124,7 +1131,7 @@ function renderBoard() {
             let puyoClasses = `puyo puyo-${cellColor}`;
             
             // 優先順位: 1. 操作中ぷよ
-            const puyoInFlight = currentPuyoCoords.find(p => p.x === x && p.y === y);
+            const puyoInFlight = currentPuyoCoords.find(p => p.x === x && puyo.y === y);
             if (puyoInFlight) {
                 cellColor = puyoInFlight.color; 
                 puyoClasses = `puyo puyo-${cellColor}`; 
