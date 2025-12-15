@@ -667,7 +667,12 @@ function generateNewPuyo() {
     
     // 初期配置で衝突チェック（ゲームオーバー判定）
     const startingCoords = getCoordsFromState(currentPuyo);
-    if (checkCollision(startingCoords)) {
+    
+    // 【修正箇所1: ぷよ生成時の即時ゲームオーバー判定】
+    // 3列目 (X=2) の 13段目 (Y=12) に、メインまたはサブのどちらかが配置されているかチェック
+    const isOverlappingTarget = startingCoords.some(p => p.x === 2 && p.y === 12 && board[p.y][p.x] !== COLORS.EMPTY);
+
+    if (checkCollision(startingCoords) || isOverlappingTarget) {
         gameState = 'gameover';
         alert('ゲームオーバーです！');
         clearInterval(dropTimer); 
@@ -861,10 +866,12 @@ function lockPuyo() {
 
     // 1. 盤面にぷよを固定
     for (const puyo of coords) {
-        // 14列目 (Y=13, HEIGHT-1) に固定されたらゲームオーバー
-        if (puyo.y >= HEIGHT - 1) { 
-            isGameOver = true;
-        }
+        // 【修正箇所2: ぷよ固定時のゲームオーバー判定】
+        // 3列目 (X=2) の 13段目 (Y=12) に、ぷよが固定された場合をチェック
+        if (puyo.y === HEIGHT - 2 && puyo.x === 2) { // Y=12 かつ X=2
+             isGameOver = true;
+        } 
+        
         if (puyo.y >= 0) {
             board[puyo.y][puyo.x] = puyo.color;
         }
