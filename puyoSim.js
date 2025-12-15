@@ -668,7 +668,6 @@ function generateNewPuyo() {
     // 初期配置で衝突チェック（ゲームオーバー判定）
     const startingCoords = getCoordsFromState(currentPuyo);
     
-    // 【修正箇所1: ぷよ生成時の即時ゲームオーバー判定】
     // 3列目 (X=2) の 13段目 (Y=12) に、メインまたはサブのどちらかが配置されているかチェック
     const isOverlappingTarget = startingCoords.some(p => p.x === 2 && p.y === 12 && board[p.y][p.x] !== COLORS.EMPTY);
 
@@ -722,6 +721,8 @@ function getPuyoCoords() {
 
 /**
  * 組ぷよが固定された後、ちぎりが発生した際の個々のぷよの最終落下位置を予測する
+ * * ★ご要望により、この関数は描画には使用されなくなりましたが、
+ * もし将来ゴーストぷよを復活させる場合のために残しておきます。
  */
 function getGhostFinalPositions() {
     if (!currentPuyo || gameState !== 'playing') return [];
@@ -866,8 +867,8 @@ function lockPuyo() {
 
     // 1. 盤面にぷよを固定
     for (const puyo of coords) {
-        // 【修正箇所2: ぷよ固定時のゲームオーバー判定】
-        // 3列目 (X=2) の 13段目 (Y=12) に、ぷよが固定された場合をチェック
+        
+        // ★ご要望1: ゲームオーバー判定 (X=2, Y=12 のみ)
         if (puyo.y === HEIGHT - 2 && puyo.x === 2) { // Y=12 かつ X=2
              isGameOver = true;
         } 
@@ -886,13 +887,20 @@ function lockPuyo() {
         return;
     }
     
-    // 2. ぷよ固定完了
+    // 2. ★ご要望1: 14段目 (Y=13, HEIGHT-1) のぷよを即座に削除
+    for (let x = 0; x < WIDTH; x++) {
+        if (board[HEIGHT - 1][x] !== COLORS.EMPTY) {
+            board[HEIGHT - 1][x] = COLORS.EMPTY;
+        }
+    }
+
+    // 3. ぷよ固定完了
     currentPuyo = null;
     
-    // 3. 履歴の保存（新しい手としてRedoスタックをクリア）
+    // 4. 履歴の保存（新しい手としてRedoスタックをクリア）
     saveState(true); 
     
-    // 4. 連鎖開始
+    // 5. 連鎖開始
     gameState = 'chaining';
     chainCount = 0;
     
@@ -1080,8 +1088,8 @@ function gravity() {
 function renderBoard() {
     const isPlaying = gameState === 'playing';
     const currentPuyoCoords = isPlaying ? getPuyoCoords() : [];
-    // 操作中のぷよがない場合、ゴーストぷよは計算しない
-    const ghostPuyoCoords = isPlaying && currentPuyo ? getGhostFinalPositions() : []; 
+    
+    // ★ご要望2: ゴーストぷよの計算と描画をスキップするため、ghostPuyoCoordsは使わない
 
     for (let y = HEIGHT - 1; y >= 0; y--) { 
         for (let x = 0; x < WIDTH; x++) {
@@ -1093,20 +1101,15 @@ function renderBoard() {
             let cellColor = board[y][x]; 
             let puyoClasses = `puyo puyo-${cellColor}`;
             
-            // 優先順位: 1. 操作中ぷよ
+            // 優先順位: 1. 操作中ぷよ (★ご要望2: 通常のぷよと同じクラスで描画)
             const puyoInFlight = currentPuyoCoords.find(p => p.x === x && p.y === y);
             if (puyoInFlight) {
                 cellColor = puyoInFlight.color; 
-                puyoClasses = `puyo puyo-${cellColor}`; 
+                puyoClasses = `puyo puyo-${cellColor}`; // puyo-ghost クラスは付与しない
             } 
-            // 2. ゴーストぷよ (操作中ぷよがなければ)
-            else {
-                const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
-                if (puyoGhost) {
-                    cellColor = puyoGhost.color; 
-                    puyoClasses = `puyo puyo-${cellColor} puyo-ghost`;
-                }
-            }
+            
+            // 2. 設置済みぷよ
+            // (puyoInFlight で上書きされなかった場合は board[y][x] の色がそのまま使われる)
             
             puyoElement.className = puyoClasses;
             puyoElement.setAttribute('data-color', cellColor);
