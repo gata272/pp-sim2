@@ -998,6 +998,13 @@ async function runChain() {
 
     if (groups.length === 0) {
         // 連鎖終了。次のぷよへ
+        
+        // ★追加: 全消し（盤面クリア）チェック
+        if (checkBoardEmpty()) {
+            score += 3600; // 全消しボーナス 3600点
+            updateUI(); 
+        }
+
         gameState = 'playing';
         generateNewPuyo(); 
         startPuyoDropLoop(); 
@@ -1086,6 +1093,23 @@ function gravity() {
     simulateGravity(board);
 }
 
+/**
+ * 盤面が完全に空であるかチェックする
+ * (ぷよが固定された後の連鎖終了時に使用)
+ * @returns {boolean}
+ */
+function checkBoardEmpty() {
+    // 盤面全体 (HEIGHT = 14) をチェックする
+    for (let y = 0; y < HEIGHT; y++) {
+        for (let x = 0; x < WIDTH; x++) {
+            if (board[y][x] !== COLORS.EMPTY) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 
 // --- 描画とUI更新 ---
 
@@ -1104,13 +1128,13 @@ function renderBoard() {
             let cellColor = board[y][x]; 
             let puyoClasses = `puyo puyo-${cellColor}`;
             
-            // 優先順位: 1. 操作中ぷよ
+            // 優先順位: 1. 操作中ぷよ (明るい色を維持)
             const puyoInFlight = currentPuyoCoords.find(p => p.x === x && p.y === y);
             if (puyoInFlight) {
                 cellColor = puyoInFlight.color; 
                 puyoClasses = `puyo puyo-${cellColor}`; 
             } 
-            // 2. ゴーストぷよ
+            // 2. ゴーストぷよ (puyo-ghost クラスで半透明化を維持)
             else {
                 const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
                 if (puyoGhost) {
