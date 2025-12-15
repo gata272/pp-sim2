@@ -1104,18 +1104,18 @@ function renderBoard() {
             let cellColor = board[y][x]; 
             let puyoClasses = `puyo puyo-${cellColor}`;
             
-            // 優先順位: 1. 操作中ぷよ
-            const puyoInFlight = currentPuyoCoords.find(p => p.x === x && p.y === y);
+            // 優先順位: 1. 操作中ぷよ (明るい色で描画するため、特殊なクラスを付与しない)
+            const puyoInFlight = currentPuyoCoords.find(p => p.x === x && puyo.y === y);
             if (puyoInFlight) {
                 cellColor = puyoInFlight.color; 
-                puyoClasses = `puyo puyo-${cellColor}`; 
+                puyoClasses = `puyo puyo-${cellColor}`; // ★修正済: 明るい状態を維持
             } 
-            // 2. ゴーストぷよ
+            // 2. ゴーストぷよ (puyo-ghost クラスで半透明化を維持)
             else {
                 const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
                 if (puyoGhost) {
                     cellColor = puyoGhost.color; 
-                    puyoClasses = `puyo puyo-${cellColor} puyo-ghost`;
+                    puyoClasses = `puyo puyo-${cellColor} puyo-ghost`; // ゴーストぷよの仕様は維持
                 }
             }
             
