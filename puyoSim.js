@@ -721,8 +721,7 @@ function getPuyoCoords() {
 
 /**
  * 組ぷよが固定された後、ちぎりが発生した際の個々のぷよの最終落下位置を予測する
- * * ★ご要望により、この関数は描画には使用されなくなりましたが、
- * もし将来ゴーストぷよを復活させる場合のために残しておきます。
+ * (ゴーストぷよを描画するために再度有効化)
  */
 function getGhostFinalPositions() {
     if (!currentPuyo || gameState !== 'playing') return [];
@@ -868,7 +867,7 @@ function lockPuyo() {
     // 1. 盤面にぷよを固定
     for (const puyo of coords) {
         
-        // ★ご要望1: ゲームオーバー判定 (X=2, Y=12 のみ)
+        // ゲームオーバー判定 (X=2, Y=12 のみ)
         if (puyo.y === HEIGHT - 2 && puyo.x === 2) { // Y=12 かつ X=2
              isGameOver = true;
         } 
@@ -887,7 +886,7 @@ function lockPuyo() {
         return;
     }
     
-    // 2. ★ご要望1: 14段目 (Y=13, HEIGHT-1) のぷよを即座に削除
+    // 2. ★変更点: 14段目 (Y=13, HEIGHT-1) のぷよを即座に削除
     for (let x = 0; x < WIDTH; x++) {
         if (board[HEIGHT - 1][x] !== COLORS.EMPTY) {
             board[HEIGHT - 1][x] = COLORS.EMPTY;
@@ -1088,8 +1087,8 @@ function gravity() {
 function renderBoard() {
     const isPlaying = gameState === 'playing';
     const currentPuyoCoords = isPlaying ? getPuyoCoords() : [];
-    
-    // ★ご要望2: ゴーストぷよの計算と描画をスキップするため、ghostPuyoCoordsは使わない
+    // ゴーストぷよの描画を復活
+    const ghostPuyoCoords = isPlaying && currentPuyo ? getGhostFinalPositions() : []; 
 
     for (let y = HEIGHT - 1; y >= 0; y--) { 
         for (let x = 0; x < WIDTH; x++) {
@@ -1101,15 +1100,20 @@ function renderBoard() {
             let cellColor = board[y][x]; 
             let puyoClasses = `puyo puyo-${cellColor}`;
             
-            // 優先順位: 1. 操作中ぷよ (★ご要望2: 通常のぷよと同じクラスで描画)
+            // 優先順位: 1. 操作中ぷよ (通常のぷよとは異なる見た目の可能性)
             const puyoInFlight = currentPuyoCoords.find(p => p.x === x && p.y === y);
             if (puyoInFlight) {
                 cellColor = puyoInFlight.color; 
-                puyoClasses = `puyo puyo-${cellColor}`; // puyo-ghost クラスは付与しない
+                puyoClasses = `puyo puyo-${cellColor}`; 
             } 
-            
-            // 2. 設置済みぷよ
-            // (puyoInFlight で上書きされなかった場合は board[y][x] の色がそのまま使われる)
+            // 2. ゴーストぷよ
+            else {
+                const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
+                if (puyoGhost) {
+                    cellColor = puyoGhost.color; 
+                    puyoClasses = `puyo puyo-${cellColor} puyo-ghost`;
+                }
+            }
             
             puyoElement.className = puyoClasses;
             puyoElement.setAttribute('data-color', cellColor);
