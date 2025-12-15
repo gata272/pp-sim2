@@ -667,7 +667,11 @@ function generateNewPuyo() {
     
     // 初期配置で衝突チェック（ゲームオーバー判定）
     const startingCoords = getCoordsFromState(currentPuyo);
+    // 修正されたルールでは、Y=12, X=2 のセルに最初からぷよが配置されているかどうかはチェックしない（操作ぷよが固定されるときのみチェック）
+
+    // 初期配置位置にボードのぷよがあるかチェック
     if (checkCollision(startingCoords)) {
+        // Y=12, X=2 以外の衝突でも配置できない
         gameState = 'gameover';
         alert('ゲームオーバーです！');
         clearInterval(dropTimer); 
@@ -853,18 +857,27 @@ function hardDrop() {
     lockPuyo(); 
 }
 
+// --- lockPuyo 関数の修正 ---
 function lockPuyo() {
     if (gameState !== 'playing' || !currentPuyo) return;
 
     const coords = getPuyoCoords();
     let isGameOver = false;
 
-    // 1. 盤面にぷよを固定
+    // 1. 盤面にぷよを固定し、14段目 (Y=13) のぷよをチェック
     for (const puyo of coords) {
-        // 14列目 (Y=13, HEIGHT-1) に固定されたらゲームオーバー
-        if (puyo.y >= HEIGHT - 1) { 
+        
+        // ★ 修正 1: 新しいゲームオーバー判定 (X=2, Y=12)
+        if (puyo.x === 2 && puyo.y === 12) { 
             isGameOver = true;
         }
+
+        // ★ 修正 2: 14段目 (Y=13, HEIGHT-1) のぷよは配置しない (実質削除)
+        if (puyo.y >= HEIGHT - 1) { 
+            console.log(`Puyo at (${puyo.x}, ${puyo.y}) was automatically deleted.`);
+            continue; // 14段目のぷよは無視
+        }
+
         if (puyo.y >= 0) {
             board[puyo.y][puyo.x] = puyo.color;
         }
@@ -892,11 +905,13 @@ function lockPuyo() {
     runChain();
 }
 
+// --- findConnectedPuyos 関数の修正 ---
 function findConnectedPuyos() {
     let disappearingGroups = [];
     let visited = Array(HEIGHT).fill(0).map(() => Array(WIDTH).fill(false));
 
-    for (let y = 0; y < HEIGHT; y++) {
+    // ★ 修正 3: 連鎖判定の対象を Y=0 から Y=11 (HEIGHT - 2) までに限定する
+    for (let y = 0; y < HEIGHT - 2; y++) { 
         for (let x = 0; x < WIDTH; x++) {
             const color = board[y][x];
             
@@ -916,7 +931,8 @@ function findConnectedPuyos() {
                     const nx = current.x + dx;
                     const ny = current.y + dy;
 
-                    if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT &&
+                    // ★ 修正 3: 連結チェックも Y=12 (HEIGHT-2) 以上は対象外とする
+                    if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT - 2 && // Y=12以上を排除
                         !visited[ny][nx] && board[ny][nx] === color) {
                         
                         visited[ny][nx] = true;
@@ -1094,7 +1110,7 @@ function renderBoard() {
             } 
             // 2. ゴーストぷよ (操作中ぷよがなければ)
             else {
-                const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
+                const puyoGhost = ghostPuyoCoords.find(p => p.x === x && puyo.y === y);
                 if (puyoGhost) {
                     cellColor = puyoGhost.color; 
                     puyoClasses = `puyo puyo-${cellColor} puyo-ghost`;
