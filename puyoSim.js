@@ -853,9 +853,6 @@ function hardDrop() {
     lockPuyo(); 
 }
 
-/**
- * 敗北条件を「X=2, Y=12」に固定された時のみに変更
- */
 function lockPuyo() {
     if (gameState !== 'playing' || !currentPuyo) return;
 
@@ -864,14 +861,11 @@ function lockPuyo() {
 
     // 1. 盤面にぷよを固定
     for (const puyo of coords) {
-        
-        // ★ 修正後のゲームオーバー判定ロジック: X=2 (3列目), Y=12 (13段目) に固定されたらゲームオーバー
-        if (puyo.x === 2 && puyo.y === 12) { 
+        // 14列目 (Y=13, HEIGHT-1) に固定されたらゲームオーバー
+        if (puyo.y >= HEIGHT - 1) { 
             isGameOver = true;
         }
-
-        // Y=0 から Y=13 (HEIGHT-1) の範囲でボードに配置
-        if (puyo.y >= 0 && puyo.y < HEIGHT) {
+        if (puyo.y >= 0) {
             board[puyo.y][puyo.x] = puyo.color;
         }
     }
@@ -1093,14 +1087,14 @@ function renderBoard() {
             let puyoClasses = `puyo puyo-${cellColor}`;
             
             // 優先順位: 1. 操作中ぷよ
-            const puyoInFlight = currentPuyoCoords.find(p => p.x === x && puyo.y === y);
+            const puyoInFlight = currentPuyoCoords.find(p => p.x === x && p.y === y);
             if (puyoInFlight) {
                 cellColor = puyoInFlight.color; 
                 puyoClasses = `puyo puyo-${cellColor}`; 
             } 
             // 2. ゴーストぷよ (操作中ぷよがなければ)
             else {
-                const puyoGhost = ghostPuyoCoords.find(p => p.x === x && puyo.y === y);
+                const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
                 if (puyoGhost) {
                     cellColor = puyoGhost.color; 
                     puyoClasses = `puyo puyo-${cellColor} puyo-ghost`;
