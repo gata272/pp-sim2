@@ -153,14 +153,13 @@ function initializeGame() {
         
         // Undo/Redoのキーバインド
         document.addEventListener('keydown', (event) => {
-            if (gameState === 'playing') {
-                if ((event.key === 'z' || event.key === 'Z') && !event.shiftKey) {
-                    event.preventDefault(); // ブラウザの戻るを防止
-                    undoMove();
-                } else if (event.key === 'y' || event.key === 'Y' || (event.key === 'z' || event.key === 'Z') && event.shiftKey) {
-                    event.preventDefault(); // ブラウザの戻る/再読み込みを防止
-                    redoMove();
-                }
+            // ゲームオーバー時もUndo/Redoが効くように、gameStateチェックは関数内で行う
+            if ((event.key === 'z' || event.key === 'Z') && !event.shiftKey) {
+                event.preventDefault(); // ブラウザの戻るを防止
+                undoMove();
+            } else if (event.key === 'y' || event.key === 'Y' || (event.key === 'z' || event.key === 'Z') && event.shiftKey) {
+                event.preventDefault(); // ブラウザの戻る/再読み込みを防止
+                redoMove();
             }
         });
 
@@ -462,7 +461,8 @@ function restoreState(state) {
  * 一手戻す (Undo)
  */
 window.undoMove = function() {
-    if (gameState !== 'playing' && gameState !== 'chaining') return; 
+    // 修正: 'gameover' 状態でもUndoを許可する
+    if (gameState !== 'playing' && gameState !== 'chaining' && gameState !== 'gameover') return; 
     if (historyStack.length <= 1) return; 
 
     // 1. 現在の状態をRedoスタックにプッシュ
@@ -480,7 +480,8 @@ window.undoMove = function() {
  * 一手やり直す (Redo)
  */
 window.redoMove = function() {
-    if (gameState !== 'playing' && gameState !== 'chaining') return; 
+    // 修正: 'gameover' 状態でもRedoを許可する
+    if (gameState !== 'playing' && gameState !== 'chaining' && gameState !== 'gameover') return; 
     if (redoStack.length === 0) return;
 
     // 1. Redoスタックから状態を取り出し
