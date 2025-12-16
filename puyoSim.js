@@ -151,9 +151,8 @@ function initializeGame() {
     if (!document.initializedKeyHandler) {
         document.addEventListener('keydown', handleInput);
         
-        // Undo/Redoのキーバインド
+        // Undo/Redoのキーバインド (ゲームオーバー時も有効)
         document.addEventListener('keydown', (event) => {
-            // ゲームオーバー時もUndo/Redoが効くように、gameStateチェックは関数内で行う
             if ((event.key === 'z' || event.key === 'Z') && !event.shiftKey) {
                 event.preventDefault(); // ブラウザの戻るを防止
                 undoMove();
@@ -461,7 +460,7 @@ function restoreState(state) {
  * 一手戻す (Undo)
  */
 window.undoMove = function() {
-    // 修正: 'gameover' 状態でもUndoを許可する
+    // 'gameover' 状態でもUndoを許可する
     if (gameState !== 'playing' && gameState !== 'chaining' && gameState !== 'gameover') return; 
     if (historyStack.length <= 1) return; 
 
@@ -480,7 +479,7 @@ window.undoMove = function() {
  * 一手やり直す (Redo)
  */
 window.redoMove = function() {
-    // 修正: 'gameover' 状態でもRedoを許可する
+    // 'gameover' 状態でもRedoを許可する
     if (gameState !== 'playing' && gameState !== 'chaining' && gameState !== 'gameover') return; 
     if (redoStack.length === 0) return;
 
@@ -658,15 +657,16 @@ function generateNewPuyo() {
         mainColor: c1,
         subColor: c2,
         mainX: 2, 
-        mainY: HEIGHT - 2, // 14 - 2 = 12 
+        mainY: HEIGHT - 2, // ★修正: Y=12 に戻す (隠し領域の最下段)
         rotation: 0 // 縦に並ぶ初期回転
     };
     
     // 初期配置で衝突チェック（ゲームオーバー判定）
     const startingCoords = getCoordsFromState(currentPuyo);
     
-    // 3列目 (X=2) の 13段目 (Y=12) に、メインまたはサブのどちらかが配置されているかチェック
-    const isOverlappingTarget = startingCoords.some(p => p.x === 2 && p.y === 12 && board[p.y][p.x] !== COLORS.EMPTY);
+    // 3列目 (X=2) の 12段目 (Y=11) に、メインまたはサブのどちらかが配置されているかチェック
+    // ★チェックY座標は Y=11 (HEIGHT - 3) のまま維持
+    const isOverlappingTarget = startingCoords.some(p => p.x === 2 && p.y === (HEIGHT - 3) && board[p.y][p.x] !== COLORS.EMPTY);
 
     if (checkCollision(startingCoords) || isOverlappingTarget) {
         gameState = 'gameover';
@@ -899,7 +899,8 @@ function findConnectedPuyos() {
     let visited = Array(HEIGHT).fill(0).map(() => Array(WIDTH).fill(false));
 
     // 探索範囲を Y=0 から Y=11 (12段目) までに制限する
-    const MAX_SEARCH_Y = HEIGHT - 2; // = 12 (13段目) 
+    // MAX_SEARCH_Y = HEIGHT - 2 = 12 (Y=12は連鎖判定対象外)
+    const MAX_SEARCH_Y = HEIGHT - 2; 
 
     for (let y = 0; y < MAX_SEARCH_Y; y++) {
         for (let x = 0; x < WIDTH; x++) {
@@ -994,14 +995,14 @@ async function runChain() {
         }
         
         // ----------------------------------------------------
-        // ★ 修正箇所: 連鎖終了後のゲームオーバー判定 (X=2, Y=12 のみ)
+        // ★ ゲームオーバー判定 (X=2, Y=11 のみ)
         // ----------------------------------------------------
         
-        // 判定基準: X=2, Y=12 のセルにぷよが残っているかのみをチェックする
-        const gameOverLineY = HEIGHT - 2; // Y=12
+        // 判定基準: X=2, Y=11 (HEIGHT - 3) のセルにぷよが残っているかのみをチェックする
+        const gameOverLineY = HEIGHT - 3; // Y=11
         const checkX = 2; // X=2 (3列目)
         
-        // Y=12 のマスにぷよが残っていればゲームオーバー
+        // Y=11 のマスにぷよが残っていればゲームオーバー
         const isGameOver = board[gameOverLineY][checkX] !== COLORS.EMPTY;
         
         if (isGameOver) {
