@@ -8,8 +8,10 @@
     <meta name="apple-mobile-web-app-title" content="Puyo Sim Test">
     <meta name="application-name" content="Puyo Sim Test">
     
+    <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png.png">
     <link rel="icon" type="image/png" sizes="192x192" href="android-icon-192x192.png.png">
+    <meta name="theme-color" content="#5e81ac">
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
@@ -117,6 +119,19 @@
     </div>
 
     <script src="puyoSim.js"></script>
+    
+    <script>
+        // サービスワーカーの登録
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('sw.js').then(function(registration) {
+                    console.log('Service Worker registered successfully:', registration);
+                }).catch(function(error) {
+                    console.log('Service Worker registration failed:', error);
+                });
+            });
+        }
+    </script>
 
 </body>
 </html>
