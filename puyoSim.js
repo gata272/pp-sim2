@@ -993,22 +993,17 @@ async function runChain() {
         }
         
         // ----------------------------------------------------
-        // ★ 修正・追加: 連鎖終了後のゲームオーバー判定
+        // ★ 修正箇所: 連鎖終了後のゲームオーバー判定 (X=2, Y=12 のみ)
         // ----------------------------------------------------
         
-        // 盤面で最も高い位置にあるぷよのY座標をチェック
-        let highestPuyoY = -1;
-        for (let x = 0; x < WIDTH; x++) {
-            for (let y = HEIGHT - 1; y >= 0; y--) {
-                if (board[y][x] !== COLORS.EMPTY) {
-                    highestPuyoY = Math.max(highestPuyoY, y);
-                    break;
-                }
-            }
-        }
+        // 判定基準: X=2, Y=12 のセルにぷよが残っているかのみをチェックする
+        const gameOverLineY = HEIGHT - 2; // Y=12
+        const checkX = 2; // X=2 (3列目)
         
-        // 判定基準: Y=12 (13段目, HEIGHT - 2) にぷよが残っている場合、ゲームオーバー
-        if (highestPuyoY >= HEIGHT - 2) {
+        // Y=12 のマスにぷよが残っていればゲームオーバー
+        const isGameOver = board[gameOverLineY][checkX] !== COLORS.EMPTY;
+        
+        if (isGameOver) {
             gameState = 'gameover';
             alert('ゲームオーバーです！');
             clearInterval(dropTimer); 
@@ -1018,7 +1013,7 @@ async function runChain() {
         }
         
         // ----------------------------------------------------
-        // ★ 修正・追加ここまで
+        // ★ 修正箇所ここまで
         // ----------------------------------------------------
 
         // ゲームオーバーでなければ、次のぷよを生成し、プレイを再開
