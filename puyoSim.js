@@ -853,34 +853,21 @@ function hardDrop() {
     lockPuyo(); 
 }
 
+/**
+ * ぷよを盤面に固定し、連鎖処理を開始する
+ */
 function lockPuyo() {
     if (gameState !== 'playing' || !currentPuyo) return;
 
     const coords = getPuyoCoords();
-    let isGameOver = false;
 
     // 1. 盤面にぷよを固定
     for (const puyo of coords) {
-        
-        // ゲームオーバー判定 (X=2, Y=12 のみ)
-        if (puyo.y === HEIGHT - 2 && puyo.x === 2) { // Y=12 かつ X=2
-             isGameOver = true;
-        } 
-        
         if (puyo.y >= 0) {
             board[puyo.y][puyo.x] = puyo.color;
         }
     }
 
-    if (isGameOver) {
-        gameState = 'gameover';
-        alert('ゲームオーバーです！');
-        clearInterval(dropTimer); 
-        updateUI();
-        renderBoard();
-        return;
-    }
-    
     // 2. 14段目 (Y=13, HEIGHT-1) のぷよを即座に削除
     for (let x = 0; x < WIDTH; x++) {
         if (board[HEIGHT - 1][x] !== COLORS.EMPTY) {
@@ -894,7 +881,7 @@ function lockPuyo() {
     // 4. 履歴の保存（新しい手としてRedoスタックをクリア）
     saveState(true); 
     
-    // 5. 連鎖開始
+    // 5. 連鎖開始 (ゲームオーバー判定より優先)
     gameState = 'chaining';
     chainCount = 0;
     
@@ -1004,7 +991,37 @@ async function runChain() {
             score += 3600; // 全消しボーナス 3600点
             updateUI(); 
         }
+        
+        // ----------------------------------------------------
+        // ★ 修正・追加: 連鎖終了後のゲームオーバー判定
+        // ----------------------------------------------------
+        
+        // 盤面で最も高い位置にあるぷよのY座標をチェック
+        let highestPuyoY = -1;
+        for (let x = 0; x < WIDTH; x++) {
+            for (let y = HEIGHT - 1; y >= 0; y--) {
+                if (board[y][x] !== COLORS.EMPTY) {
+                    highestPuyoY = Math.max(highestPuyoY, y);
+                    break;
+                }
+            }
+        }
+        
+        // 判定基準: Y=12 (13段目, HEIGHT - 2) にぷよが残っている場合、ゲームオーバー
+        if (highestPuyoY >= HEIGHT - 2) {
+            gameState = 'gameover';
+            alert('ゲームオーバーです！');
+            clearInterval(dropTimer); 
+            updateUI();
+            renderBoard();
+            return;
+        }
+        
+        // ----------------------------------------------------
+        // ★ 修正・追加ここまで
+        // ----------------------------------------------------
 
+        // ゲームオーバーでなければ、次のぷよを生成し、プレイを再開
         gameState = 'playing';
         generateNewPuyo(); 
         startPuyoDropLoop(); 
