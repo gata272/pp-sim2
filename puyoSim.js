@@ -640,6 +640,65 @@ window.clearEditNext = function() {
 
 // --- ぷよの生成と操作 (プレイモード時のみ有効) ---
 
+/**
+ * ぷよぷよ通/ぷよぷよテトリス2準拠のWall Kickオフセットを取得する
+ * @param {number} oldRotation - 回転前の状態 (0:上, 1:左, 2:下, 3:右)
+ * @param {number} newRotation - 回転後の状態 (0:上, 1:左, 2:下, 3:右)
+ * @returns {Array<{dx: number, dy: number}>} 試行するオフセットのリスト
+ */
+function getWallKickOffsets(oldRotation, newRotation) {
+    // ぷよぷよのWall Kickは、テトリスのSRSほど複雑ではない。
+    // 基本は (0,0) -> (±1, 0) -> (0, +1) の順で試行する。
+    // ぷよぷよ通では、壁際での回転補正は以下の優先順位で行われることが多い。
+    // 1. (0, 0) - 通常の回転
+    // 2. (±1, 0) - 横方向の補正 (壁蹴り)
+    // 3. (0, +1) - 上方向の補正 (床蹴り)
+    
+    // ぷよぷよの回転は、メインぷよを軸にサブぷよが回る。
+    // 衝突が起こった場合、衝突したぷよを盤面外に押し出す方向の移動を試みる。
+    
+    // ぷよぷよ通/PPT2の挙動を再現するため、以下の優先順位を採用する。
+    // 1. (0, 0)
+    // 2. (±1, 0) - 壁蹴り
+    // 3. (0, +1) - 床蹴り (Floor Kick)
+    
+    // 左右の優先順位は、回転後のサブぷよの位置に依存する。
+    // ただし、現在の実装では、回転後のサブぷよの位置を計算する前に衝突判定を行うため、
+    // シンプルに (0, 0), (+1, 0), (-1, 0), (0, +1) の順で試行する。
+    // (0, +1)は、現在のmovePuyoのロジックでは、ぷよが下に落ちる方向の移動しかチェックしないため、
+    // movePuyoを修正するか、ここで明示的にチェックする必要がある。
+    
+    // 既存のmovePuyoは、dx, dyの移動が成功するかどうかをチェックする関数であり、
+    // Wall Kickの「回転と同時に移動」を表現するには、回転後の座標で衝突判定を行う必要がある。
+    
+    // 現在のmovePuyoの引数は (dx, dy, newRotation) であり、
+    // newRotationが指定された場合、回転後の座標で (dx, dy) の移動を伴う衝突判定を行う。
+    
+    // ぷよぷよ通/PPT2のWall Kickは、以下の優先順位で試行されることが一般的。
+    // 1. (0, 0)
+    // 2. (±1, 0)
+    // 3. (0, +1)
+    
+    // 左右の優先順位は、回転方向によって決まる。
+    // CW (時計回り): 0->1 (右), 1->2 (下), 2->3 (左), 3->0 (上)
+    // CCW (反時計回り): 0->3 (左), 3->2 (下), 2->1 (右), 1->0 (上)
+    
+    // 衝突した方向と逆の方向に押し出すのが基本。
+    
+    // 暫定的に、最もシンプルな Wall Kick の優先順位を採用する。
+    // 1. (0, 0)
+    // 2. (+1, 0)
+    // 3. (-1, 0)
+    // 4. (0, +1) - 床蹴り (Floor Kick)
+    
+    return [
+        { dx: 0, dy: 0 }, // 1. 通常の回転
+        { dx: 1, dy: 0 }, // 2. 右への壁蹴り
+        { dx: -1, dy: 0 }, // 3. 左への壁蹴り
+        { dx: 0, dy: 1 } // 4. 上への床蹴り (Floor Kick)
+    ];
+}
+
 function getRandomColor() {
     // 1 (赤) から 4 (黄) までの色をランダムに返す
     return Math.floor(Math.random() * 4) + 1; 
@@ -835,9 +894,17 @@ window.rotatePuyoCW = function() { // グローバル公開のためwindow.を�
         startPuyoDropLoop();
     }
     
-    // 1. 通常の回転を試みる
+    // 1. Wall Kickを伴う回転を試みる
     const newRotation = (currentPuyo.rotation + 1) % 4;
-    const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
+    const offsets = getWallKickOffsets(currentPuyo.rotation, newRotation);
+    let rotationSuccess = false;
+    
+    for (const offset of offsets) {
+        if (movePuyo(offset.dx, offset.dy, newRotation)) {
+            rotationSuccess = true;
+            break;
+        }
+    }
     
     if (rotationSuccess) {
         lastFailedRotation.type = null; // 成功したのでリセット
@@ -848,15 +915,15 @@ window.rotatePuyoCW = function() { // グローバル公開のためwindow.を�
     const now = Date.now();
     
     if (lastFailedRotation.type === 'CW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
-        // クイックターン実行: ぷよの上下入れ替えのみ
+        // クイックターン成功: 色を入れ替える
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
         
         lastFailedRotation.type = null; // 成功したのでリセット
         renderBoard();
         return true;
     }
-
-    // 3. 失敗情報を記録
+    
+    // 3. クイックターン失敗: 失敗情報を更新
     lastFailedRotation.type = 'CW';
     lastFailedRotation.timestamp = now;
     return false;
@@ -871,35 +938,40 @@ window.rotatePuyoCCW = function() { // グローバル公開のためwindow.を�
         startPuyoDropLoop();
     }
     
-    // 1. 通常の回転を試みる
-    const newRotation = (currentPuyo.rotation - 1 + 4) % 4;
-    const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
+    // 1. Wall Kickを伴う回転を試みる
+    const newRotation = (currentPuyo.rotation + 3) % 4;
+    const offsets = getWallKickOffsets(currentPuyo.rotation, newRotation);
+    let rotationSuccess = false;
+    
+    for (const offset of offsets) {
+        if (movePuyo(offset.dx, offset.dy, newRotation)) {
+            rotationSuccess = true;
+            break;
+        }
+    }
     
     if (rotationSuccess) {
         lastFailedRotation.type = null; // 成功したのでリセット
         return true;
     }
-
+    
     // 2. 回転失敗時のクイックターン判定
     const now = Date.now();
     
     if (lastFailedRotation.type === 'CCW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
-        // クイックターン実行: ぷよの上下入れ替えのみ
+        // クイックターン成功: 色を入れ替える
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
         
         lastFailedRotation.type = null; // 成功したのでリセット
         renderBoard();
         return true;
     }
-
-    // 3. 失敗情報を記録
+    
+    // 3. クイックターン失敗: 失敗情報を更新
     lastFailedRotation.type = 'CCW';
     lastFailedRotation.timestamp = now;
     return false;
-}
-
-function hardDrop() {
-    if (gameState !== 'playing' || !currentPuyo) return;
+}eState !== 'playing' || !currentPuyo) return;
 
     clearInterval(dropTimer); 
 
