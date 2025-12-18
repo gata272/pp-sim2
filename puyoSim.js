@@ -50,6 +50,13 @@ let dropInterval = 1000; // 1秒ごとに落下
 let dropTimer = null; 
 let autoDropEnabled = false; 
 
+// --- クイックターン用変数 ---
+let lastFailedRotation = {
+    type: null, // 'CW' or 'CCW'
+    timestamp: 0
+};
+const QUICK_TURN_WINDOW = 300; // 0.3 seconds in milliseconds
+
 
 // --- 初期化関数 ---
 
@@ -171,8 +178,8 @@ function initializeGame() {
 
         if (btnLeft) btnLeft.addEventListener('click', () => movePuyo(-1, 0));
         if (btnRight) btnRight.addEventListener('click', () => movePuyo(1, 0));
-        if (btnRotateCW) btnRotateCW.addEventListener('click', rotatePuyoCW); 
-        if (btnRotateCCW) btnRotateCCW.addEventListener('click', rotatePuyoCCW); 
+if (btnRotateCW) btnRotateCW.addEventListener('click', window.rotatePuyoCW); 
+if (btnRotateCCW) btnRotateCCW.addEventListener('click', window.rotatePuyoCCW); 
         if (btnHardDrop) btnHardDrop.addEventListener('click', hardDrop);
         
         setupEditModeListeners(); 
@@ -819,25 +826,71 @@ function movePuyo(dx, dy, newRotation, shouldRender = true) {
     return false;
 }
 
-function rotatePuyoCW() {
+window.rotatePuyoCW = function() { // グローバル公開のためwindow.を付ける
     if (gameState !== 'playing') return false;
-    const newRotation = (currentPuyo.rotation + 1) % 4;
     
-    // 回転後の座標で衝突する場合、ズラして回転を試みる（壁際回転）
-    if (movePuyo(0, 0, newRotation)) return true; 
-    if (movePuyo(1, 0, newRotation)) return true; // 右へズラして試行
-    if (movePuyo(-1, 0, newRotation)) return true; // 左へズラして試行
+    // 1. 通常の回転を試みる
+    const newRotation = (currentPuyo.rotation + 1) % 4;
+    const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
+    
+    if (rotationSuccess) {
+        lastFailedRotation.type = null; // 成功したのでリセット
+        return true;
+    }
+
+    // 2. 回転失敗時のクイックターン判定
+    const now = Date.now();
+    
+    if (lastFailedRotation.type === 'CW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
+        // クイックターン実行: ぷよの上下入れ替えと1段上昇
+        [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
+        
+        // 1段上昇を試みる
+        const movedUp = movePuyo(0, 1, undefined, true);
+        
+        // 上昇に成功したかに関わらず、クイックターンは完了
+        lastFailedRotation.type = null; // 成功したのでリセット
+        renderBoard();
+        return true;
+    }
+
+    // 3. 失敗情報を記録
+    lastFailedRotation.type = 'CW';
+    lastFailedRotation.timestamp = now;
     return false;
 }
 
-function rotatePuyoCCW() {
+window.rotatePuyoCCW = function() { // グローバル公開のためwindow.を付ける
     if (gameState !== 'playing') return false;
+    
+    // 1. 通常の回転を試みる
     const newRotation = (currentPuyo.rotation - 1 + 4) % 4;
+    const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
+    
+    if (rotationSuccess) {
+        lastFailedRotation.type = null; // 成功したのでリセット
+        return true;
+    }
 
-    // 回転後の座標で衝突する場合、ズラして回転を試みる
-    if (movePuyo(0, 0, newRotation)) return true; 
-    if (movePuyo(1, 0, newRotation)) return true; 
-    if (movePuyo(-1, 0, newRotation)) return true; 
+    // 2. 回転失敗時のクイックターン判定
+    const now = Date.now();
+    
+    if (lastFailedRotation.type === 'CCW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
+        // クイックターン実行: ぷよの上下入れ替えと1段上昇
+        [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
+        
+        // 1段上昇を試みる
+        const movedUp = movePuyo(0, 1, undefined, true);
+        
+        // 上昇に成功したかに関わらず、クイックターンは完了
+        lastFailedRotation.type = null; // 成功したのでリセット
+        renderBoard();
+        return true;
+    }
+
+    // 3. 失敗情報を記録
+    lastFailedRotation.type = 'CCW';
+    lastFailedRotation.timestamp = now;
     return false;
 }
 
