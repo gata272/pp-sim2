@@ -829,6 +829,12 @@ function movePuyo(dx, dy, newRotation, shouldRender = true) {
 window.rotatePuyoCW = function() { // グローバル公開のためwindow.を付ける
     if (gameState !== 'playing') return false;
     
+    // 回転ボタン押下時に自動落下タイマーをリセット
+    if (autoDropEnabled && dropTimer) {
+        clearInterval(dropTimer);
+        startPuyoDropLoop();
+    }
+    
     // 1. 通常の回転を試みる
     const newRotation = (currentPuyo.rotation + 1) % 4;
     const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
@@ -842,13 +848,9 @@ window.rotatePuyoCW = function() { // グローバル公開のためwindow.を�
     const now = Date.now();
     
     if (lastFailedRotation.type === 'CW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
-        // クイックターン実行: ぷよの上下入れ替えと1段上昇
+        // クイックターン実行: ぷよの上下入れ替えのみ
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
         
-        // 1段上昇を試みる
-        const movedUp = movePuyo(0, 1, undefined, true);
-        
-        // 上昇に成功したかに関わらず、クイックターンは完了
         lastFailedRotation.type = null; // 成功したのでリセット
         renderBoard();
         return true;
@@ -863,6 +865,12 @@ window.rotatePuyoCW = function() { // グローバル公開のためwindow.を�
 window.rotatePuyoCCW = function() { // グローバル公開のためwindow.を付ける
     if (gameState !== 'playing') return false;
     
+    // 回転ボタン押下時に自動落下タイマーをリセット
+    if (autoDropEnabled && dropTimer) {
+        clearInterval(dropTimer);
+        startPuyoDropLoop();
+    }
+    
     // 1. 通常の回転を試みる
     const newRotation = (currentPuyo.rotation - 1 + 4) % 4;
     const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
@@ -876,13 +884,9 @@ window.rotatePuyoCCW = function() { // グローバル公開のためwindow.を�
     const now = Date.now();
     
     if (lastFailedRotation.type === 'CCW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
-        // クイックターン実行: ぷよの上下入れ替えと1段上昇
+        // クイックターン実行: ぷよの上下入れ替えのみ
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
         
-        // 1段上昇を試みる
-        const movedUp = movePuyo(0, 1, undefined, true);
-        
-        // 上昇に成功したかに関わらず、クイックターンは完了
         lastFailedRotation.type = null; // 成功したのでリセット
         renderBoard();
         return true;
