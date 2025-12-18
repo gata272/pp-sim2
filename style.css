@@ -59,9 +59,11 @@ body {
     position: relative; 
 }
 
-/* --- 隠し領域の視覚化 (13列目と14列目) --- */
-#puyo-board > div:nth-child(-n+6), 
-#puyo-board > div:nth-child(n+7):nth-child(-n+12) 
+/* --- 隠し領域の視覚化 (Y=12, Y=13の隠し領域のセルのみ) --- */
+/* 盤面は上からY=13, Y=12, ..., Y=0の順で配置されている。
+   第1-12行: Y=13からY=2 (可視領域)
+   第13-14行: Y=1, Y=0 (隠し領域) */
+#puyo-board > div:nth-child(n+79):nth-child(-n+90)
 {
     opacity: 0.5;
     background-color: rgba(50, 50, 50, 0.5); 
