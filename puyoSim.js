@@ -971,7 +971,13 @@ window.rotatePuyoCCW = function() { // グローバル公開のためwindow.を�
     lastFailedRotation.type = 'CCW';
     lastFailedRotation.timestamp = now;
     return false;
-}eState !== 'playing' || !currentPuyo) return;
+}
+
+/**
+ * ハードドロップ (スペースキー)
+ */
+window.hardDrop = function() {
+    if (gameState !== 'playing' || !currentPuyo) return;
 
     clearInterval(dropTimer); 
 
