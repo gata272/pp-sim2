@@ -788,15 +788,41 @@ function getGhostFinalPositions() {
 
 function checkCollision(coords) {
     for (const puyo of coords) {
-        // 盤面の左右または下にはみ出したら衝突
+        // 盤面の左右または下にはみ出したら複突
         if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0) return true;
 
-        // 既にぷよがあるセルと衝突
+        // 既にぷよがあるセルと複突
         if (puyo.y < HEIGHT && puyo.y >= 0 && board[puyo.y][puyo.x] !== COLORS.EMPTY) {
             return true;
         }
     }
     return false;
+}
+
+/**
+ * 回転失敗の原因を判定する関数
+ * @returns {string|null} 'out-of-bounds' (盤面外), 'occupied' (他のぷよがある), null (複突なし)
+ */
+function checkRotationFailureReason(coords) {
+    let hasOutOfBounds = false;
+    let hasOccupied = false;
+    
+    for (const puyo of coords) {
+        // 盤面の左右または下にはみ出した場合
+        if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0) {
+            hasOutOfBounds = true;
+        }
+        
+        // 既にぷよがあるセルと複突
+        if (puyo.y < HEIGHT && puyo.y >= 0 && board[puyo.y][puyo.x] !== COLORS.EMPTY) {
+            hasOccupied = true;
+        }
+    }
+    
+    // 优先顺位: 他のぷよがある場合を優先して返す
+    if (hasOccupied) return 'occupied';
+    if (hasOutOfBounds) return 'out-of-bounds';
+    return null;
 }
 
 function movePuyo(dx, dy, newRotation, shouldRender = true) {
@@ -848,6 +874,7 @@ window.rotatePuyoCW = function() { // グローバル公開のためwindow.を�
     }
     
     const newRotation = (currentPuyo.rotation + 1) % 4;
+    const orientation = getPuyoOrientation();
     
     // 1. 通常の回転を試みる (縦横共通)
     const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
@@ -858,18 +885,35 @@ window.rotatePuyoCW = function() { // グローバル公開のためwindow.を�
     }
 
     // 2. 回転失敗時の処理
-    const orientation = getPuyoOrientation();
     const now = Date.now();
     
     if (orientation === 'horizontal') {
-        // 横向きの場合: Wall Kickをスキップして、即座に1段上げ＋回転を試みる
-        if (movePuyo(0, 1, newRotation)) {
-            // 1段上に上げてから回転成功
-            lastFailedRotation.type = null;
-            renderBoard();
-            return true;
+        // 横向きの場合: 失敗原因を判定して処理を分岐
+        const testPuyo = { 
+            mainX: currentPuyo.mainX, 
+            mainY: currentPuyo.mainY, 
+            rotation: newRotation 
+        };
+        const testCoords = getCoordsFromState(testPuyo);
+        const failureReason = checkRotationFailureReason(testCoords);
+        
+        if (failureReason === 'occupied') {
+            // 他のぷよがある場合: 1段上げ＋回転を試みる
+            if (movePuyo(0, 1, newRotation)) {
+                // 1段上に上げてから回転成功
+                lastFailedRotation.type = null;
+                renderBoard();
+                return true;
+            }
+        } else if (failureReason === 'out-of-bounds') {
+            // 盤面外の場合: Wall Kickを試みる
+            if (movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation)) {
+                lastFailedRotation.type = null;
+                return true;
+            }
         }
-        // 1段上に上げてからの回転も失敗した場合は、失敗情報をリセット
+        
+        // どちらも失敗した場合は、失敗情報をリセット
         lastFailedRotation.type = null;
         return false;
     }
@@ -888,7 +932,7 @@ window.rotatePuyoCW = function() { // グローバル公開のためwindow.を�
     lastFailedRotation.type = 'CW';
     lastFailedRotation.timestamp = now;
     return false;
-}
+
 
 window.rotatePuyoCCW = function() { // グローバル公開のためwindow.を付ける
     if (gameState !== 'playing') return false;
@@ -900,6 +944,7 @@ window.rotatePuyoCCW = function() { // グローバル公開のためwindow.を�
     }
     
     const newRotation = (currentPuyo.rotation - 1 + 4) % 4;
+    const orientation = getPuyoOrientation();
     
     // 1. 通常の回転を試みる (縦横共通)
     const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
@@ -910,18 +955,35 @@ window.rotatePuyoCCW = function() { // グローバル公開のためwindow.を�
     }
 
     // 2. 回転失敗時の処理
-    const orientation = getPuyoOrientation();
     const now = Date.now();
     
     if (orientation === 'horizontal') {
-        // 横向きの場合: Wall Kickをスキップして、即座に1段上げ＋回転を試みる
-        if (movePuyo(0, 1, newRotation)) {
-            // 1段上に上げてから回転成功
-            lastFailedRotation.type = null;
-            renderBoard();
-            return true;
+        // 横向きの場合: 失敗原因を判定して処理を分岐
+        const testPuyo = { 
+            mainX: currentPuyo.mainX, 
+            mainY: currentPuyo.mainY, 
+            rotation: newRotation 
+        };
+        const testCoords = getCoordsFromState(testPuyo);
+        const failureReason = checkRotationFailureReason(testCoords);
+        
+        if (failureReason === 'occupied') {
+            // 他のぷよがある場合: 1段上げ＋回転を試みる
+            if (movePuyo(0, 1, newRotation)) {
+                // 1段上に上げてから回転成功
+                lastFailedRotation.type = null;
+                renderBoard();
+                return true;
+            }
+        } else if (failureReason === 'out-of-bounds') {
+            // 盤面外の場合: Wall Kickを試みる
+            if (movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation)) {
+                lastFailedRotation.type = null;
+                return true;
+            }
         }
-        // 1段上に上げてからの回転も失敗した場合は、失敗情報をリセット
+        
+        // どちらも失敗した場合は、失敗情報をリセット
         lastFailedRotation.type = null;
         return false;
     }
