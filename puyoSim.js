@@ -848,10 +848,21 @@ window.rotatePuyoCW = function() { // グローバル公開のためwindow.を�
     }
     
     const newRotation = (currentPuyo.rotation + 1) % 4;
-    const orientation = getPuyoOrientation();
     
-    // 横向きの場合: Wall Kickをスキップして、即座に1段上げ＋回転を試みる
+    // 1. 通常の回転を試みる (縦横共通)
+    const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
+    
+    if (rotationSuccess) {
+        lastFailedRotation.type = null; // 成功したのでリセット
+        return true;
+    }
+
+    // 2. 回転失敗時の処理
+    const orientation = getPuyoOrientation();
+    const now = Date.now();
+    
     if (orientation === 'horizontal') {
+        // 横向きの場合: Wall Kickをスキップして、即座に1段上げ＋回転を試みる
         if (movePuyo(0, 1, newRotation)) {
             // 1段上に上げてから回転成功
             lastFailedRotation.type = null;
@@ -863,18 +874,7 @@ window.rotatePuyoCW = function() { // グローバル公開のためwindow.を�
         return false;
     }
     
-    // 縦向きの場合: 通常のWall Kickロジックを適用
-    // 1. 通常の回転を試みる
-    const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
-    
-    if (rotationSuccess) {
-        lastFailedRotation.type = null; // 成功したのでリセット
-        return true;
-    }
-
-    // 2. 回転失敗時のクイックターン判定
-    const now = Date.now();
-    
+    // 縦向きの場合: 0.3秒以内の再入力で色を入れ替える
     if (lastFailedRotation.type === 'CW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
         // クイックターン実行: ぷよの上下入れ替えのみ
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
@@ -900,10 +900,21 @@ window.rotatePuyoCCW = function() { // グローバル公開のためwindow.を�
     }
     
     const newRotation = (currentPuyo.rotation - 1 + 4) % 4;
-    const orientation = getPuyoOrientation();
     
-    // 横向きの場合: Wall Kickをスキップして、即座に1段上げ＋回転を試みる
+    // 1. 通常の回転を試みる (縦横共通)
+    const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
+    
+    if (rotationSuccess) {
+        lastFailedRotation.type = null; // 成功したのでリセット
+        return true;
+    }
+
+    // 2. 回転失敗時の処理
+    const orientation = getPuyoOrientation();
+    const now = Date.now();
+    
     if (orientation === 'horizontal') {
+        // 横向きの場合: Wall Kickをスキップして、即座に1段上げ＋回転を試みる
         if (movePuyo(0, 1, newRotation)) {
             // 1段上に上げてから回転成功
             lastFailedRotation.type = null;
@@ -915,18 +926,7 @@ window.rotatePuyoCCW = function() { // グローバル公開のためwindow.を�
         return false;
     }
     
-    // 縦向きの場合: 通常のWall Kickロジックを適用
-    // 1. 通常の回転を試みる
-    const rotationSuccess = movePuyo(0, 0, newRotation) || movePuyo(1, 0, newRotation) || movePuyo(-1, 0, newRotation);
-    
-    if (rotationSuccess) {
-        lastFailedRotation.type = null; // 成功したのでリセット
-        return true;
-    }
-
-    // 2. 回転失敗時のクイックターン判定
-    const now = Date.now();
-    
+    // 縦向きの場合: 0.3秒以内の再入力で色を入れ替える
     if (lastFailedRotation.type === 'CCW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
         // クイックターン実行: ぷよの上下入れ替えのみ
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
