@@ -393,12 +393,14 @@ body {
     display: flex;
 }
 
-/* 2段に並べるためのコンテナ */
+/* 縦並びにするためのコンテナ */
 .btn-stack {
     display: flex;
     flex-direction: column;
-    flex: 1; 
-    gap: 4px; /* 上下ボタンの間の隙間 */
+    /* flex: 1; から数値を増やす (例: 1.5倍にする) */
+    flex: 1.5; 
+    gap: 4px;
+    min-width: 0; /* 縮小を許可してレイアウト崩れを防ぐ */
 }
 
 .mobile-btn {
@@ -419,11 +421,11 @@ body {
     transition: background-color 0.1s, transform 0.05s;
 }
 
-/* 2段重ねにするボタン専用の設定 */
 .small-btn {
-    flex: none; /* 自動的な伸びを抑制 */
-    height: calc(50% - 2px); /* 1段ボタンのちょうど半分の高さ */
-    font-size: 0.85em; /* 文字を少し小さくして収まりをよくする */
+    flex: none;
+    height: calc(50% - 2px);
+    font-size: 1.0em; /* 0.85emから少し大きくする */
+    white-space: nowrap; /* 改行を防ぐ */
 }
 
 #btn-soft-drop { background-color: #5e81ac; } /* 1↓ */
