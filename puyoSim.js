@@ -1,5 +1,3 @@
-// puyoSim.js
-
 // --- ぷよぷよシミュレーションの定数と設定 ---
 
 // 盤面サイズ
@@ -138,13 +136,21 @@ function initializeGame() {
     if (!document.initializedKeyHandler) {
         document.addEventListener('keydown', handleInput);
         
+        // ★PC用ショートカットキーの変更
         document.addEventListener('keydown', (event) => {
-            if ((event.key === 'z' || event.key === 'Z') && !event.shiftKey) {
+            const key = event.key.toLowerCase();
+            if (key === 'u') { // Undo (一手戻す)
                 event.preventDefault();
                 undoMove();
-            } else if (event.key === 'y' || event.key === 'Y' || (event.key === 'z' || event.key === 'Z') && event.shiftKey) {
+            } else if (key === 'y') { // Redo (やり直し)
                 event.preventDefault();
                 redoMove();
+            } else if (key === 'r') { // Reset (リセット)
+                event.preventDefault();
+                resetGame();
+            } else if (key === 'e') { // Edit (エディット切り替え)
+                event.preventDefault();
+                toggleMode();
             }
         });
 
@@ -153,12 +159,22 @@ function initializeGame() {
         const btnRotateCW = document.getElementById('btn-rotate-cw'); 
         const btnRotateCCW = document.getElementById('btn-rotate-ccw'); 
         const btnHardDrop = document.getElementById('btn-hard-drop');
+        const btnSoftDrop = document.getElementById('btn-soft-drop'); // ★追加
 
         if (btnLeft) btnLeft.addEventListener('click', () => movePuyo(-1, 0));
         if (btnRight) btnRight.addEventListener('click', () => movePuyo(1, 0));
         if (btnRotateCW) btnRotateCW.addEventListener('click', window.rotatePuyoCW); 
         if (btnRotateCCW) btnRotateCCW.addEventListener('click', window.rotatePuyoCCW); 
         if (btnHardDrop) btnHardDrop.addEventListener('click', hardDrop);
+        
+        // ★スマホ用ソフトドロップ
+        if (btnSoftDrop) btnSoftDrop.addEventListener('click', () => {
+            if (gameState === 'playing') {
+                clearInterval(dropTimer);
+                movePuyo(0, -1);
+                if (autoDropEnabled) startPuyoDropLoop();
+            }
+        });
         
         setupEditModeListeners(); 
         document.initializedKeyHandler = true;
@@ -690,7 +706,7 @@ function movePuyo(dx, dy, newRotation, shouldRender = true) {
     return false;
 }
 
-// ★修正済み: 回転補正ロジック
+// ★回転補正ロジック
 window.rotatePuyoCW = function() {
     if (gameState !== 'playing' || !currentPuyo) return false;
     
@@ -718,7 +734,7 @@ window.rotatePuyoCW = function() {
                 if (!rotationSuccess) rotationSuccess = movePuyo(0, 1, newRotation); // 上に逃げる
             }
         } 
-        // 2-B. 横（1, 3）から縦へ回転する場合（以前のロジック：1段上げるだけ）
+        // 2-B. 横（1, 3）から縦へ回転する場合
         else {
             rotationSuccess = movePuyo(0, 1, newRotation);
         }
@@ -1101,7 +1117,7 @@ function renderEditNextPuyos() {
         let puyo = document.createElement('div');
         puyo.className = `puyo puyo-${color}`;
         
-        puyo.addEventListener('click', (event) => {
+        puyo.onclick = (event) => {
             event.stopPropagation(); 
             if (gameState !== 'editing') return;
             
@@ -1109,7 +1125,7 @@ function renderEditNextPuyos() {
                 editingNextPuyos[listIndex][puyoIndex] = currentEditColor; 
                 renderEditNextPuyos(); 
             }
-        });
+        };
         
         return puyo;
     };
@@ -1171,12 +1187,12 @@ function handleInput(event) {
             break;
         case 'z':
         case 'Z':
-            if (!event.shiftKey) {
-                 rotatePuyoCW(); 
-            }
+            // ★回転専用に変更
+            rotatePuyoCW(); 
             break;
         case 'x':
         case 'X':
+            // ★回転専用に変更
             rotatePuyoCCW(); 
             break;
         case 'ArrowDown':
