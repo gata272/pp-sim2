@@ -690,7 +690,7 @@ function movePuyo(dx, dy, newRotation, shouldRender = true) {
     return false;
 }
 
-// ★修正箇所: 左右補正(ステップA) -> 上補正(ステップB) -> クイックターン待機(ステップC)
+// ★修正済み: 回転補正ロジック (0, 2 -> 1, 3 の時のみ A:スライド, B:上押し上げ, C:クイックターン)
 window.rotatePuyoCW = function() {
     if (gameState !== 'playing' || !currentPuyo) return false;
     
@@ -701,24 +701,25 @@ window.rotatePuyoCW = function() {
     
     const newRotation = (currentPuyo.rotation + 1) % 4;
     const oldRotation = currentPuyo.rotation;
+    
     let rotationSuccess = false;
 
-    // 1. その場での回転を試行
+    // 1. まずはその場での回転を試行
     rotationSuccess = movePuyo(0, 0, newRotation);
 
-    // 2. 失敗した場合かつ、縦から横（0 or 2 -> 1 or 3）への回転なら補正を試行
+    // 2. 元が縦（0 or 2）で失敗した場合のみ、補正を試みる
     if (!rotationSuccess && (oldRotation === 0 || oldRotation === 2)) {
-        if (newRotation === 1) { // メインの左にサブが来る予定
+        if (newRotation === 1) { // 左にサブが来る予定
             // ステップA: メインを右にスライド
             rotationSuccess = movePuyo(1, 0, newRotation);
-            // ステップB: 失敗なら、メインを上に押し上げ
+            // ステップB: スライド失敗なら、メインを上に押し上げ
             if (!rotationSuccess) {
                 rotationSuccess = movePuyo(0, 1, newRotation);
             }
-        } else if (newRotation === 3) { // メインの右にサブが来る予定
+        } else if (newRotation === 3) { // 右にサブが来る予定
             // ステップA: メインを左にスライド
             rotationSuccess = movePuyo(-1, 0, newRotation);
-            // ステップB: 失敗なら、メインを上に押し上げ
+            // ステップB: スライド失敗なら、メインを上に押し上げ
             if (!rotationSuccess) {
                 rotationSuccess = movePuyo(0, 1, newRotation);
             }
@@ -730,7 +731,7 @@ window.rotatePuyoCW = function() {
         return true;
     }
 
-    // 3. ステップC: 回転不可の場合のクイックターン判定
+    // 3. ステップC: どこにも動けず回転に失敗した場合、クイックターン判定
     const now = Date.now();
     if (lastFailedRotation.type === 'CW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
@@ -744,6 +745,7 @@ window.rotatePuyoCW = function() {
     return false;
 }
 
+// ★修正済み: CCW（反時計回り）も同様の条件で補正
 window.rotatePuyoCCW = function() {
     if (gameState !== 'playing' || !currentPuyo) return false;
     
@@ -754,19 +756,20 @@ window.rotatePuyoCCW = function() {
     
     const newRotation = (currentPuyo.rotation - 1 + 4) % 4;
     const oldRotation = currentPuyo.rotation;
+
     let rotationSuccess = false;
 
     // 1. その場での回転を試行
     rotationSuccess = movePuyo(0, 0, newRotation);
 
-    // 2. 補正ロジック (0 or 2 -> 1 or 3)
+    // 2. 補正ロジック (0, 2 -> 1, 3 の時のみ)
     if (!rotationSuccess && (oldRotation === 0 || oldRotation === 2)) {
-        if (newRotation === 1) { // メインの左にサブ
+        if (newRotation === 1) { // 左にサブ
             rotationSuccess = movePuyo(1, 0, newRotation);
             if (!rotationSuccess) {
                 rotationSuccess = movePuyo(0, 1, newRotation);
             }
-        } else if (newRotation === 3) { // メインの右にサブ
+        } else if (newRotation === 3) { // 右にサブ
             rotationSuccess = movePuyo(-1, 0, newRotation);
             if (!rotationSuccess) {
                 rotationSuccess = movePuyo(0, 1, newRotation);
