@@ -395,7 +395,7 @@ body {
 .mobile-btn {
     flex: 1; /* 6つのボタンを均等幅に */
     min-width: 0;
-    height: 65px; 
+    height: 80px; 
     padding: 0;
     font-size: 1.3em; 
     font-weight: bold;
@@ -403,7 +403,7 @@ body {
     border: none;
     border-radius: 8px;
     cursor: pointer;
-    background-color: #457b9d; 
+    background-color: #5e81ac; 
     transition: background-color 0.1s, transform 0.05s;
     touch-action: manipulation;
     display: flex;
