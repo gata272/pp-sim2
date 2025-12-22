@@ -412,7 +412,7 @@ body {
 }
 
 #btn-soft-drop { background-color: #5e81ac; } /* 1↓ */
-#btn-hard-drop { background-color: #3b4252; } /* MAX↓ */
+#btn-hard-drop { background-color: #5e81ac; } /* MAX↓ */
 #btn-rotate-cw, #btn-rotate-ccw { background-color: #6a0dad; } /* B, Aボタン */
 
 .mobile-btn:active {
