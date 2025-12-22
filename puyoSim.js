@@ -35,7 +35,7 @@ let gameState = 'playing'; // 'playing', 'chaining', 'gameover', 'editing'
 let currentEditColor = COLORS.EMPTY; // エディットモードで選択中の色 (デフォルトは消しゴム: 0)
 let editingNextPuyos = []; // エディットモードで使用するNEXT 50組
 
-// ★履歴管理用スタック
+// 履歴管理用スタック
 let historyStack = []; // 過去の状態を保存 (Undo用)
 let redoStack = [];    // 戻した状態を保存 (Redo用)
 
@@ -136,7 +136,7 @@ function initializeGame() {
     if (!document.initializedKeyHandler) {
         document.addEventListener('keydown', handleInput);
         
-        // ★PC用ショートカットキーの変更
+        // PC用ショートカットキーの変更
         document.addEventListener('keydown', (event) => {
             const key = event.key.toLowerCase();
             if (key === 'u') { // Undo (一手戻す)
@@ -156,18 +156,21 @@ function initializeGame() {
 
         const btnLeft = document.getElementById('btn-left');
         const btnRight = document.getElementById('btn-right');
-        const btnRotateCW = document.getElementById('btn-rotate-cw'); 
-        const btnRotateCCW = document.getElementById('btn-rotate-ccw'); 
+        const btnRotateCW = document.getElementById('btn-rotate-cw'); // Bボタン
+        const btnRotateCCW = document.getElementById('btn-rotate-ccw'); // Aボタン
         const btnHardDrop = document.getElementById('btn-hard-drop');
-        const btnSoftDrop = document.getElementById('btn-soft-drop'); // ★追加
+        const btnSoftDrop = document.getElementById('btn-soft-drop');
 
         if (btnLeft) btnLeft.addEventListener('click', () => movePuyo(-1, 0));
         if (btnRight) btnRight.addEventListener('click', () => movePuyo(1, 0));
+        
+        // Bボタンで右回転(CW)、Aボタンで左回転(CCW)
         if (btnRotateCW) btnRotateCW.addEventListener('click', window.rotatePuyoCW); 
         if (btnRotateCCW) btnRotateCCW.addEventListener('click', window.rotatePuyoCCW); 
+        
         if (btnHardDrop) btnHardDrop.addEventListener('click', hardDrop);
         
-        // ★スマホ用ソフトドロップ
+        // スマホ用ソフトドロップ（1↓）
         if (btnSoftDrop) btnSoftDrop.addEventListener('click', () => {
             if (gameState === 'playing') {
                 clearInterval(dropTimer);
@@ -706,7 +709,7 @@ function movePuyo(dx, dy, newRotation, shouldRender = true) {
     return false;
 }
 
-// ★回転補正ロジック
+// 回転補正ロジック
 window.rotatePuyoCW = function() {
     if (gameState !== 'playing' || !currentPuyo) return false;
     
@@ -724,7 +727,7 @@ window.rotatePuyoCW = function() {
     rotationSuccess = movePuyo(0, 0, newRotation);
 
     if (!rotationSuccess) {
-        // 2-A. 縦（0, 2）から横へ回転する場合（新しいロジック：スライド優先）
+        // 2-A. 縦（0, 2）から横へ回転する場合
         if (oldRotation === 0 || oldRotation === 2) {
             if (newRotation === 1) { // 左にサブ
                 rotationSuccess = movePuyo(1, 0, newRotation); // 右スライド
@@ -1187,12 +1190,10 @@ function handleInput(event) {
             break;
         case 'z':
         case 'Z':
-            // ★回転専用に変更
             rotatePuyoCW(); 
             break;
         case 'x':
         case 'X':
-            // ★回転専用に変更
             rotatePuyoCCW(); 
             break;
         case 'ArrowDown':
