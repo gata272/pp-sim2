@@ -111,20 +111,21 @@
     </div>
 <div id="mobile-controls">
     <button class="mobile-btn" id="btn-left">←</button>
-    <button class="mobile-btn" id="btn-soft-drop">1↓</button>
-    <button class="mobile-btn" id="btn-hard-drop">M↓</button>
+    <div class="btn-stack">
+        <button class="mobile-btn small-btn" id="btn-soft-drop">1↓</button>
+        <button class="mobile-btn small-btn" id="btn-hard-drop">M↓</button>
+    </div>
     <button class="mobile-btn" id="btn-right">→</button>
     <button class="mobile-btn" id="btn-rotate-cw">B</button>
     <button class="mobile-btn" id="btn-rotate-ccw">A</button>
 </div>
-
 
     <script src="puyoSim.js"></script>
     
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
-                navigator.worker.register('sw.js').then(function(registration) {
+                navigator.serviceWorker.register('sw.js').then(function(registration) {
                     console.log('Service Worker registered successfully:', registration);
                 }).catch(function(error) {
                     console.log('Service Worker registration failed:', error);
