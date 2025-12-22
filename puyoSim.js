@@ -690,7 +690,7 @@ function movePuyo(dx, dy, newRotation, shouldRender = true) {
     return false;
 }
 
-// ★修正済み: 回転補正ロジック (0, 2 -> 1, 3 の時のみ A:スライド, B:上押し上げ, C:クイックターン)
+// ★修正済み: 回転補正ロジック
 window.rotatePuyoCW = function() {
     if (gameState !== 'playing' || !currentPuyo) return false;
     
@@ -707,22 +707,20 @@ window.rotatePuyoCW = function() {
     // 1. まずはその場での回転を試行
     rotationSuccess = movePuyo(0, 0, newRotation);
 
-    // 2. 元が縦（0 or 2）で失敗した場合のみ、補正を試みる
-    if (!rotationSuccess && (oldRotation === 0 || oldRotation === 2)) {
-        if (newRotation === 1) { // 左にサブが来る予定
-            // ステップA: メインを右にスライド
-            rotationSuccess = movePuyo(1, 0, newRotation);
-            // ステップB: スライド失敗なら、メインを上に押し上げ
-            if (!rotationSuccess) {
-                rotationSuccess = movePuyo(0, 1, newRotation);
+    if (!rotationSuccess) {
+        // 2-A. 縦（0, 2）から横へ回転する場合（新しいロジック：スライド優先）
+        if (oldRotation === 0 || oldRotation === 2) {
+            if (newRotation === 1) { // 左にサブ
+                rotationSuccess = movePuyo(1, 0, newRotation); // 右スライド
+                if (!rotationSuccess) rotationSuccess = movePuyo(0, 1, newRotation); // 上に逃げる
+            } else if (newRotation === 3) { // 右にサブ
+                rotationSuccess = movePuyo(-1, 0, newRotation); // 左スライド
+                if (!rotationSuccess) rotationSuccess = movePuyo(0, 1, newRotation); // 上に逃げる
             }
-        } else if (newRotation === 3) { // 右にサブが来る予定
-            // ステップA: メインを左にスライド
-            rotationSuccess = movePuyo(-1, 0, newRotation);
-            // ステップB: スライド失敗なら、メインを上に押し上げ
-            if (!rotationSuccess) {
-                rotationSuccess = movePuyo(0, 1, newRotation);
-            }
+        } 
+        // 2-B. 横（1, 3）から縦へ回転する場合（以前のロジック：1段上げるだけ）
+        else {
+            rotationSuccess = movePuyo(0, 1, newRotation);
         }
     }
 
@@ -731,7 +729,7 @@ window.rotatePuyoCW = function() {
         return true;
     }
 
-    // 3. ステップC: どこにも動けず回転に失敗した場合、クイックターン判定
+    // 3. 失敗時のクイックターン判定
     const now = Date.now();
     if (lastFailedRotation.type === 'CW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
@@ -745,7 +743,6 @@ window.rotatePuyoCW = function() {
     return false;
 }
 
-// ★修正済み: CCW（反時計回り）も同様の条件で補正
 window.rotatePuyoCCW = function() {
     if (gameState !== 'playing' || !currentPuyo) return false;
     
@@ -762,18 +759,20 @@ window.rotatePuyoCCW = function() {
     // 1. その場での回転を試行
     rotationSuccess = movePuyo(0, 0, newRotation);
 
-    // 2. 補正ロジック (0, 2 -> 1, 3 の時のみ)
-    if (!rotationSuccess && (oldRotation === 0 || oldRotation === 2)) {
-        if (newRotation === 1) { // 左にサブ
-            rotationSuccess = movePuyo(1, 0, newRotation);
-            if (!rotationSuccess) {
-                rotationSuccess = movePuyo(0, 1, newRotation);
+    if (!rotationSuccess) {
+        // 2-A. 縦（0, 2）から横へ
+        if (oldRotation === 0 || oldRotation === 2) {
+            if (newRotation === 1) {
+                rotationSuccess = movePuyo(1, 0, newRotation);
+                if (!rotationSuccess) rotationSuccess = movePuyo(0, 1, newRotation);
+            } else if (newRotation === 3) {
+                rotationSuccess = movePuyo(-1, 0, newRotation);
+                if (!rotationSuccess) rotationSuccess = movePuyo(0, 1, newRotation);
             }
-        } else if (newRotation === 3) { // 右にサブ
-            rotationSuccess = movePuyo(-1, 0, newRotation);
-            if (!rotationSuccess) {
-                rotationSuccess = movePuyo(0, 1, newRotation);
-            }
+        } 
+        // 2-B. 横（1, 3）から縦へ
+        else {
+            rotationSuccess = movePuyo(0, 1, newRotation);
         }
     }
 
@@ -782,7 +781,7 @@ window.rotatePuyoCCW = function() {
         return true;
     }
 
-    // 3. クイックターン判定
+    // 3. 失敗時のクイックターン判定
     const now = Date.now();
     if (lastFailedRotation.type === 'CCW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
