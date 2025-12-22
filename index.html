@@ -51,15 +51,15 @@
                 </div>
                 
                 <div id="history-controls" class="common-control">
-                    <button id="undo-button" onclick="undoMove()" disabled>一手戻す (Z)</button>
+                    <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
                     <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
                 </div>
                 
                 <div id="play-controls" class="common-control">
                     <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
-                    <button id="reset-button-play" onclick="resetGame()">盤面リセット</button>
+                    <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
                     
-                    <button class="mode-toggle-btn" onclick="toggleMode()">edit</button>
+                    <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
                 </div>
 
             </div>
@@ -99,10 +99,10 @@
                 
                 <div id="edit-action-buttons" class="common-control">
                     <div id="mode-toggle-container">
-                        <button class="mode-toggle-btn" onclick="toggleMode()">play</button>
+                        <button class="mode-toggle-btn" onclick="toggleMode()">play (E)</button>
                     </div>
                     <div id="reset-button-container">
-                        <button id="reset-button-edit" onclick="resetGame(); toggleMode();">盤面リセット</button>
+                        <button id="reset-button-edit" onclick="resetGame(); toggleMode();">盤面リセット (R)</button>
                     </div>
                 </div>
             </div>
@@ -111,20 +111,20 @@
     </div>
     
     <div id="mobile-controls">
+        <button class="mobile-btn" id="btn-hard-drop">MAX↓</button>
+        <button class="mobile-btn" id="btn-soft-drop" style="background-color: #5e81ac;">1↓</button>
         <button class="mobile-btn" id="btn-left">←</button>
-        <button class="mobile-btn" id="btn-hard-drop">↓</button>
         <button class="mobile-btn" id="btn-right">→</button>
-        <button class="mobile-btn" id="btn-rotate-cw">B</button>
-        <button class="mobile-btn" id="btn-rotate-ccw">A</button>
+        <button class="mobile-btn" id="btn-rotate-ccw">左回転</button>
+        <button class="mobile-btn" id="btn-rotate-cw">右回転</button>
     </div>
 
     <script src="puyoSim.js"></script>
     
     <script>
-        // サービスワーカーの登録
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
-                navigator.serviceWorker.register('sw.js').then(function(registration) {
+                navigator.worker.register('sw.js').then(function(registration) {
                     console.log('Service Worker registered successfully:', registration);
                 }).catch(function(error) {
                     console.log('Service Worker registration failed:', error);
