@@ -375,28 +375,32 @@ body {
 }
 
 
-/* --- ★ モバイル操作ボタン (修正版) ★ --- */
+/* モバイルコントロール部分のみ差し替え・追加 */
 #mobile-controls {
     display: none; 
     margin-top: 15px;
     width: 100%;
-    max-width: 500px; /* 6ボタンを収めるための調整 */
+    max-width: 500px; 
     flex-direction: row; 
     justify-content: center; 
     gap: 6px; 
     padding: 0 5px;
     box-sizing: border-box;
+    align-items: stretch; /* 子要素の高さを揃える */
 }
 
-#mobile-controls.visible {
+/* 縦並びにするためのコンテナ */
+.btn-stack {
     display: flex;
+    flex-direction: column;
+    flex: 1; /* 他のボタンと同じ幅を確保 */
+    gap: 4px; /* 上下ボタンの隙間 */
 }
 
 .mobile-btn {
-    flex: 1; /* 6つのボタンを均等幅に */
+    flex: 1; 
     min-width: 0;
-    height: 80px; 
-    padding: 0;
+    height: 65px; /* 基本の高さ */
     font-size: 1.3em; 
     font-weight: bold;
     color: white;
@@ -404,16 +408,19 @@ body {
     border-radius: 8px;
     cursor: pointer;
     background-color: #5e81ac; 
-    transition: background-color 0.1s, transform 0.05s;
-    touch-action: manipulation;
     display: flex;
     align-items: center;
     justify-content: center;
+    touch-action: manipulation;
 }
 
-#btn-soft-drop { background-color: #5e81ac; } /* 1↓ */
-#btn-hard-drop { background-color: #5e81ac; } /* MAX↓ */
-#btn-rotate-cw, #btn-rotate-ccw { background-color: #6a0dad; } /* B, Aボタン */
+/* 2段重ねにするボタン専用の高さ調整 */
+.small-btn {
+    height: calc(50% - 2px); /* 親の高さの半分にする */
+    font-size: 0.9em; /* 文字を少し小さくして収まりを良くする */
+}
+
+#btn-rotate-cw, #btn-rotate-ccw { background-color: #6a0dad; }
 
 .mobile-btn:active {
     filter: brightness(1.2);
