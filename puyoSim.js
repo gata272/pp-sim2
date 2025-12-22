@@ -690,7 +690,7 @@ function movePuyo(dx, dy, newRotation, shouldRender = true) {
     return false;
 }
 
-// ★修正箇所: 壁蹴り(movePuyo(1,0)等)を削除
+// ★修正箇所: 左右補正(ステップA) -> 上補正(ステップB) -> クイックターン待機(ステップC)
 window.rotatePuyoCW = function() {
     if (gameState !== 'playing' || !currentPuyo) return false;
     
@@ -700,16 +700,28 @@ window.rotatePuyoCW = function() {
     }
     
     const newRotation = (currentPuyo.rotation + 1) % 4;
-    const isHorizontal = (currentPuyo.rotation === 1 || currentPuyo.rotation === 3);
+    const oldRotation = currentPuyo.rotation;
+    let rotationSuccess = false;
 
-    // 1. その場での回転のみ試行 (壁蹴り移動を削除)
-    let rotationSuccess = movePuyo(0, 0, newRotation);
-    
-    // 2. 失敗かつ横向きなら「床蹴り」を判定
-    if (!rotationSuccess && isHorizontal) {
-        const isMainGrounded = (currentPuyo.mainY === 0 || board[currentPuyo.mainY - 1][currentPuyo.mainX] !== COLORS.EMPTY);
-        if (isMainGrounded) {
-            if (movePuyo(0, 1, newRotation)) rotationSuccess = true;
+    // 1. その場での回転を試行
+    rotationSuccess = movePuyo(0, 0, newRotation);
+
+    // 2. 失敗した場合かつ、縦から横（0 or 2 -> 1 or 3）への回転なら補正を試行
+    if (!rotationSuccess && (oldRotation === 0 || oldRotation === 2)) {
+        if (newRotation === 1) { // メインの左にサブが来る予定
+            // ステップA: メインを右にスライド
+            rotationSuccess = movePuyo(1, 0, newRotation);
+            // ステップB: 失敗なら、メインを上に押し上げ
+            if (!rotationSuccess) {
+                rotationSuccess = movePuyo(0, 1, newRotation);
+            }
+        } else if (newRotation === 3) { // メインの右にサブが来る予定
+            // ステップA: メインを左にスライド
+            rotationSuccess = movePuyo(-1, 0, newRotation);
+            // ステップB: 失敗なら、メインを上に押し上げ
+            if (!rotationSuccess) {
+                rotationSuccess = movePuyo(0, 1, newRotation);
+            }
         }
     }
 
@@ -718,6 +730,7 @@ window.rotatePuyoCW = function() {
         return true;
     }
 
+    // 3. ステップC: 回転不可の場合のクイックターン判定
     const now = Date.now();
     if (lastFailedRotation.type === 'CW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
@@ -731,7 +744,6 @@ window.rotatePuyoCW = function() {
     return false;
 }
 
-// ★修正箇所: 壁蹴り(movePuyo(1,0)等)を削除
 window.rotatePuyoCCW = function() {
     if (gameState !== 'playing' || !currentPuyo) return false;
     
@@ -741,16 +753,24 @@ window.rotatePuyoCCW = function() {
     }
     
     const newRotation = (currentPuyo.rotation - 1 + 4) % 4;
-    const isHorizontal = (currentPuyo.rotation === 1 || currentPuyo.rotation === 3);
+    const oldRotation = currentPuyo.rotation;
+    let rotationSuccess = false;
 
-    // 1. その場での回転のみ試行 (壁蹴り移動を削除)
-    let rotationSuccess = movePuyo(0, 0, newRotation);
-    
-    // 2. 失敗かつ横向きなら「床蹴り」を判定
-    if (!rotationSuccess && isHorizontal) {
-        const isMainGrounded = (currentPuyo.mainY === 0 || board[currentPuyo.mainY - 1][currentPuyo.mainX] !== COLORS.EMPTY);
-        if (isMainGrounded) {
-            if (movePuyo(0, 1, newRotation)) rotationSuccess = true;
+    // 1. その場での回転を試行
+    rotationSuccess = movePuyo(0, 0, newRotation);
+
+    // 2. 補正ロジック (0 or 2 -> 1 or 3)
+    if (!rotationSuccess && (oldRotation === 0 || oldRotation === 2)) {
+        if (newRotation === 1) { // メインの左にサブ
+            rotationSuccess = movePuyo(1, 0, newRotation);
+            if (!rotationSuccess) {
+                rotationSuccess = movePuyo(0, 1, newRotation);
+            }
+        } else if (newRotation === 3) { // メインの右にサブ
+            rotationSuccess = movePuyo(-1, 0, newRotation);
+            if (!rotationSuccess) {
+                rotationSuccess = movePuyo(0, 1, newRotation);
+            }
         }
     }
 
@@ -759,6 +779,7 @@ window.rotatePuyoCCW = function() {
         return true;
     }
 
+    // 3. クイックターン判定
     const now = Date.now();
     if (lastFailedRotation.type === 'CCW' && (now - lastFailedRotation.timestamp) < QUICK_TURN_WINDOW) {
         [currentPuyo.mainColor, currentPuyo.subColor] = [currentPuyo.subColor, currentPuyo.mainColor];
