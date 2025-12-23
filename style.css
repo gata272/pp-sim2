@@ -406,7 +406,7 @@ body {
 .mobile-btn {
     flex: 1; 
     min-width: 0;
-    height: 70px; /* 全体の高さ */
+    height: 120px; /* 全体の高さ */
     font-size: 1.3em; 
     font-weight: bold;
     color: white;
