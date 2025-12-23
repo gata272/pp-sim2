@@ -244,7 +244,7 @@ body {
 .mobile-btn {
     flex: 1; 
     min-width: 0;
-    height: 100px; /* iPhone16の画面縦幅に合わせて120pxから100pxに微調整 */
+    height: 120px; /* iPhone16の画面縦幅に合わせて120pxから100pxに微調整 */
     font-size: 1.2em; 
     font-weight: bold;
     color: white;
