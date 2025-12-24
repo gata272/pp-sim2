@@ -22,8 +22,7 @@
 
     <div id="wrapper">
         
-        <div id="puyo-board">
-        </div>
+        <div id="puyo-board"></div>
 
         <div id="info-panel">
             
@@ -32,10 +31,8 @@
                 <div id="play-next-info" class="info-box info-group-a">
                     <h2>NEXT</h2>
                     <div class="next-puyo-row">
-                        <div id="next-puyo-1" class="next-puyo-slot">
-                            </div>
-                        <div id="next-puyo-2" class="next-puyo-slot">
-                            </div>
+                        <div id="next-puyo-1" class="next-puyo-slot"></div>
+                        <div id="next-puyo-2" class="next-puyo-slot"></div>
                     </div>
                 </div>
 
@@ -51,15 +48,14 @@
                 </div>
                 
                 <div id="history-controls" class="common-control">
-                    <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
+                    <button id="undo-button" onclick="undoMove()" disabled>一手戻す (Z)</button>
                     <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
                 </div>
                 
                 <div id="play-controls" class="common-control">
                     <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
-                    <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
-                    
-                    <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
+                    <button id="reset-button-play" onclick="resetGame()">盤面リセット</button>
+                    <button class="mode-toggle-btn" onclick="toggleMode()">EDIT</button>
                 </div>
 
             </div>
@@ -69,56 +65,51 @@
                 <div id="color-palette" class="info-box edit-group-a">
                     <h2>パレット</h2>
                     <div class="palette-row">
-                        <div class="puyo palette-color puyo-1" data-color="1"></div> <div class="puyo palette-color puyo-2" data-color="2"></div> <div class="puyo palette-color puyo-3" data-color="3"></div> </div>
+                        <div class="puyo palette-color puyo-1" data-color="1"></div>
+                        <div class="puyo palette-color puyo-2" data-color="2"></div>
+                        <div class="puyo palette-color puyo-3" data-color="3"></div>
+                    </div>
                     <div class="palette-row">
-                        <div class="puyo palette-color puyo-4" data-color="4"></div> <div class="puyo palette-color puyo-5" data-color="5"></div> <div class="puyo palette-color puyo-0" data-color="0"></div> </div>
+                        <div class="puyo palette-color puyo-4" data-color="4"></div>
+                        <div class="puyo palette-color puyo-5" data-color="5"></div>
+                        <div class="puyo palette-color puyo-0" data-color="0"></div>
+                    </div>
                 </div>
 
                 <div id="stage-code-info" class="info-box">
                     <h2>ステージコード管理</h2>
-                    <div style="margin-bottom: 10px;">
-                        <textarea id="stage-code-input" placeholder="ステージコードを入力" rows="3" style="width: 100%; box-sizing: border-box; resize: none;"></textarea>
-                        <button onclick="loadStageCode()" style="width: 100%; padding: 8px; background-color: #f4a261; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 5px;">コードを読み込む</button>
-                    </div>
-                    <button onclick="copyStageCode()" style="width: 100%; padding: 8px; background-color: #2a9d8f; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">現在のステージをコード化 (コピー)</button>
+                    <textarea id="stage-code-input" placeholder="ステージコードを入力" rows="3"></textarea>
+                    <button class="stage-code-btn" onclick="loadStageCode()">コードを読み込む</button>
+                    <button class="stage-code-btn" onclick="copyStageCode()">現在のステージをコード化 (コピー)</button>
                 </div>
+
                 <div id="edit-next-info" class="info-box"> 
                     <h2>ネクスト設定</h2>
-                    
                     <div class="next-puyo-row">
                         <div class="next-puyo-slot" id="edit-next-1"></div>
                         <div class="next-puyo-slot" id="edit-next-2"></div>
                     </div>
-                    
-                    <div id="edit-next-list-container">
-                        </div>
-
-                    <button id="apply-next-button" onclick="applyNextPuyos()" style="margin-top:10px; width:100%; padding:8px; background-color: #457b9d; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクスト設定を適用</button>
-                    <button onclick="clearEditNext()" style="margin-top:10px; width:100%; padding:5px; background-color: #e63946; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクストをランダムで再生成</button>
+                    <div id="edit-next-list-container"></div>
+                    <button class="edit-next-btn" id="apply-next-button" onclick="applyNextPuyos()">ネクスト設定を適用</button>
+                    <button class="edit-next-btn" onclick="clearEditNext()">ネクストをランダムで再生成</button>
                 </div>
                 
                 <div id="edit-action-buttons" class="common-control">
-                    <div id="mode-toggle-container">
-                        <button class="mode-toggle-btn" onclick="toggleMode()">play (E)</button>
-                    </div>
-                    <div id="reset-button-container">
-                        <button id="reset-button-edit" onclick="resetGame(); toggleMode();">盤面リセット (R)</button>
-                    </div>
+                    <button class="mode-toggle-btn" onclick="toggleMode()">PLAY</button>
+                    <button id="reset-button-edit" onclick="resetGame(); toggleMode();">盤面リセット</button>
                 </div>
             </div>
             
         </div>
     </div>
-<div id="mobile-controls">
-    <button class="mobile-btn" id="btn-left">←</button>
-    <div class="btn-stack">
-        <button class="mobile-btn small-btn" id="btn-soft-drop">1↓</button>
-        <button class="mobile-btn small-btn" id="btn-hard-drop">M↓</button>
+    
+    <div id="mobile-controls">
+        <button class="mobile-btn" id="btn-left">←</button>
+        <button class="mobile-btn" id="btn-hard-drop">↓</button>
+        <button class="mobile-btn" id="btn-right">→</button>
+        <button class="mobile-btn" id="btn-rotate-cw">B</button>
+        <button class="mobile-btn" id="btn-rotate-ccw">A</button>
     </div>
-    <button class="mobile-btn" id="btn-right">→</button>
-    <button class="mobile-btn" id="btn-rotate-cw">B</button>
-    <button class="mobile-btn" id="btn-rotate-ccw">A</button>
-</div>
 
     <script src="puyoSim.js"></script>
     
