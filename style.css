@@ -1,5 +1,3 @@
-/* style.css の全体 */
-
 html, body {
     height: 100%; 
     margin: 0;
@@ -15,63 +13,51 @@ body {
     padding: 10px;
 }
 
-/* --- 【重要】レイアウトの強制横並び --- */
 #wrapper {
     display: flex;
     flex-direction: row; 
-    gap: 8px; /* iPhone16向けに15pxから8pxに短縮 */
+    gap: 15px;
     background-color: #222;
     padding: 10px;
     box-shadow: none;
     max-width: 800px;
     margin: 0 auto;
-    width: 100%; /* 95%から100%に変更して端まで活用 */
-    box-sizing: border-box;
+    width: 95%; 
     flex-grow: 1; 
     align-items: flex-start;
 }
 
-/* ぷよのセルサイズを 36px に微調整 (iPhone16の横幅 393px に収めるため) */
 #puyo-board {
-    --puyo-cell-size: 36px; 
-    
+    --puyo-cell-size: 40px; 
     display: grid;
     grid-template-rows: repeat(14, var(--puyo-cell-size)); 
-    grid-template-columns: repeat(6, var(--puyo-cell-size)) !important; 
-    
+    grid-template-columns: repeat(6, 40px) !important; 
     border: 3px solid #666;
     background-color: #000;
-    
     background-image: linear-gradient(to right, #1a1a1a 1px, transparent 1px),
                       linear-gradient(to bottom, #1a1a1a 1px, transparent 1px);
     background-size: var(--puyo-cell-size) var(--puyo-cell-size); 
     background-position: -1px -1px; 
-    
-    /* 幅を自動計算 (36 * 6 = 216px) */
-    width: calc(var(--puyo-cell-size) * 6) !important; 
-    height: calc(var(--puyo-cell-size) * 14) !important; 
-    
-    flex: 0 0 calc(var(--puyo-cell-size) * 6); 
-    min-width: calc(var(--puyo-cell-size) * 6); 
+    width: 240px !important; 
+    height: 560px; 
+    flex: 0 0 240px; 
+    min-width: 240px; 
     margin: 0;
-    
     max-width: 100%; 
     max-height: 90vh; 
     position: relative; 
 }
 
-/* --- 隠し領域の視覚化 --- */
-#puyo-board > div:nth-child(-n+12)
-{
+#puyo-board > div:nth-child(-n+12) {
     opacity: 0.5;
     background-color: rgba(50, 50, 50, 0.5); 
     border-bottom: 1px solid rgba(255, 0, 0, 0.5); 
 }
 
-/* --- ゲームオーバーライン --- */
 #puyo-board > div:nth-child(15) {
     position: relative;
     opacity: 1 !important; 
+    background-color: transparent !important;
 }
 
 #puyo-board > div:nth-child(15):after {
@@ -80,7 +66,7 @@ body {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 2.2em; 
+    font-size: 2.5em; 
     color: red;
     font-weight: bold;
     opacity: 0.8;
@@ -88,32 +74,32 @@ body {
     z-index: 10;
 }
 
-/* --- ぷよのデザイン --- */
 .puyo {
     border-radius: 50%;
     box-shadow: inset 0 -3px 0 rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2); 
     display: block; 
     box-sizing: border-box;
+    transition: transform 0.1s ease-out;
 }
+
 #puyo-board > div {
     display: flex; 
     justify-content: center;
     align-items: center;
 }
+
 #puyo-board > div > .puyo {
     width: 90%; 
     height: 90%;
 }
 
-/* --- 情報パネルのレスポンシブ調整 --- */
 #info-panel {
     display: flex;
     flex-direction: column; 
-    gap: 8px;
-    flex: 1; /* 残りの幅をすべて使う */
-    min-width: 0; /* 150pxの制限を解除して縮めるようにする */
+    gap: 10px;
+    flex: 1;
+    min-width: 150px;
     max-width: 200px;
-    overflow: hidden; /* はみ出し防止 */
 }
 
 #play-info-container, #edit-info-container {
@@ -121,45 +107,78 @@ body {
     flex-direction: column;
     gap: 10px;
     width: 100%;
+    flex-grow: 1;
 }
 
 .info-box {
-    padding: 8px 5px; /* 余白を少し詰める */
+    padding: 10px;
     border: 1px solid #444; 
     background-color: #333; 
     border-radius: 5px;
     text-align: center;
     width: 100%; 
-    box-sizing: border-box;
+    flex-shrink: 0; 
 }
 
 .info-box h2 {
-    margin: 0 0 3px 0;
-    font-size: 0.85em; /* 文字を少し小さく */
+    margin: 0 0 5px 0;
+    font-size: 1em;
     color: #ccc;
 }
 
 #score, #chain-count {
-    font-size: 1.25em; /* 数字を少し小さく */
+    font-size: 1.5em;
     font-weight: bold;
     color: #e63946;
 }
 
-/* NEXTぷよ */
+.info-group-a {
+    flex-direction: column; 
+    padding: 10px; 
+}
+
 .next-puyo-row {
     display: flex; 
     justify-content: center;
-    gap: 10px;
+    gap: 15px;
     margin-top: 5px;
 }
-#play-next-info .puyo {
-    width: 22px; 
-    height: 22px; 
+
+.next-puyo-slot {
+    display: flex;
+    flex-direction: column; 
+    gap: 3px;
+    align-items: center;
 }
 
-/* --- ボタン類 --- */
-#history-controls {
+#play-next-info .puyo, #edit-next-info .next-puyo-row .puyo {
+    width: 25px; 
+    height: 25px; 
+}
+
+#play-stats-info {
     display: flex;
+    flex-direction: column; 
+    gap: 10px;
+    width: 100%;
+    flex-shrink: 0;
+}
+
+#play-stats-info .info-box {
+    padding: 10px;
+    flex-grow: 1;
+    width: 100%;
+}
+
+#play-controls, #edit-controls, #mode-toggle-container, #history-controls {
+    width: 100%; 
+    display: flex;
+    flex-direction: column; 
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+#history-controls {
     flex-direction: row; 
     gap: 5px; 
     margin-bottom: 5px; 
@@ -167,117 +186,256 @@ body {
 
 #undo-button, #redo-button {
     flex-grow: 1; 
-    padding: 8px 2px;
+    padding: 8px 5px;
     border: none;
     border-radius: 5px;
-    font-size: 0.75em; /* iPhone向けに縮小 */
+    cursor: pointer;
+    font-size: 0.9em;
     font-weight: bold;
     color: white;
     background-color: #f4a261; 
 }
 
-.mode-toggle-btn, #reset-button-play, #auto-drop-toggle-button {
-    width: 100%;
-    padding: 8px;
-    border: none;
-    border-radius: 5px;
-    font-size: 0.85em;
-    font-weight: bold;
+#undo-button:disabled, #redo-button:disabled {
+    background-color: #555;
+    color: #bbb;
+    cursor: default;
 }
 
-.mode-toggle-btn { background-color: #457b9d; color: white; }
-#reset-button-play { background-color: #e63946; color: white; }
-#auto-drop-toggle-button { background-color: #2a9d8f; color: white; }
+#reset-button-play, #reset-button-edit, #auto-drop-toggle-button, .mode-toggle-btn {
+    width: 100%;
+    padding: 10px 10px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1em;
+    font-weight: bold;
+    text-transform: uppercase; 
+}
 
-/* --- モード表示 --- */
-.edit-info { display: none !important; } 
-.play-info { display: flex; flex-direction: column; } 
-.edit-mode-active .play-info { display: none !important; }
-.edit-mode-active .edit-info { display: flex !important; flex-direction: column; gap: 10px; }
+.mode-toggle-btn {
+    background-color: #457b9d; 
+    color: white;
+}
 
-/* --- パレット --- */
+#reset-button-play, #reset-button-edit {
+    background-color: #e63946;
+    color: white;
+}
+
+#auto-drop-toggle-button {
+    background-color: #2a9d8f; 
+    color: white;
+}
+
+#auto-drop-toggle-button.disabled {
+    background-color: #555; 
+    color: #bbb;
+}
+
+.edit-info { 
+    display: none !important; 
+    flex-grow: 0;
+} 
+
+.play-info { 
+    display: flex; 
+    flex-grow: 1;
+    flex-direction: column; 
+} 
+
+.edit-mode-active .play-info {
+    display: none !important; 
+    flex-grow: 0;
+}
+
+.edit-mode-active .edit-info {
+    display: flex !important; 
+    flex-direction: column; 
+    gap: 10px;
+    flex-grow: 1; 
+}
+
+#color-palette {
+    flex-grow: 1; 
+}
+
 .palette-row {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 5px; 
+    gap: 8px; 
     margin-top: 5px; 
+    justify-items: center; 
 }
-#color-palette .puyo { width: 100%; aspect-ratio: 1/1; cursor: pointer; }
-#color-palette .puyo.selected { box-shadow: 0 0 0 2px #fff, 0 0 4px 2px #ffc107; }
 
-/* --- 色定義 --- */
+#color-palette .puyo {
+    cursor: pointer;
+    box-shadow: 0 0 5px rgba(0,0,0,0.5);
+    width: 90%; 
+    aspect-ratio: 1 / 1; 
+}
+
+#color-palette .puyo.selected {
+    box-shadow: 0 0 0 2px #fff, 0 0 4px 4px #ffc107; 
+}
+
 .puyo-1 { background-color: #e63946; } 
 .puyo-2 { background-color: #457b9d; } 
 .puyo-3 { background-color: #8ac926; } 
 .puyo-4 { background-color: #fca311; } 
 .puyo-5 { background-color: #ccc; } 
-.puyo-0 { background-color: transparent !important; border: 2px dashed #666; }
 
-.puyo-ghost { opacity: 0.4; border: 2px dashed #fff; }
+.puyo-0 { 
+    background-color: transparent !important;
+    box-shadow: none !important;
+    border: 2px dashed #666; 
+}
 
-/* --- ★ モバイル操作ボタン (2段スタック版) ★ --- */
+.puyo-ghost {
+    box-shadow: none !important; 
+    border: 2px dashed #fff; 
+    opacity: 1; 
+}
+
+.puyo-1.puyo-ghost { 
+    background-color: rgba(230, 57, 70, 0.4); 
+    border-color: #e63946; 
+} 
+
+.puyo-2.puyo-ghost { 
+    background-color: rgba(69, 123, 157, 0.4); 
+    border-color: #457b9d;
+} 
+
+.puyo-3.puyo-ghost { 
+    background-color: rgba(138, 201, 38, 0.4); 
+    border-color: #8ac926;
+} 
+
+.puyo-4.puyo-ghost { 
+    background-color: rgba(252, 163, 17, 0.4); 
+    border-color: #fca311;
+} 
+
+.puyo-5.puyo-ghost { 
+    background-color: rgba(204, 204, 204, 0.4); 
+    border-color: #ccc;
+} 
+
+#edit-next-list-container {
+    max-height: 250px; 
+    overflow-y: auto;
+    padding: 5px 5px 0 5px; 
+    margin-top: 10px;
+    text-align: left; 
+    border: 1px dashed #555;
+    background-color: #2a2a2a;
+    border-radius: 3px;
+}
+
+.next-puyo-slot-pair {
+    display: flex;
+    align-items: center;
+    padding: 3px 0;
+    border-bottom: 1px dashed #444;
+}
+
+.next-puyo-slot-pair:last-child {
+    border-bottom: none;
+}
+
+.next-puyo-slot-pair span {
+    font-size: 0.8em;
+    width: 35px;
+    text-align: right;
+    color: #ccc;
+    flex-shrink: 0;
+    font-weight: bold;
+}
+
+.next-puyo-slot-pair .next-puyo-row {
+    margin: 0; 
+    gap: 8px; 
+    justify-content: flex-start; 
+    flex-grow: 1;
+    padding-left: 10px;
+    display: flex;
+    flex-direction: row; 
+    align-items: center;
+}
+
+#edit-next-list-container .puyo {
+    cursor: pointer;
+}
+
+#stage-code-input {
+    width: 100%;
+    box-sizing: border-box;
+    resize: none;
+    margin-bottom: 5px;
+}
+
+.stage-code-btn, .edit-next-btn {
+    width: 100%;
+    padding: 8px;
+    border: none;
+    font-weight: bold;
+    border-radius: 5px;
+    cursor: pointer;
+    margin-top: 5px;
+    color: white;
+}
+
+.stage-code-btn:first-of-type {
+    background-color: #f4a261;
+}
+
+.stage-code-btn:last-of-type {
+    background-color: #2a9d8f;
+}
+
+.edit-next-btn {
+    background-color: #457b9d;
+    margin-top: 10px;
+}
+
+.edit-next-btn:last-of-type {
+    background-color: #e63946;
+}
+
 #mobile-controls {
     display: none; 
-    margin-top: 15px;
+    margin-top: 10px;
     width: 100%;
-    max-width: 500px; 
+    max-width: 400px; 
     flex-direction: row; 
-    justify-content: center; 
-    gap: 6px; 
-    padding: 0 5px;
-    box-sizing: border-box;
-    align-items: stretch;
+    justify-content: space-between; 
+    gap: 10px; 
 }
 
 #mobile-controls.visible {
     display: flex;
 }
 
-.btn-stack {
-    display: flex;
-    flex-direction: column;
-    flex: 1.5; /* 落下ボタン列を少し広く */
-    gap: 4px;
-    min-width: 0;
-}
-
 .mobile-btn {
-    flex: 1; 
-    min-width: 0;
-    height: 120px; /* iPhone16の画面縦幅に合わせて120pxから100pxに微調整 */
-    font-size: 1.2em; 
+    width: 70px; 
+    height: 70px; 
+    padding: 0;
+    font-size: 1.6em; 
     font-weight: bold;
     color: white;
     border: none;
     border-radius: 8px;
     cursor: pointer;
     background-color: #457b9d; 
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    transition: background-color 0.1s;
     touch-action: manipulation;
-    transition: background-color 0.1s, transform 0.05s;
+    flex-shrink: 0; 
+    flex-grow: 1; 
+    line-height: 70px;
+    text-align: center;
 }
 
-.small-btn {
-    flex: none;
-    height: calc(50% - 2px);
-    font-size: 0.9em; 
-    white-space: nowrap;
-}
-
-#btn-soft-drop, #btn-hard-drop { background-color: #5e81ac; }
-#btn-rotate-cw, #btn-rotate-ccw { background-color: #6a0dad; }
-
-.mobile-btn:active {
-    filter: brightness(1.2);
-    transform: scale(0.95);
-}
-
-/* 50手リスト */
-#edit-next-list-container {
-    max-height: 180px; 
-    overflow-y: auto;
-    background-color: #2a2a2a;
-    border: 1px dashed #555;
+#btn-rotate-cw, #btn-rotate-ccw {
+    background-color: #6a0dad; 
 }
