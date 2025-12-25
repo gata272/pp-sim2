@@ -1210,6 +1210,26 @@ function handleInput(event) {
     }
 }
 
+document.getElementById('ai-button').addEventListener('click', () => {
+    if (gameState !== 'playing' || !currentPuyo) return;
+
+    // AIに最適な場所を計算させる
+    const bestMove = PuyoAI.getBestMove(
+        board, 
+        currentPuyo.axisColor, 
+        currentPuyo.childColor
+    );
+
+    // ヒントを表示（例：コンソールに出力、または盤面に点を描画）
+    console.log("AIの推奨位置:", bestMove);
+    showAIHint(bestMove);
+});
+
+function showAIHint(move) {
+    // 既存の描画処理(draw関数など)の中で、
+    // move.x と move.rotation に基づいた位置に色のついた点を描画するロジックを追加してください。
+}
+
 // ゲーム開始
 document.addEventListener('DOMContentLoaded', () => {
     initializeGame();
