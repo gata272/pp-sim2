@@ -1217,14 +1217,12 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 /**
  * puyoSim.js の末尾に追加してください。
- * AIが提案するドットに、操作中のぷよの色を確実に反映させます。
+ * 2手先読みAI(v2)に対応した統合コードです。
  */
 
 (function() {
-    // AIヒントの状態を保持
     let aiHint = null;
 
-    // style.css に基づくカラーコード定義
     const PUYO_COLORS = {
         1: '#e63946', // 赤
         2: '#457b9d', // 青
@@ -1234,7 +1232,6 @@ document.addEventListener('DOMContentLoaded', () => {
         0: 'transparent'
     };
 
-    // AIボタンの取得とスタイル設定
     const aiButton = document.getElementById('ai-button');
     if (aiButton) {
         aiButton.style.width = '100%';
@@ -1248,48 +1245,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // AIに最適な場所を計算させる
-            // puyoSim.js の currentPuyo は {mainColor, subColor, mainX, mainY, rotation} の構造
+            // ネクストぷよの情報を取得
+            // nextPuyoColors は [[c1, c2], [c3, c4], ...] の形式
+            const nextPair = nextPuyoColors[0] || [0, 0];
+
+            // AIに最適な場所を計算させる (2手先読み)
             aiHint = PuyoAI.getBestMove(
                 board, 
                 currentPuyo.mainColor, 
-                currentPuyo.subColor
+                currentPuyo.subColor,
+                nextPair[0],
+                nextPair[1]
             );
 
-            console.log("AI推奨位置:", aiHint);
-            
-            // ヒントを表示
+            console.log("AI(v2)推奨位置:", aiHint);
             showAIHintOnBoard();
         });
     }
 
-    /**
-     * 盤面にAIのヒント（色のついたドット）を表示する
-     */
     function showAIHintOnBoard() {
         if (!aiHint || !currentPuyo) return;
-
-        // 既存のヒントをすべて削除
         document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
 
-        // 軸ぷよ(main)の設置予定位置
         const axisX = aiHint.x;
         let axisY = getDropY(axisX);
-
-        // 子ぷよ(sub)の設置予定位置
         let childX = axisX;
         let childY = axisY;
         const r = aiHint.rotation;
         
-        // 回転に応じた子ぷよの位置（puyoSim.jsの仕様に合わせる）
-        // 0:上, 1:右, 2:下, 3:左
-        if (r === 0) {
-            childY = getDropY(axisX, axisY + 1); 
-        } else if (r === 1) {
+        if (r === 0) childY = getDropY(axisX, axisY + 1); 
+        else if (r === 1) {
             childX = axisX + 1;
             childY = getDropY(childX);
         } else if (r === 2) {
-            // 軸が上、子が下になる場合
             childY = axisY;
             axisY = getDropY(axisX, childY + 1);
         } else if (r === 3) {
@@ -1297,18 +1285,13 @@ document.addEventListener('DOMContentLoaded', () => {
             childY = getDropY(childX);
         }
 
-        // 操作中のぷよの色を取得（puyoSim.jsのプロパティ名を使用）
         const axisColorCode = PUYO_COLORS[currentPuyo.mainColor] || '#fff';
         const childColorCode = PUYO_COLORS[currentPuyo.subColor] || '#fff';
 
-        // ドットを描画（実際の色を反映）
         createDot(axisX, axisY, axisColorCode, '軸ぷよ');
         createDot(childX, childY, childColorCode, '子ぷよ');
     }
 
-    /**
-     * 指定した列でぷよが止まるY座標を計算する
-     */
     function getDropY(x, startY = 0) {
         if (x < 0 || x >= WIDTH) return -1;
         let y = Math.max(0, startY);
@@ -1318,46 +1301,30 @@ document.addEventListener('DOMContentLoaded', () => {
         return y < HEIGHT ? y : HEIGHT - 1;
     }
 
-    /**
-     * セル内にドットを生成する
-     */
     function createDot(x, y, color, label) {
         if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return;
-        
         const cell = document.getElementById(`cell-${x}-${y}`);
         if (cell) {
             const dot = document.createElement('div');
             dot.className = 'ai-hint-dot';
             dot.style.position = 'absolute';
-            dot.style.width = '16px'; // 少し大きく
-            dot.style.height = '16px';
+            dot.style.width = '18px';
+            dot.style.height = '18px';
             dot.style.backgroundColor = color;
             dot.style.borderRadius = '50%';
             dot.style.top = '50%';
             dot.style.left = '50%';
             dot.style.transform = 'translate(-50%, -50%)';
             dot.style.zIndex = '100';
-            dot.style.border = '2px solid #fff'; // 白い縁取り
-            dot.style.boxShadow = '0 0 6px rgba(0,0,0,0.8)';
-            dot.title = label;
+            dot.style.border = '3px solid #fff';
+            dot.style.boxShadow = '0 0 8px rgba(0,0,0,0.9)';
             cell.style.position = 'relative';
             cell.appendChild(dot);
         }
     }
 
-    // 設置時にヒントをクリアする処理を window に公開
     window.clearAIHint = function() {
         aiHint = null;
         document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
     };
-
-    // 既存の renderBoard を拡張して、描画時にヒントが消えないようにするか、
-    // あるいは特定のタイミングで消すように調整
-    const originalRenderBoard = window.renderBoard;
-    window.renderBoard = function() {
-        if (typeof originalRenderBoard === 'function') originalRenderBoard();
-        // 盤面が再描画された際、ヒントが消えてしまう場合はここで再描画するロジックが必要
-        // 今回はDOMに直接追加しているので、innerHTMLが書き換えられると消えます。
-    };
 })();
-
