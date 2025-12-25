@@ -1305,3 +1305,129 @@ function drawDot(x, y, color) {
 
 // ぷよが設置されたらヒントを消す処理を dropPuyo 等に追加してください
 // aiHint = null;
+(function() {
+    // AIヒントの状態を保持
+    let aiHint = null;
+
+    // AIボタンの取得とスタイル設定
+    const aiButton = document.getElementById('ai-button');
+    if (aiButton) {
+        // ボタンの幅を100%にするスタイル調整
+        aiButton.style.width = '100%';
+        aiButton.style.marginTop = '10px';
+        aiButton.style.padding = '10px';
+        aiButton.style.boxSizing = 'border-box';
+
+        aiButton.addEventListener('click', () => {
+            if (gameState !== 'playing' || !currentPuyo) {
+                alert("プレイ中のみAIヒントを表示できます。");
+                return;
+            }
+
+            // AIに最適な場所を計算させる
+            // puyoSim.js の currentPuyo は {x, y, axisColor, childColor, rotation} の構造
+            aiHint = PuyoAI.getBestMove(
+                board, 
+                currentPuyo.axisColor, 
+                currentPuyo.childColor
+            );
+
+            console.log("AI推奨位置:", aiHint);
+            
+            // ヒントを表示
+            showAIHintOnBoard();
+        });
+    }
+
+    /**
+     * 盤面にAIのヒント（ドット）を表示する
+     */
+    function showAIHintOnBoard() {
+        if (!aiHint) return;
+
+        // 既存のヒントをすべて削除
+        document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
+
+        // 軸ぷよの設置予定位置（一番下まで落とした位置）
+        const axisX = aiHint.x;
+        let axisY = getDropY(axisX);
+
+        // 子ぷよの設置予定位置
+        let childX = axisX;
+        let childY = axisY;
+        const r = aiHint.rotation;
+        
+        // 回転に応じた子ぷよの位置（puyoSim.jsの仕様に合わせる）
+        // 0:上, 1:右, 2:下, 3:左
+        if (r === 0) childY = getDropY(axisX, axisY + 1); 
+        else if (r === 1) {
+            childX = axisX + 1;
+            childY = getDropY(childX);
+        } else if (r === 2) {
+            // 軸が上、子が下になる場合
+            childY = axisY;
+            axisY = getDropY(axisX, childY + 1);
+        } else if (r === 3) {
+            childX = axisX - 1;
+            childY = getDropY(childX);
+        }
+
+        // ドットを描画
+        createDot(axisX, axisY, 'rgba(255, 255, 255, 0.8)', '軸');
+        createDot(childX, childY, 'rgba(255, 255, 0, 0.8)', '子');
+    }
+
+    /**
+     * 指定した列でぷよが止まるY座標を計算する
+     */
+    function getDropY(x, startY = 0) {
+        if (x < 0 || x >= WIDTH) return -1;
+        for (let y = Math.max(0, startY); y < HEIGHT; y++) {
+            if (board[y][x] === COLORS.EMPTY) {
+                return y;
+            }
+        }
+        return HEIGHT - 1;
+    }
+
+    /**
+     * セル内にドットを生成する
+     */
+    function createDot(x, y, color, label) {
+        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return;
+        
+        const cell = document.getElementById(`cell-${x}-${y}`);
+        if (cell) {
+            const dot = document.createElement('div');
+            dot.className = 'ai-hint-dot';
+            dot.style.position = 'absolute';
+            dot.style.width = '12px';
+            dot.style.height = '12px';
+            dot.style.backgroundColor = color;
+            dot.style.borderRadius = '50%';
+            dot.style.top = '50%';
+            dot.style.left = '50%';
+            dot.style.transform = 'translate(-50%, -50%)';
+            dot.style.zIndex = '100';
+            dot.style.border = '2px solid rgba(0,0,0,0.5)';
+            dot.title = label;
+            cell.style.position = 'relative';
+            cell.appendChild(dot);
+        }
+    }
+
+    // ぷよが設置されたり、盤面が更新されたらヒントを消すためのフック
+    const originalRenderBoard = window.renderBoard;
+    window.renderBoard = function() {
+        if (typeof originalRenderBoard === 'function') originalRenderBoard();
+        // 盤面描画時にヒントを消す（新しい手番になったら消えるようにする）
+        // ただし、AIボタンを押した直後は消したくないので、
+        // 設置処理(placePuyo等)の後に aiHint = null するのが理想的
+    };
+
+    // 設置時にヒントをクリアする処理を window に公開
+    window.clearAIHint = function() {
+        aiHint = null;
+        document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
+    };
+})();
