@@ -1357,3 +1357,71 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
     };
 })();
+
+// --- AI連携コード (Manus AI) ---
+(function() {
+    let aiHint = null;
+    const PUYO_COLORS = { 1: '#e63946', 2: '#457b9d', 3: '#8ac926', 4: '#fca311', 5: '#ccc', 0: 'transparent' };
+
+    const aiButton = document.getElementById('ai-button');
+    if (aiButton) {
+        aiButton.addEventListener('click', () => {
+            if (gameState !== 'playing' || !currentPuyo) {
+                alert('プレイ中のみAIヒントを表示できます。');
+                return;
+            }
+            const nextPair = nextPuyoColors[0] || [0, 0];
+            aiHint = PuyoAI.getBestMove(board, currentPuyo.mainColor, currentPuyo.subColor, nextPair[0], nextPair[1]);
+            showAIHintOnBoard();
+        });
+    }
+
+    function showAIHintOnBoard() {
+        if (!aiHint || !currentPuyo) return;
+        document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
+        const axisX = aiHint.x;
+        let axisY = getDropY(axisX);
+        let childX = axisX;
+        let childY = axisY;
+        const r = aiHint.rotation;
+        if (r === 0) childY = getDropY(axisX, axisY + 1); 
+        else if (r === 1) { childX = axisX + 1; childY = getDropY(childX); }
+        else if (r === 2) { childY = axisY; axisY = getDropY(axisX, childY + 1); }
+        else if (r === 3) { childX = axisX - 1; childY = getDropY(childX); }
+        if (axisY < 13) createDot(axisX, axisY, PUYO_COLORS[currentPuyo.mainColor]);
+        if (childY < 13) createDot(childX, childY, PUYO_COLORS[currentPuyo.subColor]);
+    }
+
+    function getDropY(x, startY = 0) {
+        if (x < 0 || x >= WIDTH) return -1;
+        let y = Math.max(0, startY);
+        while (y < HEIGHT && board[y][x] !== COLORS.EMPTY) y++;
+        return y;
+    }
+
+    function createDot(x, y, color) {
+        const cell = document.getElementById('cell-' + x + '-' + y);
+        if (cell) {
+            const dot = document.createElement('div');
+            dot.className = 'ai-hint-dot';
+            dot.style.position = 'absolute';
+            dot.style.width = '18px';
+            dot.style.height = '18px';
+            dot.style.backgroundColor = color;
+            dot.style.borderRadius = '50%';
+            dot.style.top = '50%';
+            dot.style.left = '50%';
+            dot.style.transform = 'translate(-50%, -50%)';
+            dot.style.zIndex = '100';
+            dot.style.border = '3px solid #fff';
+            dot.style.boxShadow = '0 0 8px rgba(0,0,0,0.9)';
+            cell.style.position = 'relative';
+            cell.appendChild(dot);
+        }
+    }
+
+    window.clearAIHint = function() {
+        aiHint = null;
+        document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
+    };
+})();
