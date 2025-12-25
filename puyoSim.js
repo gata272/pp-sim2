@@ -1431,3 +1431,130 @@ function drawDot(x, y, color) {
         document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
     };
 })();
+(function() {
+    // AIヒントの状態を保持
+    let aiHint = null;
+
+    // style.css に基づくカラーコード定義
+    const PUYO_COLORS = {
+        1: '#e63946', // 赤
+        2: '#457b9d', // 青
+        3: '#8ac926', // 緑
+        4: '#fca311', // 黄
+        5: '#ccc',    // おじゃま
+        0: 'transparent'
+    };
+
+    // AIボタンの取得とスタイル設定
+    const aiButton = document.getElementById('ai-button');
+    if (aiButton) {
+        aiButton.style.width = '100%';
+        aiButton.style.marginTop = '10px';
+        aiButton.style.padding = '10px';
+        aiButton.style.boxSizing = 'border-box';
+
+        aiButton.addEventListener('click', () => {
+            if (gameState !== 'playing' || !currentPuyo) {
+                alert("プレイ中のみAIヒントを表示できます。");
+                return;
+            }
+
+            // AIに最適な場所を計算させる
+            aiHint = PuyoAI.getBestMove(
+                board, 
+                currentPuyo.axisColor, 
+                currentPuyo.childColor
+            );
+
+            console.log("AI推奨位置:", aiHint);
+            
+            // ヒントを表示
+            showAIHintOnBoard();
+        });
+    }
+
+    /**
+     * 盤面にAIのヒント（色のついたドット）を表示する
+     */
+    function showAIHintOnBoard() {
+        if (!aiHint || !currentPuyo) return;
+
+        // 既存のヒントをすべて削除
+        document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
+
+        // 軸ぷよの設置予定位置
+        const axisX = aiHint.x;
+        let axisY = getDropY(axisX);
+
+        // 子ぷよの設置予定位置
+        let childX = axisX;
+        let childY = axisY;
+        const r = aiHint.rotation;
+        
+        // 回転に応じた子ぷよの位置
+        if (r === 0) childY = getDropY(axisX, axisY + 1); 
+        else if (r === 1) {
+            childX = axisX + 1;
+            childY = getDropY(childX);
+        } else if (r === 2) {
+            childY = axisY;
+            axisY = getDropY(axisX, childY + 1);
+        } else if (r === 3) {
+            childX = axisX - 1;
+            childY = getDropY(childX);
+        }
+
+        // 操作中のぷよの色を取得
+        const axisColorCode = PUYO_COLORS[currentPuyo.axisColor] || '#fff';
+        const childColorCode = PUYO_COLORS[currentPuyo.childColor] || '#fff';
+
+        // ドットを描画（実際の色を反映）
+        createDot(axisX, axisY, axisColorCode, '軸ぷよ');
+        createDot(childX, childY, childColorCode, '子ぷよ');
+    }
+
+    /**
+     * 指定した列でぷよが止まるY座標を計算する
+     */
+    function getDropY(x, startY = 0) {
+        if (x < 0 || x >= WIDTH) return -1;
+        let y = Math.max(0, startY);
+        while (y < HEIGHT && board[y][x] !== COLORS.EMPTY) {
+            y++;
+        }
+        return y < HEIGHT ? y : HEIGHT - 1;
+    }
+
+    /**
+     * セル内にドットを生成する
+     */
+    function createDot(x, y, color, label) {
+        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return;
+        
+        const cell = document.getElementById(`cell-${x}-${y}`);
+        if (cell) {
+            const dot = document.createElement('div');
+            dot.className = 'ai-hint-dot';
+            dot.style.position = 'absolute';
+            dot.style.width = '14px';
+            dot.style.height = '14px';
+            dot.style.backgroundColor = color;
+            dot.style.borderRadius = '50%';
+            dot.style.top = '50%';
+            dot.style.left = '50%';
+            dot.style.transform = 'translate(-50%, -50%)';
+            dot.style.zIndex = '100';
+            dot.style.border = '2px solid #fff'; // 白い縁取りで目立たせる
+            dot.style.boxShadow = '0 0 4px rgba(0,0,0,0.8)';
+            dot.title = label;
+            cell.style.position = 'relative';
+            cell.appendChild(dot);
+        }
+    }
+
+    // 設置時にヒントをクリアする処理を window に公開
+    window.clearAIHint = function() {
+        aiHint = null;
+        document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
+    };
+})();
