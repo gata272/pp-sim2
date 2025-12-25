@@ -19,21 +19,80 @@
             font-weight: bold;
             font-size: 16px;
         }
-        /* エディットモードのネクスト設定の表示修正 */
-        .next-puyo-slot {
-            position: relative;
-            min-height: 30px;
+
+        /* NEXTぷよを縦並びに修正 */
+        .next-puyo-row {
             display: flex;
             justify-content: center;
-            align-items: center;
-            background-color: rgba(255, 255, 255, 0.1);
-            border-radius: 4px;
+            gap: 15px;
+            margin-top: 5px;
         }
-        #edit-next-list-container .puyo {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            margin: 2px;
+        .next-puyo-slot {
+            display: flex;
+            flex-direction: column-reverse; /* 軸が下、子が上 */
+            align-items: center;
+            gap: 2px;
+            min-width: 30px;
+            min-height: 60px;
+            background-color: rgba(0, 0, 0, 0.3);
+            padding: 5px;
+            border-radius: 5px;
+        }
+        .next-puyo-slot .puyo {
+            width: 24px;
+            height: 24px;
+        }
+
+        /* エディットモードのネクスト設定をスリム化 */
+        #edit-next-list-container {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+            background: #1a1a1a;
+            padding: 5px;
+            border: 1px solid #444;
+            text-align: left;
+        }
+        .edit-next-item {
+            display: flex;
+            align-items: center;
+            padding: 2px 5px;
+            border-bottom: 1px solid #333;
+            font-size: 12px;
+            color: #ccc;
+        }
+        .edit-next-item:last-child { border-bottom: none; }
+        .edit-next-label {
+            width: 35px;
+            font-weight: bold;
+        }
+        .edit-next-puyos {
+            display: flex;
+            gap: 4px;
+            margin-left: 10px;
+        }
+        .edit-next-puyos .puyo {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+        }
+
+        /* パレットの調整 */
+        .palette-row {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .palette-color {
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        .palette-color.selected {
+            border-color: #fff;
+            box-shadow: 0 0 5px #ff9800;
         }
     </style>
 </head>
@@ -43,41 +102,44 @@
         <div id="puyo-board"></div>
 
         <div id="info-panel">
+            <!-- プレイモード情報 -->
             <div id="play-info-container" class="play-info">
-                <div id="play-next-info" class="info-box info-group-a">
+                <div id="play-next-info" class="info-box">
                     <h2>NEXT</h2>
                     <div class="next-puyo-row">
-                        <div id="next-puyo-1" class="next-puyo-slot"></div>
-                        <div id="next-puyo-2" class="next-puyo-slot"></div>
+                        <div class="next-puyo-slot">
+                            <span style="font-size: 10px; color: #888;">N1</span>
+                            <div id="next-puyo-1-axis"></div>
+                            <div id="next-puyo-1-child"></div>
+                        </div>
+                        <div class="next-puyo-slot">
+                            <span style="font-size: 10px; color: #888;">N2</span>
+                            <div id="next-puyo-2-axis"></div>
+                            <div id="next-puyo-2-child"></div>
+                        </div>
                     </div>
                 </div>
 
-                <div id="play-stats-info">
-                    <div id="score-box" class="info-box">
-                        <h2>スコア</h2>
-                        <span id="score">0</span>
+                <div class="info-box">
+                    <h2>スコア / 連鎖</h2>
+                    <div style="font-size: 18px; font-weight: bold; color: #e63946;">
+                        <span id="score">0</span> / <span id="chain-count">0</span>
                     </div>
-                    <div id="chain-box" class="info-box">
-                        <h2>連鎖数</h2>
-                        <span id="chain-count">0</span>
-                    </div>
-                </div>
-                
-                <div id="history-controls" class="common-control">
-                    <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
-                    <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
                 </div>
                 
                 <div id="play-controls" class="common-control">
-                    <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
-                    <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
+                    <button id="undo-button" onclick="undoMove()" style="width:48%">戻す</button>
+                    <button id="redo-button" onclick="redoMove()" style="width:48%">進む</button>
+                    <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()" style="margin-top:5px">自動落下: ON</button>
+                    <button id="reset-button-play" onclick="resetGame()" style="margin-top:5px">リセット</button>
                     <button id="ai-button">AIヒントを表示</button>
-                    <button class="mode-toggle-btn" onclick="toggleMode()" style="margin-top: 10px;">edit (E)</button>
+                    <button class="mode-toggle-btn" onclick="toggleMode()" style="margin-top: 10px; background-color: #457b9d;">エディットモードへ</button>
                 </div>
             </div>
             
+            <!-- エディットモード情報 -->
             <div id="edit-info-container" class="edit-info">
-                <div id="color-palette" class="info-box edit-group-a">
+                <div id="color-palette" class="info-box">
                     <h2>パレット</h2>
                     <div class="palette-row">
                         <div class="puyo palette-color puyo-1" data-color="1"></div>
@@ -91,27 +153,28 @@
                     </div>
                 </div>
 
-                <div id="stage-code-info" class="info-box">
-                    <h2>ステージコード管理</h2>
-                    <textarea id="stage-code-input" placeholder="ステージコードを入力" rows="3" style="width: 100%; box-sizing: border-box; resize: none;"></textarea>
-                    <button onclick="loadStageCode()" style="width: 100%; padding: 8px; background-color: #f4a261; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 5px;">コードを読み込む</button>
-                    <button onclick="copyStageCode()" style="width: 100%; padding: 8px; background-color: #2a9d8f; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 5px;">現在のステージをコード化</button>
-                </div>
-
-                <div id="edit-next-info" class="info-box"> 
+                <div class="info-box">
                     <h2>ネクスト設定</h2>
                     <div class="next-puyo-row">
                         <div class="next-puyo-slot" id="edit-next-1"></div>
                         <div class="next-puyo-slot" id="edit-next-2"></div>
                     </div>
-                    <div id="edit-next-list-container" style="max-height: 150px; overflow-y: auto; margin-top: 10px; background: #222; padding: 5px;"></div>
-                    <button onclick="applyNextPuyos()" style="margin-top:10px; width:100%; padding:8px; background-color: #457b9d; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">設定を適用</button>
-                    <button onclick="clearEditNext()" style="margin-top:5px; width:100%; padding:5px; background-color: #e63946; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ランダム再生成</button>
+                    <div id="edit-next-list-container">
+                        <!-- ここに N3: ぷよ 形式でリストが生成される -->
+                    </div>
+                    <button onclick="applyNextPuyos()" style="margin-top:10px; width:100%; padding:8px; background-color: #2a9d8f; color: white; border: none; border-radius: 5px; cursor: pointer;">設定を適用</button>
+                    <button onclick="clearEditNext()" style="margin-top:5px; width:100%; padding:5px; background-color: #e63946; color: white; border: none; border-radius: 5px; cursor: pointer;">ランダム再生成</button>
+                </div>
+
+                <div class="info-box">
+                    <h2>ステージコード</h2>
+                    <textarea id="stage-code-input" placeholder="コードを入力" rows="2" style="width: 100%; box-sizing: border-box; font-size: 10px;"></textarea>
+                    <button onclick="loadStageCode()" style="width: 48%; font-size: 11px; margin-top: 5px;">読込</button>
+                    <button onclick="copyStageCode()" style="width: 48%; font-size: 11px; margin-top: 5px;">コピー</button>
                 </div>
                 
-                <div id="edit-action-buttons" class="common-control">
-                    <button class="mode-toggle-btn" onclick="toggleMode()">play (E)</button>
-                    <button id="reset-button-edit" onclick="resetGame(); toggleMode();">盤面リセット (R)</button>
+                <div class="common-control">
+                    <button class="mode-toggle-btn" onclick="toggleMode()" style="background-color: #e63946;">プレイモードへ</button>
                 </div>
             </div>
         </div>
@@ -130,5 +193,66 @@
 
     <script src="puyoAI.js"></script>
     <script src="puyoSim.js"></script>
+    
+    <script>
+        // puyoSim.js の renderEditNextPuyos をスリムな形式に上書きするためのフック
+        // puyoSim.js が読み込まれた後に実行されるように調整
+        window.addEventListener('load', () => {
+            const originalRenderEditNextPuyos = window.renderEditNextPuyos;
+            window.renderEditNextPuyos = function() {
+                const container = document.getElementById('edit-next-list-container');
+                if (!container) return;
+                
+                container.innerHTML = '';
+                // 3手目から50手目を表示
+                for (let i = 2; i < editingNextPuyos.length; i++) {
+                    const pair = editingNextPuyos[i];
+                    const item = document.createElement('div');
+                    item.className = 'edit-next-item';
+                    item.innerHTML = `
+                        <span class="edit-next-label">N${i+1}:</span>
+                        <div class="edit-next-puyos">
+                            <div class="puyo puyo-${pair[0]}"></div>
+                            <div class="puyo puyo-${pair[1]}"></div>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                }
+                
+                // NEXT 1, 2 の表示
+                const n1 = document.getElementById('edit-next-1');
+                const n2 = document.getElementById('edit-next-2');
+                if (n1 && editingNextPuyos[0]) {
+                    n1.innerHTML = `<span style="font-size:10px;color:#888">N1</span>
+                                    <div class="puyo puyo-${editingNextPuyos[0][1]}"></div>
+                                    <div class="puyo puyo-${editingNextPuyos[0][0]}"></div>`;
+                }
+                if (n2 && editingNextPuyos[1]) {
+                    n2.innerHTML = `<span style="font-size:10px;color:#888">N2</span>
+                                    <div class="puyo puyo-${editingNextPuyos[1][1]}"></div>
+                                    <div class="puyo puyo-${editingNextPuyos[1][0]}"></div>`;
+                }
+            };
+            
+            // プレイモードのNEXT表示を更新する関数を上書き
+            const originalUpdateUI = window.updateUI;
+            window.updateUI = function() {
+                if (typeof originalUpdateUI === 'function') originalUpdateUI();
+                
+                // 縦並びのNEXT表示を更新
+                if (nextPuyoColors && nextPuyoColors.length >= 2) {
+                    const n1_axis = document.getElementById('next-puyo-1-axis');
+                    const n1_child = document.getElementById('next-puyo-1-child');
+                    const n2_axis = document.getElementById('next-puyo-2-axis');
+                    const n2_child = document.getElementById('next-puyo-2-child');
+                    
+                    if (n1_axis) n1_axis.className = `puyo puyo-${nextPuyoColors[0][0]}`;
+                    if (n1_child) n1_child.className = `puyo puyo-${nextPuyoColors[0][1]}`;
+                    if (n2_axis) n2_axis.className = `puyo puyo-${nextPuyoColors[1][0]}`;
+                    if (n2_child) n2_child.className = `puyo puyo-${nextPuyoColors[1][1]}`;
+                }
+            };
+        });
+    </script>
 </body>
 </html>
