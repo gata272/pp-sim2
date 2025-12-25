@@ -281,3 +281,60 @@ body {
     background-color: #2a2a2a;
     border: 1px dashed #555;
 }
+
+/* --- エディットモード：ネクスト設定の表示復元 --- */
+
+/* ネクストの器（これがないと中身が0pxで潰れます） */
+.next-puyo-slot {
+    width: 36px;
+    height: 72px; 
+    background-color: rgba(0, 0, 0, 0.4);
+    border: 1px solid #555;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column; /* ぷよを縦に並べる */
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+}
+
+/* スロット内のぷよサイズ */
+.next-puyo-slot .puyo {
+    width: 28px !important;
+    height: 28px !important;
+    margin: 1px 0;
+}
+
+/* 50手リスト（N3以降）の1行分のレイアウト */
+.next-puyo-slot-pair {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid #333;
+    background-color: #2a2a2a;
+}
+
+.next-puyo-slot-pair span {
+    font-size: 0.8em;
+    color: #888;
+    width: 30px;
+}
+
+/* リスト内のスロットは少しだけコンパクトに */
+#edit-next-list-container .next-puyo-slot {
+    width: 28px;
+    height: 56px;
+}
+
+#edit-next-list-container .puyo {
+    width: 20px !important;
+    height: 20px !important;
+}
+
+/* リスト全体のスクロール設定 */
+#edit-next-list-container {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #444;
+}
