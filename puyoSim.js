@@ -1210,28 +1210,98 @@ function handleInput(event) {
     }
 }
 
-document.getElementById('ai-button').addEventListener('click', () => {
-    if (gameState !== 'playing' || !currentPuyo) return;
-
-    // AIに最適な場所を計算させる
-    const bestMove = PuyoAI.getBestMove(
-        board, 
-        currentPuyo.axisColor, 
-        currentPuyo.childColor
-    );
-
-    // ヒントを表示（例：コンソールに出力、または盤面に点を描画）
-    console.log("AIの推奨位置:", bestMove);
-    showAIHint(bestMove);
-});
-
-function showAIHint(move) {
-    // 既存の描画処理(draw関数など)の中で、
-    // move.x と move.rotation に基づいた位置に色のついた点を描画するロジックを追加してください。
-}
-
 // ゲーム開始
 document.addEventListener('DOMContentLoaded', () => {
     initializeGame();
     window.addEventListener('resize', checkMobileControlsVisibility);
 });
+
+/**
+ * puyoSim.js の末尾、または適切な初期化関数内に追加してください。
+ */
+
+// AIヒントの状態を保持する変数
+let aiHint = null;
+
+// AIボタンのイベントリスナー設定
+document.getElementById('ai-button').addEventListener('click', () => {
+    if (gameState !== 'playing' || !currentPuyo) {
+        alert("プレイ中のみAIヒントを表示できます。");
+        return;
+    }
+
+    // AIに最適な場所を計算させる
+    // currentPuyo の構造に合わせて引数を調整してください
+    aiHint = PuyoAI.getBestMove(
+        board, 
+        currentPuyo.axisColor, 
+        currentPuyo.childColor
+    );
+
+    console.log("AI推奨位置:", aiHint);
+    
+    // 描画を更新するために draw() を呼ぶ（もし自動で呼ばれていない場合）
+    if (typeof draw === 'function') draw();
+});
+
+/**
+ * 既存の drawPuyo 関数や盤面描画ループの中で、
+ * AIのヒントを描画する処理を追加する例です。
+ */
+function drawAIHint(ctx) {
+    if (!aiHint) return;
+
+    // ぷよのサイズ（puyoSim.js内の定数に合わせてください）
+    const PUYO_SIZE = 32; 
+
+    // 軸ぷよの推奨位置
+    const axisX = aiHint.x;
+    // 設置後のY座標を計算（簡易的に一番下を探す例）
+    let axisY = 0;
+    for (let y = 0; y < HEIGHT; y++) {
+        if (board[y][axisX] === 0) {
+            axisY = y;
+            break;
+        }
+    }
+
+    // 子ぷよの推奨位置
+    let childX = axisX;
+    let childY = axisY;
+    const r = aiHint.rotation;
+    if (r === 0) childY++; // 上
+    else if (r === 1) childX++; // 右
+    else if (r === 2) childY--; // 下
+    else if (r === 3) childX--; // 左
+
+    // 画面上の座標に変換して描画（実装に合わせて調整してください）
+    // ここでは「色のついた点」として描画します
+    drawDot(axisX, axisY, 'rgba(255, 255, 255, 0.8)'); // 軸ぷよの位置に白い点
+    drawDot(childX, childY, 'rgba(255, 255, 0, 0.8)');   // 子ぷよの位置に黄色い点
+}
+
+function drawDot(x, y, color) {
+    // 盤面のDOM要素を取得して、その上に点を重ねる実装例
+    const cell = document.getElementById(`cell-${x}-${y}`);
+    if (cell) {
+        // 既存のヒントを消去
+        const oldHint = cell.querySelector('.ai-hint-dot');
+        if (oldHint) oldHint.remove();
+
+        const dot = document.createElement('div');
+        dot.className = 'ai-hint-dot';
+        dot.style.position = 'absolute';
+        dot.style.width = '10px';
+        dot.style.height = '10px';
+        dot.style.backgroundColor = color;
+        dot.style.borderRadius = '50%';
+        dot.style.top = '50%';
+        dot.style.left = '50%';
+        dot.style.transform = 'translate(-50%, -50%)';
+        dot.style.zIndex = '10';
+        cell.appendChild(dot);
+    }
+}
+
+// ぷよが設置されたらヒントを消す処理を dropPuyo 等に追加してください
+// aiHint = null;
