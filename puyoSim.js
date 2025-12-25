@@ -1215,10 +1215,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeGame();
     window.addEventListener('resize', checkMobileControlsVisibility);
 });
-/**
- * puyoSim.js の末尾に追加してください。
- * 2手先読みAI(v2)に対応した統合コードです。
- */
 
 (function() {
     let aiHint = null;
@@ -1232,24 +1228,15 @@ document.addEventListener('DOMContentLoaded', () => {
         0: 'transparent'
     };
 
+    // AIボタンの設定
     const aiButton = document.getElementById('ai-button');
     if (aiButton) {
-        aiButton.style.width = '100%';
-        aiButton.style.marginTop = '10px';
-        aiButton.style.padding = '10px';
-        aiButton.style.boxSizing = 'border-box';
-
         aiButton.addEventListener('click', () => {
             if (gameState !== 'playing' || !currentPuyo) {
                 alert("プレイ中のみAIヒントを表示できます。");
                 return;
             }
-
-            // ネクストぷよの情報を取得
-            // nextPuyoColors は [[c1, c2], [c3, c4], ...] の形式
             const nextPair = nextPuyoColors[0] || [0, 0];
-
-            // AIに最適な場所を計算させる (2手先読み)
             aiHint = PuyoAI.getBestMove(
                 board, 
                 currentPuyo.mainColor, 
@@ -1257,8 +1244,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 nextPair[0],
                 nextPair[1]
             );
-
-            console.log("AI(v2)推奨位置:", aiHint);
             showAIHintOnBoard();
         });
     }
@@ -1285,11 +1270,9 @@ document.addEventListener('DOMContentLoaded', () => {
             childY = getDropY(childX);
         }
 
-        const axisColorCode = PUYO_COLORS[currentPuyo.mainColor] || '#fff';
-        const childColorCode = PUYO_COLORS[currentPuyo.subColor] || '#fff';
-
-        createDot(axisX, axisY, axisColorCode, '軸ぷよ');
-        createDot(childX, childY, childColorCode, '子ぷよ');
+        // 14列目(Y=13)に置かれる場合は表示しない（または消えることを示す）
+        if (axisY < 13) createDot(axisX, axisY, PUYO_COLORS[currentPuyo.mainColor], '軸');
+        if (childY < 13) createDot(childX, childY, PUYO_COLORS[currentPuyo.subColor], '子');
     }
 
     function getDropY(x, startY = 0) {
@@ -1298,7 +1281,7 @@ document.addEventListener('DOMContentLoaded', () => {
         while (y < HEIGHT && board[y][x] !== COLORS.EMPTY) {
             y++;
         }
-        return y < HEIGHT ? y : HEIGHT - 1;
+        return y;
     }
 
     function createDot(x, y, color, label) {
@@ -1322,6 +1305,52 @@ document.addEventListener('DOMContentLoaded', () => {
             cell.appendChild(dot);
         }
     }
+
+    /**
+     * 落下バグの修正: 14列目に置かれた際の個別落下処理
+     * puyoSim.js の lockPuyo 関数をオーバーライドして修正します。
+     */
+    const originalLockPuyo = window.lockPuyo;
+    window.lockPuyo = function() {
+        if (!currentPuyo) return;
+
+        const coords = getCoordsFromState(currentPuyo);
+        let placedAny = false;
+
+        // 1つずつ個別に設置判定を行う
+        coords.forEach((p, index) => {
+            const color = (index === 0) ? currentPuyo.mainColor : currentPuyo.subColor;
+            
+            // 14列目(Y=13)より下であれば設置
+            if (p.y < 13 && p.x >= 0 && p.x < WIDTH) {
+                board[p.y][p.x] = color;
+                placedAny = true;
+            }
+            // 14列目(Y=13)の場合は何もしない（自動削除の挙動）
+        });
+
+        currentPuyo = null;
+        
+        // 設置後に浮いているぷよを落とす
+        gravity();
+
+        const groups = findConnectedPuyos();
+        if (groups.length > 0) {
+            gameState = 'chaining';
+            chainCount = 0;
+            runChain();
+        } else {
+            generateNewPuyo();
+            if (gameState === 'playing') {
+                startPuyoDropLoop();
+            }
+        }
+        
+        renderBoard();
+        updateUI();
+        saveState();
+        if (window.clearAIHint) window.clearAIHint();
+    };
 
     window.clearAIHint = function() {
         aiHint = null;
