@@ -59,6 +59,9 @@
                     <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
                     <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
                     
+                    <!-- AIボタンを追加 -->
+                    <button id="ai-button" style="background-color: #ff9800; color: white; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; padding: 5px 10px;">AI</button>
+                    
                     <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
                 </div>
 
@@ -120,6 +123,9 @@
     <button class="mobile-btn" id="btn-rotate-ccw">A</button>
 </div>
 
+    <!-- AIプログラムを先に読み込む -->
+    <script src="puyoAI.js"></script>
+    <!-- メインのシミュレーター -->
     <script src="puyoSim.js"></script>
     
     <script>
