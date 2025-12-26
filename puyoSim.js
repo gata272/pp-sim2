@@ -60,7 +60,8 @@ function createBoardDOM() {
     const boardElement = document.getElementById('puyo-board');
     boardElement.innerHTML = ''; 
 
-    for (let y = HEIGHT - 1; y >= 0; y--) { 
+    // ★ 修正: Y=0 (最下段) から Y=13 (最上段) の順にDOMを生成
+    for (let y = 0; y < HEIGHT; y++) { 
         for (let x = 0; x < WIDTH; x++) {
             const cell = document.createElement('div');
             cell.id = `cell-<LaTex>${x}-$</LaTex>{y}`; 
@@ -334,69 +335,46 @@ window.loadStageCode = function() {
         renderEditNextPuyos();
         
     } catch (e) {
-        console.error("ステージコードの復元中にエラーが発生しました:", e);
-        alert('ステージコードが無効です。形式を確認してください。');
+        alert("ステージコードの読み込みに失敗しました: " + e.message);
     }
 }
 
-// --- 履歴管理関数 ---
 
-function saveState(clearRedoStack = true) {
+// --- 履歴管理 ---
+
+function saveState(isMove = false) {
     const state = {
         board: board.map(row => [...row]),
-        nextPuyoColors: nextPuyoColors.map(pair => [...pair]),
+        currentPuyo: currentPuyo ? { ...currentPuyo } : null,
+        nextPuyoColors: [...nextPuyoColors],
         score: score,
         chainCount: chainCount,
-        currentPuyo: currentPuyo ? { 
-            mainColor: currentPuyo.mainColor,
-            subColor: currentPuyo.subColor,
-            mainX: currentPuyo.mainX, 
-            mainY: currentPuyo.mainY, 
-            rotation: currentPuyo.rotation
-        } : null
+        gameState: gameState,
+        autoDropEnabled: autoDropEnabled
     };
-
-    historyStack.push(state);
-
-    if (clearRedoStack) {
-        redoStack = [];
+    
+    if (isMove) {
+        redoStack = []; 
     }
+    
+    historyStack.push(state);
     updateHistoryButtons();
 }
 
 function restoreState(state) {
-    if (!state) return;
-
     board = state.board.map(row => [...row]);
-    nextPuyoColors = state.nextPuyoColors.map(pair => [...pair]);
+    currentPuyo = state.currentPuyo ? { ...state.currentPuyo } : null;
+    nextPuyoColors = [...state.nextPuyoColors];
     score = state.score;
     chainCount = state.chainCount;
+    gameState = state.gameState;
+    autoDropEnabled = state.autoDropEnabled;
     
-    if (state.currentPuyo) {
-        currentPuyo = { ...state.currentPuyo };
-    } else {
-        currentPuyo = null;
-    }
-    
-    gameState = 'playing';
-    clearInterval(dropTimer);
-    
-    if (currentPuyo === null) {
-        generateNewPuyo(); 
-    }
-    
-    gravity(); 
-
-    const groups = findConnectedPuyos();
-
-    if (groups.length > 0) {
-        gameState = 'chaining';
-        chainCount = 0;
-        runChain();
-    } else {
+    if (dropTimer) clearInterval(dropTimer);
+    if (gameState === 'playing' && autoDropEnabled) {
         startPuyoDropLoop();
     }
-
+    
     updateUI();
     renderBoard();
 }
@@ -566,7 +544,7 @@ function generateNewPuyo() {
         mainColor: c1,
         subColor: c2,
         mainX: 2, 
-        mainY: HEIGHT - 2, // 修正: 初期位置をY=12 (13段目) に確定
+        mainY: HEIGHT - 2, // ★ 修正: 初期位置をY=12 (13段目) に確定
         rotation: 0 
     };
     
@@ -829,12 +807,12 @@ function lockPuyo() {
     // 2. 自由落下を実行（これにより、14列目から13列目以下へ移動する）
     gravity();
 
-    // 3. 描画を更新
+    // 4. 描画を更新
     renderBoard();
     updateUI();
     saveState(true); 
     
-    // 4. 連鎖判定
+    // 5. 連鎖判定
     gameState = 'chaining';
     chainCount = 0;
     runChain();
@@ -932,8 +910,6 @@ function clearGarbagePuyos(targetBoard, erasedCoords) {
  */
 async function runChain() {
     // lockPuyoで既にgravity()とrenderBoard()が呼ばれているため、ここでは連鎖判定から開始する
-    // gravity(); 
-    // renderBoard(); 
     await new Promise(resolve => setTimeout(resolve, 300));
     
     const groups = findConnectedPuyos(board);
@@ -987,6 +963,8 @@ async function runChain() {
 
     await new Promise(resolve => setTimeout(resolve, 300));
 
+    gravity(); // ぷよを落下させる
+    
     runChain();
 }
 
@@ -1088,7 +1066,6 @@ function calculateMaxChainFromBoard(initialBoard) {
             });
         });
 
-        // おじゃまぷよの処理（連鎖数には影響しないが、次の連鎖に影響する可能性があるため実行）
         clearGarbagePuyos(tempBoard, erasedCoords);
     }
 
@@ -1205,7 +1182,8 @@ function renderBoard() {
     // 最大連鎖の起点ぷよ
     const starterPuyo = maxChainResult.starterPuyo;
 
-    for (let y = HEIGHT - 1; y >= 0; y--) { 
+    // ★ 修正: Y=0 (最下段) から Y=13 (最上段) の順に描画
+    for (let y = 0; y < HEIGHT; y++) { 
         for (let x = 0; x < WIDTH; x++) {
             const cellElement = document.getElementById(`cell-<LaTex>${x}-$</LaTex>{y}`);
             if (!cellElement) continue;
