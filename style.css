@@ -49,7 +49,7 @@ body {
     
     /* 幅を自動計算 (36 * 6 = 216px) */
     width: calc(var(--puyo-cell-size) * 6) !important; 
-    height: calc(var(--puyo-cell-size) * 12) !important; /* ★ 修正: 12段分に限定 */
+    height: calc(var(--puyo-cell-size) * 14) !important; /* ★ 修正: 14段分表示 */ 
     
     flex: 0 0 calc(var(--puyo-cell-size) * 6); 
     min-width: calc(var(--puyo-cell-size) * 6); 
@@ -57,7 +57,7 @@ body {
     
     max-width: 100%; 
     max-height: 90vh; 
-    overflow: hidden; /* ★ 修正: 隠し領域を非表示にする */
+    overflow: visible; /* ★ 修正: 隠し領域も表示 */
     position: relative; 
 }
 
