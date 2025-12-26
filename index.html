@@ -48,11 +48,19 @@
                         <h2>連鎖数</h2>
                         <span id="chain-count">0</span>
                     </div>
+                    <div id="max-chain-box" class="info-box">
+                        <h2>最大連鎖</h2>
+                        <span id="max-chain-count">0</span>
+                    </div>
                 </div>
                 
                 <div id="history-controls" class="common-control">
                     <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
                     <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
+                </div>
+                
+                <div id="max-chain-controls" class="common-control">
+                    <button id="max-chain-button" onclick="findMaxChain()">最大連鎖</button>
                 </div>
                 
                 <div id="play-controls" class="common-control">
