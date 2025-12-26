@@ -937,8 +937,9 @@ function clearGarbagePuyos(targetBoard, erasedCoords) {
  * メインゲームの連鎖処理（非同期）
  */
 async function runChain() {
-    gravity(); 
-    renderBoard(); 
+    // lockPuyoで既にgravity()とrenderBoard()が呼ばれているため、ここでは連鎖判定から開始する
+    // gravity(); 
+    // renderBoard(); 
     await new Promise(resolve => setTimeout(resolve, 300));
     
     const groups = findConnectedPuyos(board);
