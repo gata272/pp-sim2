@@ -139,7 +139,7 @@ body {
     color: #ccc;
 }
 
-#score, #chain-count {
+#score, #chain-count, #max-chain-count {
     font-size: 1.25em; /* 数字を少し小さく */
     font-weight: bold;
     color: #e63946;
@@ -158,7 +158,7 @@ body {
 }
 
 /* --- ボタン類 --- */
-#history-controls {
+#history-controls, #max-chain-controls {
     display: flex;
     flex-direction: row; 
     gap: 5px; 
@@ -176,6 +176,17 @@ body {
     background-color: #f4a261; 
 }
 
+#max-chain-button {
+    flex-grow: 1;
+    padding: 8px 2px;
+    border: none;
+    border-radius: 5px;
+    font-size: 0.75em;
+    font-weight: bold;
+    color: white;
+    background-color: #d62828;
+}
+
 .mode-toggle-btn, #reset-button-play, #auto-drop-toggle-button {
     width: 100%;
     padding: 8px;
@@ -188,6 +199,7 @@ body {
 .mode-toggle-btn { background-color: #457b9d; color: white; }
 #reset-button-play { background-color: #e63946; color: white; }
 #auto-drop-toggle-button { background-color: #2a9d8f; color: white; }
+#max-chain-button { background-color: #d62828; color: white; }
 
 /* --- モード表示 --- */
 .edit-info { display: none !important; } 
@@ -214,6 +226,12 @@ body {
 .puyo-0 { background-color: transparent !important; border: 2px dashed #666; }
 
 .puyo-ghost { opacity: 0.4; border: 2px dashed #fff; }
+
+/* --- 最大連鎖の起点ぷよのハイライト --- */
+.puyo-max-chain-starter {
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2), 0 0 0 3px #ff0000 !important;
+    border: 2px solid #ff0000 !important;
+}
 
 /* --- ★ モバイル操作ボタン (2段スタック版) ★ --- */
 #mobile-controls {
