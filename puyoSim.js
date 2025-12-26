@@ -60,8 +60,9 @@ function createBoardDOM() {
     const boardElement = document.getElementById('puyo-board');
     boardElement.innerHTML = ''; 
 
-    // ★ 修正: Y=0 (最下段) から Y=13 (最上段) の順にDOMを生成
-    for (let y = 0; y < HEIGHT; y++) { 
+    // ★ 修正: Y=13 (最上段) から Y=0 (最下段) の順にDOMを生成
+    // CSS Gridの描画順序（上から下）とゲームロジックのY座標（下から上）を一致させる
+    for (let y = HEIGHT - 1; y >= 0; y--) { 
         for (let x = 0; x < WIDTH; x++) {
             const cell = document.createElement('div');
             cell.id = `cell-<LaTex>${x}-$</LaTex>{y}`; 
@@ -1182,8 +1183,8 @@ function renderBoard() {
     // 最大連鎖の起点ぷよ
     const starterPuyo = maxChainResult.starterPuyo;
 
-    // ★ 修正: Y=0 (最下段) から Y=13 (最上段) の順に描画
-    for (let y = 0; y < HEIGHT; y++) { 
+    // ★ 修正: Y=13 (最上段) から Y=0 (最下段) の順に描画
+    for (let y = HEIGHT - 1; y >= 0; y--) { 
         for (let x = 0; x < WIDTH; x++) {
             const cellElement = document.getElementById(`cell-<LaTex>${x}-$</LaTex>{y}`);
             if (!cellElement) continue;
