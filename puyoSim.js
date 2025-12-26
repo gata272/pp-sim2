@@ -566,13 +566,14 @@ function generateNewPuyo() {
         mainColor: c1,
         subColor: c2,
         mainX: 2, 
-        mainY: HEIGHT - 2, 
+        mainY: HEIGHT - 1, // 修正: 初期位置を1つ上に移動
         rotation: 0 
     };
     
     const startingCoords = getCoordsFromState(currentPuyo);
     
-    const isOverlappingTarget = startingCoords.some(p => p.x === 2 && p.y === (HEIGHT - 3) && board[p.y][p.x] !== COLORS.EMPTY);
+    // 修正: ゲームオーバー判定ラインを HEIGHT - 2 (12段目) に修正
+    const isOverlappingTarget = startingCoords.some(p => p.x === 2 && p.y === (HEIGHT - 2) && board[p.y][p.x] !== COLORS.EMPTY);
 
     if (isOverlappingTarget) {
         gameState = 'gameover';
@@ -663,15 +664,16 @@ function getGhostFinalPositions() {
         }
     }
     
-    return ghostPositions.filter(p => p.y < HEIGHT - 2); 
+    // 修正: 描画範囲を HEIGHT - 1 (13段目) までに修正
+    return ghostPositions.filter(p => p.y < HEIGHT - 1); 
 }
 
 
 function checkCollision(coords) {
     for (const puyo of coords) {
         if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0) return true;
-        // 14列目(Y=13)は衝突判定から除外する（設置を許可するため）
-        if (puyo.y < HEIGHT - 1 && board[puyo.y][puyo.x] !== COLORS.EMPTY) {
+        // 修正: 14列目(Y=13)も含めて衝突判定を行う
+        if (puyo.y < HEIGHT && board[puyo.y][puyo.x] !== COLORS.EMPTY) {
             return true;
         }
     }
@@ -828,9 +830,10 @@ function lockPuyo() {
     gravity();
 
     // 3. 14列目（Y=13）をクリア
-    for (let x = 0; x < WIDTH; x++) {
-        board[13][x] = COLORS.EMPTY;
-    }
+    // 修正: 14列目（Y=13）は落下処理で空になるため、ここではクリアしない
+    // for (let x = 0; x < WIDTH; x++) {
+    //     board[13][x] = COLORS.EMPTY;
+    // }
 
     // 4. 描画を更新
     renderBoard();
@@ -946,7 +949,8 @@ async function runChain() {
             updateUI(); 
         }
         
-        const gameOverLineY = HEIGHT - 3; 
+        // 修正: ゲームオーバー判定ラインを HEIGHT - 2 (12段目) に修正
+        const gameOverLineY = HEIGHT - 2; 
         const checkX = 2; 
         
         const isGameOver = board[gameOverLineY][checkX] !== COLORS.EMPTY;
