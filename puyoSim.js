@@ -671,10 +671,13 @@ function getGhostFinalPositions() {
 function checkCollision(coords) {
     for (const puyo of coords) {
         if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0) return true;
-
-        if (puyo.y < HEIGHT && puyo.y >= 0 && board[puyo.y][puyo.x] !== COLORS.EMPTY) {
+        // 14列目(Y=13)は衝突判定から除外する（設置を許可するため）
+        if (puyo.y < HEIGHT - 1 && board[puyo.y][puyo.x] !== COLORS.EMPTY) {
             return true;
         }
+    }
+    return false;
+}
     }
     return false;
 }
@@ -815,11 +818,36 @@ function lockPuyo() {
     if (gameState !== 'playing' || !currentPuyo) return;
 
     const coords = getPuyoCoords();
-
-    for (const puyo of coords) {
-        if (puyo.y >= 0) {
-            board[puyo.y][puyo.x] = puyo.color;
+    
+    // 1. 設置（14列目も含めて一旦盤面に書き込む）
+    coords.forEach(p => {
+        if (p.y >= 0 && p.y < HEIGHT && p.x >= 0 && p.x < WIDTH) {
+            board[p.y][p.x] = p.color;
         }
+    });
+
+    currentPuyo = null;
+    
+    // 2. 自由落下を実行（これにより、14列目から13列目以下へ移動する）
+    gravity();
+
+    // 3. 14列目（Y=13）をクリア
+    for (let x = 0; x < WIDTH; x++) {
+        board[13][x] = COLORS.EMPTY;
+    }
+
+    // 4. 描画を更新
+    renderBoard();
+    updateUI();
+    saveState(true); 
+    
+    // 5. 連鎖判定
+    gameState = 'chaining';
+    chainCount = 0;
+    runChain();
+    
+    if (window.clearAIHint) window.clearAIHint();
+}
     }
 
     for (let x = 0; x < WIDTH; x++) {
