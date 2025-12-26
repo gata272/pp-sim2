@@ -678,9 +678,6 @@ function checkCollision(coords) {
     }
     return false;
 }
-    }
-    return false;
-}
 
 function movePuyo(dx, dy, newRotation, shouldRender = true) {
     if (gameState !== 'playing' || !currentPuyo) return false; 
@@ -847,22 +844,6 @@ function lockPuyo() {
     runChain();
     
     if (window.clearAIHint) window.clearAIHint();
-}
-    }
-
-    for (let x = 0; x < WIDTH; x++) {
-        if (board[HEIGHT - 1][x] !== COLORS.EMPTY) {
-            board[HEIGHT - 1][x] = COLORS.EMPTY;
-        }
-    }
-
-    currentPuyo = null;
-    saveState(true); 
-    
-    gameState = 'chaining';
-    chainCount = 0;
-    
-    runChain();
 }
 
 function findConnectedPuyos() {
