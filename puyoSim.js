@@ -364,7 +364,7 @@ function saveState(isMove = false) {
 
 function restoreState(state) {
     board = state.board.map(row => [...row]);
-    currentPuyo = state.currentPuyo ? { ...state.currentPuyo } : null;
+    currentPuyo = state.currentPuyo ? { ...currentPuyo } : null;
     nextPuyoColors = [...state.nextPuyoColors];
     score = state.score;
     chainCount = state.chainCount;
