@@ -36,6 +36,7 @@ body {
     --puyo-cell-size: 36px; 
     
     display: grid;
+    /* ★ 修正: Y=13からY=0の順にDOMを配置しているため、Gridの行も14行定義 */
     grid-template-rows: repeat(14, var(--puyo-cell-size)); 
     grid-template-columns: repeat(6, var(--puyo-cell-size)) !important; 
     
@@ -49,7 +50,7 @@ body {
     
     /* 幅を自動計算 (36 * 6 = 216px) */
     width: calc(var(--puyo-cell-size) * 6) !important; 
-    height: calc(var(--puyo-cell-size) * 14) !important; /* ★ 修正: 14段分表示 */ 
+    height: calc(var(--puyo-cell-size) * 14) !important; /* 14段分表示 */ 
     
     flex: 0 0 calc(var(--puyo-cell-size) * 6); 
     min-width: calc(var(--puyo-cell-size) * 6); 
@@ -57,11 +58,13 @@ body {
     
     max-width: 100%; 
     max-height: 90vh; 
-    overflow: visible; /* ★ 修正: 隠し領域も表示 */
+    overflow: visible; /* 隠し領域も表示 */
     position: relative; 
 }
 
 /* --- 隠し領域の視覚化 --- */
+/* Y=13, Y=12の6セルずつ、合計12セルが隠し領域 */
+/* DOMの配置順序がY=13からY=0なので、最初の12セルが隠し領域 */
 #puyo-board > div:nth-child(-n+12)
 {
     opacity: 0.5;
@@ -70,6 +73,7 @@ body {
 }
 
 /* --- ゲームオーバーライン --- */
+/* Y=12のセル（DOMの13番目から18番目） */
 #puyo-board > div:nth-child(15) {
     position: relative;
     opacity: 1 !important; 
