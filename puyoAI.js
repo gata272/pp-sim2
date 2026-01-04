@@ -1,7 +1,8 @@
 /**
- * PuyoAI v9 - Pure Chain Edition
- * スコア（消えるぷよの数）を完全に無視し、
- * 連鎖の深さ（連鎖数）のみを最大化することに特化したアルゴリズム。
+ * PuyoAI v10 - Special Rule Edition
+ * 14段目への設置条件：
+ * 「12段目まである列と、13段目まである列がそれぞれ最低1つ存在する時のみ、14段目に置ける」
+ * という特殊ルールを認知したアルゴリズム。
  */
 const PuyoAI = (function() {
     const WIDTH = 6;
@@ -9,18 +10,36 @@ const PuyoAI = (function() {
     const COLORS = [1, 2, 3, 4];
 
     /**
-     * 盤面の連鎖ポテンシャル（最大連鎖数）のみを評価する
+     * 14段目(Y=13)への設置が許可されているかチェックする
      */
+    function is14thRowAllowed(board) {
+        let has12 = false;
+        let has13 = false;
+        
+        for (let x = 0; x < WIDTH; x++) {
+            let height = 0;
+            while (height < 14 && board[height][x] !== 0) height++;
+            
+            if (height === 12) has12 = true;
+            if (height === 13) has13 = true;
+        }
+        
+        return has12 && has13;
+    }
+
     function evaluatePureChainPotential(board) {
         let maxChain = 0;
-        
-        // 盤面の各列に全色を仮置きし、到達可能な最大連鎖数を探索
+        const allowed14 = is14thRowAllowed(board);
+
         for (let x = 0; x < WIDTH; x++) {
             for (let color of COLORS) {
                 let tempBoard = board.map(row => [...row]);
                 let y = 0;
-                while (y < 12 && tempBoard[y][x] !== 0) y++;
-                if (y >= 12) continue;
+                while (y < 14 && tempBoard[y][x] !== 0) y++;
+                
+                // 14段目(index 13)に置こうとする場合、特殊条件をチェック
+                if (y === 13 && !allowed14) continue;
+                if (y >= 14) continue;
                 
                 tempBoard[y][x] = color;
                 let res = simulatePureChain(tempBoard);
@@ -32,9 +51,6 @@ const PuyoAI = (function() {
         return maxChain;
     }
 
-    /**
-     * 連鎖シミュレーション（連鎖数のみをカウント）
-     */
     function simulatePureChain(board) {
         let tempBoard = board.map(row => [...row]);
         let chainCount = 0;
@@ -49,7 +65,6 @@ const PuyoAI = (function() {
     function processStep(board) {
         let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
         let exploded = false;
-        
         for (let y = 0; y < 12; y++) {
             for (let x = 0; x < WIDTH; x++) {
                 if (board[y][x] !== 0 && !visited[y][x]) {
@@ -102,31 +117,32 @@ const PuyoAI = (function() {
         return true;
     }
 
-    /**
-     * 最適な手を探索（連鎖数のみを基準にする）
-     */
     function getBestMove(board, axisColor, childColor, nextAxisColor, nextChildColor) {
         let bestChainScore = -1;
         let bestMove = { x: 2, rotation: 0 };
+        const allowed14 = is14thRowAllowed(board);
 
         for (let x = 0; x < WIDTH; x++) {
             for (let rot = 0; rot < 4; rot++) {
                 if (!isReachable(board, x)) continue;
 
                 let tempBoard = board.map(row => [...row]);
+                
+                // 14段目への設置が含まれるかチェック
+                let willUse14 = false;
+                if (rot === 0) willUse14 = true; // 子ぷよが上
+                // 他の回転でも、高さによっては14段目を使う可能性がある
+                let h = 0; while(h < 14 && tempBoard[h][x] !== 0) h++;
+                if (h >= 13) willUse14 = true;
+
+                if (willUse14 && !allowed14) continue;
+
                 if (!placePuyo(tempBoard, x, rot, axisColor, childColor)) continue;
 
-                // 1. この手で発生する連鎖
                 let res1 = simulatePureChain(tempBoard);
-                
-                // 2. その後の盤面での最大連鎖ポテンシャル
                 let potential = evaluatePureChainPotential(res1.finalBoard);
-                
-                // 評価値 = (今発生する連鎖 * 100) + (将来の最大連鎖数 * 1000)
-                // 将来の連鎖数を極めて高く評価する
                 let totalChainScore = (res1.chains * 100) + (potential * 1000);
 
-                // 3. 2手先読み（ネクスト）
                 if (nextAxisColor && nextChildColor) {
                     let nextMaxPotential = 0;
                     for (let nx = 0; nx < WIDTH; nx++) {
@@ -140,7 +156,6 @@ const PuyoAI = (function() {
                     totalChainScore += nextMaxPotential * 500;
                 }
 
-                // 窒息回避
                 if (tempBoard[11][2] !== 0) totalChainScore = -1000000;
 
                 if (totalChainScore > bestChainScore) {
