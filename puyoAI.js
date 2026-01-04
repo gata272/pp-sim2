@@ -1,122 +1,61 @@
 /**
- * PuyoAI v7 - Mobility-Aware Edition
- * 中央列(2-5列)の13段目が埋まることによる移動制限を考慮し、
- * 将来の移動不能状態を回避するアルゴリズム。
+ * PuyoAI v8 - Ultimate Chain Edition
+ * 最大連鎖数の構築を絶対的な最優先事項とし、
+ * 全色シミュレーションによって将来のポテンシャルを評価する。
  */
 const PuyoAI = (function() {
     const WIDTH = 6;
-    const HEIGHT = 14; // 14列目まで考慮
-    const COLORS = { EMPTY: 0, RED: 1, BLUE: 2, GREEN: 3, YELLOW: 4, GARBAGE: 5 };
-
-    // 評価定数
-    const SCORE_WEIGHT = 1;
-    const CHAIN_WEIGHT = 1000;
-    const CONNECTION_WEIGHT = 10;
-    const HEIGHT_PENALTY = 20;
-    const DEAD_END_PENALTY = 1000000; // 移動不能状態への極大ペナルティ
+    const HEIGHT = 14;
+    const COLORS = [1, 2, 3, 4]; // 赤, 青, 緑, 黄
 
     /**
-     * 指定された位置・回転が、現在の盤面で物理的に到達可能か判定する
+     * 盤面のポテンシャル（最大連鎖期待値）を評価する
      */
-    function isReachable(board, targetX, targetRotation) {
-        // 簡易的な経路探索: 
-        // 1. 中央(X=2)の最上段(Y=12 or 13)から開始
-        // 2. ターゲットのX座標まで横移動が可能かチェック
-        // 3. 2-5列目の13段目が埋まっている場合、それを越えて1, 6列目には行けない
+    function evaluatePotential(board) {
+        let maxChainFound = 0;
         
-        const startX = 2;
-        const direction = targetX > startX ? 1 : -1;
-        
-        for (let x = startX; x !== targetX; x += direction) {
-            // 13段目(index 12)が埋まっているかチェック
-            // シミュレーターの仕様上、ここが壁になる
-            if (board[12][x] !== COLORS.EMPTY) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * 盤面の評価関数
-     */
-    function evaluateBoard(board) {
-        let score = 0;
-        
-        // 1. 連鎖ポテンシャルと連結数
+        // 盤面の各列に対して、全色のぷよを1つずつ置いてみて、
+        // その結果発生する最大連鎖数をシミュレートする
         for (let x = 0; x < WIDTH; x++) {
-            for (let y = 0; y < 12; y++) { // 13段目以上は評価対象外
-                const color = board[y][x];
-                if (color === COLORS.EMPTY) continue;
+            for (let color of COLORS) {
+                let tempBoard = board.map(row => [...row]);
+                // 1つ置いてみる
+                let y = 0;
+                while (y < 12 && tempBoard[y][x] !== 0) y++;
+                if (y >= 12) continue;
                 
-                // 連結チェック（簡易）
-                let connections = 0;
-                if (x > 0 && board[y][x-1] === color) connections++;
-                if (x < WIDTH - 1 && board[y][x+1] === color) connections++;
-                if (y > 0 && board[y-1][x] === color) connections++;
-                
-                score += connections * CONNECTION_WEIGHT;
-                score -= y * HEIGHT_PENALTY; // 高い位置にあるほどペナルティ
+                tempBoard[y][x] = color;
+                let res = simulateChain(tempBoard);
+                if (res.chains > maxChainFound) {
+                    maxChainFound = res.chains;
+                }
             }
         }
-
-        // 2. 中央高積みペナルティ（移動制限の予兆）
-        // 2-5列目の12段目(index 11)や13段目(index 12)が埋まりそうな場合
-        for (let x = 1; x <= 4; x++) {
-            if (board[11][x] !== COLORS.EMPTY) score -= 500;
-            if (board[12][x] !== COLORS.EMPTY) score -= 2000;
-        }
-
-        // 3. 窒息点(3列目12段目)のチェック
-        if (board[11][2] !== COLORS.EMPTY) return -DEAD_END_PENALTY;
-
-        return score;
+        return maxChainFound;
     }
 
-    /**
-     * 連鎖シミュレーション
-     */
     function simulateChain(board) {
         let tempBoard = board.map(row => [...row]);
         let totalChains = 0;
-        let totalPuyos = 0;
-        
         while (true) {
-            let { chains, puyos } = processStep(tempBoard);
+            let chains = processStep(tempBoard);
             if (chains === 0) break;
             totalChains += chains;
-            totalPuyos += puyos;
         }
-        
-        return { chains: totalChains, puyos: totalPuyos, finalBoard: tempBoard };
+        return { chains: totalChains };
     }
 
     function processStep(board) {
-        let connected = findConnections(board);
-        if (connected.length === 0) return { chains: 0, puyos: 0 };
-        
-        let puyos = 0;
-        connected.forEach(group => {
-            puyos += group.length;
-            group.forEach(p => board[p.y][p.x] = COLORS.EMPTY);
-        });
-        
-        applyGravity(board);
-        return { chains: 1, puyos };
-    }
-
-    function findConnections(board) {
         let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
-        let groups = [];
+        let toExplode = [];
         
         for (let y = 0; y < 12; y++) {
             for (let x = 0; x < WIDTH; x++) {
-                if (board[y][x] !== COLORS.EMPTY && !visited[y][x]) {
+                if (board[y][x] !== 0 && !visited[y][x]) {
                     let group = [];
                     let color = board[y][x];
                     let stack = [{x, y}];
                     visited[y][x] = true;
-                    
                     while (stack.length > 0) {
                         let p = stack.pop();
                         group.push(p);
@@ -129,63 +68,73 @@ const PuyoAI = (function() {
                             }
                         });
                     }
-                    if (group.length >= 4) groups.push(group);
+                    if (group.length >= 4) toExplode.push(...group);
                 }
             }
         }
-        return groups;
+        
+        if (toExplode.length === 0) return 0;
+        toExplode.forEach(p => board[p.y][p.x] = 0);
+        applyGravity(board);
+        return 1;
     }
 
     function applyGravity(board) {
         for (let x = 0; x < WIDTH; x++) {
             let writeY = 0;
             for (let readY = 0; readY < 12; readY++) {
-                if (board[readY][x] !== COLORS.EMPTY) {
+                if (board[readY][x] !== 0) {
                     board[writeY][x] = board[readY][x];
-                    if (writeY !== readY) board[readY][x] = COLORS.EMPTY;
+                    if (writeY !== readY) board[readY][x] = 0;
                     writeY++;
                 }
             }
         }
     }
 
-    /**
-     * 最適な手を探索する
-     */
+    function isReachable(board, targetX) {
+        const startX = 2;
+        const direction = targetX > startX ? 1 : -1;
+        for (let x = startX; x !== targetX; x += direction) {
+            if (board[12][x] !== 0) return false;
+        }
+        return true;
+    }
+
     function getBestMove(board, axisColor, childColor, nextAxisColor, nextChildColor) {
         let bestScore = -Infinity;
         let bestMove = { x: 2, rotation: 0 };
 
-        // 全ての移動・回転パターンを試行
         for (let x = 0; x < WIDTH; x++) {
             for (let rot = 0; rot < 4; rot++) {
-                // 1. 到達可能性チェック
-                if (!isReachable(board, x, rot)) continue;
+                if (!isReachable(board, x)) continue;
 
                 let tempBoard = board.map(row => [...row]);
                 if (!placePuyo(tempBoard, x, rot, axisColor, childColor)) continue;
 
-                // 1手目の連鎖シミュレーション
+                // 1手目の連鎖
                 let res1 = simulateChain(tempBoard);
-                let score = res1.chains * CHAIN_WEIGHT + evaluateBoard(res1.finalBoard);
+                // 評価 = (発生した連鎖数 * 100) + (将来の最大連鎖ポテンシャル * 1000)
+                // 今すぐ消すよりも、将来大きな連鎖になる形を圧倒的に優先する
+                let potential = evaluatePotential(res1.finalBoard || tempBoard);
+                let score = (res1.chains * 100) + (potential * 1000);
 
-                // 2手先読み（ネクストがある場合）
+                // 2手先読み
                 if (nextAxisColor && nextChildColor) {
-                    let nextBestScore = -Infinity;
+                    let nextBestPotential = 0;
                     for (let nx = 0; nx < WIDTH; nx++) {
-                        for (let nrot = 0; nrot < 4; nrot++) {
-                            if (!isReachable(res1.finalBoard, nx, nrot)) continue;
-                            
-                            let nextBoard = res1.finalBoard.map(row => [...row]);
-                            if (!placePuyo(nextBoard, nx, nrot, nextAxisColor, nextChildColor)) continue;
-                            
-                            let res2 = simulateChain(nextBoard);
-                            let nScore = res2.chains * CHAIN_WEIGHT + evaluateBoard(res2.finalBoard);
-                            if (nScore > nextBestScore) nextBestScore = nScore;
+                        if (!isReachable(res1.finalBoard || tempBoard, nx)) continue;
+                        let nextBoard = (res1.finalBoard || tempBoard).map(row => [...row]);
+                        if (placePuyo(nextBoard, nx, 0, nextAxisColor, nextChildColor)) {
+                            let p = evaluatePotential(nextBoard);
+                            if (p > nextBestPotential) nextBestPotential = p;
                         }
                     }
-                    score += nextBestScore * 0.5; // 2手目は半分重み付け
+                    score += nextBestPotential * 500;
                 }
+
+                // 窒息回避（最低限）
+                if (tempBoard[11][2] !== 0) score -= 1000000;
 
                 if (score > bestScore) {
                     bestScore = score;
@@ -198,38 +147,25 @@ const PuyoAI = (function() {
 
     function placePuyo(board, x, rot, axisColor, childColor) {
         let coords = [];
-        // 0:上, 1:右, 2:下, 3:左
         coords.push({x: x, y: 13, color: axisColor});
         if (rot === 0) coords.push({x: x, y: 14, color: childColor});
         else if (rot === 1) coords.push({x: x + 1, y: 13, color: childColor});
         else if (rot === 2) coords.push({x: x, y: 12, color: childColor});
         else if (rot === 3) coords.push({x: x - 1, y: 13, color: childColor});
 
-        // 範囲外チェック
-        for (let p of coords) {
-            if (p.x < 0 || p.x >= WIDTH) return false;
-        }
+        for (let p of coords) if (p.x < 0 || p.x >= WIDTH) return false;
 
-        // 落下処理
         coords.sort((a, b) => a.y - b.y);
         for (let p of coords) {
             let curY = p.y;
-            while (curY > 0 && board[curY-1][p.x] === COLORS.EMPTY) {
-                curY--;
-            }
-            if (curY < 14) {
-                board[curY][p.x] = p.color;
-            }
+            while (curY > 0 && board[curY-1][p.x] === 0) curY--;
+            if (curY < 14) board[curY][p.x] = p.color;
         }
-        
-        // 14列目クリア
-        for (let i = 0; i < WIDTH; i++) board[13][i] = COLORS.EMPTY;
-        
+        for (let i = 0; i < WIDTH; i++) board[13][i] = 0;
         return true;
     }
 
     return { getBestMove };
 })();
 
-if (typeof module !== 'undefined') module.exports = PuyoAI;
 window.PuyoAI = PuyoAI;
