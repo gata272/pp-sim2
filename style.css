@@ -1,66 +1,55 @@
+/* style.css の全体 */
+
 :root {
-    --puyo-cell-size: 30px;
-    --puyo-size: 28px;
+    --puyo-cell-size: 36px;
+    --puyo-size: 32px;
     --board-width: 6;
     --board-height: 14;
-    --color-red: #e74c3c;
-    --color-green: #2ecc71;
-    --color-blue: #3498db;
-    --color-yellow: #f1c40f;
-    --color-purple: #9b59b6;
-    --color-garbage: #bdc3c7;
-    --color-empty: #2c3e50;
-    --color-background: #34495e;
-    --color-info-bg: #2c3e50;
-    --color-button-bg: #3498db;
-    --color-button-hover: #2980b9;
-    --color-button-danger: #e74c3c;
-    --color-button-danger-hover: #c0392b;
-    --color-button-success: #2ecc71;
-    --color-button-success-hover: #27ae60;
 }
 
 html, body {
-    height: 100%;
+    height: 100%; 
     margin: 0;
-    background-color: var(--color-background);
-    color: white;
-    font-family: sans-serif;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    font-family: 'Arial', sans-serif;
+    background-color: #2e3440;
+    color: #d8dee9;
 }
 
 #wrapper {
     display: flex;
-    gap: 20px;
+    justify-content: center;
+    align-items: flex-start;
     padding: 20px;
+    gap: 20px;
+    min-height: 100vh;
+    box-sizing: border-box;
 }
 
 /* --- 盤面 --- */
 #puyo-board {
     width: calc(var(--puyo-cell-size) * var(--board-width));
-    height: calc(var(--puyo-cell-size) * var(--board-height));
-    background-color: #000;
-    border: 5px solid #1abc9c;
+    height: calc(var(--puyo-cell-size) * 12); /* 可視領域は12段 */
     display: grid;
     grid-template-columns: repeat(var(--board-width), var(--puyo-cell-size));
-    /* Y=13が一番上に来るように、14行を定義 */
-    grid-template-rows: repeat(var(--board-height), var(--puyo-cell-size)); 
-    overflow: hidden; /* 隠し領域はDOM上は存在するが、描画は隠す */
+    grid-template-rows: repeat(var(--board-height), var(--puyo-cell-size));
+    border: 4px solid #4c566a;
+    background-color: #3b4252;
+    overflow: hidden; /* 隠し領域を非表示にする */
+    position: relative;
+    top: calc(var(--puyo-cell-size) * -2); /* 隠し領域の2段分上にずらす */
 }
 
 .cell {
     width: var(--puyo-cell-size);
     height: var(--puyo-cell-size);
     box-sizing: border-box;
-    border: 1px dashed #444;
     display: flex;
     justify-content: center;
     align-items: center;
     position: relative;
 }
 
+/* --- ぷよ --- */
 .puyo {
     width: var(--puyo-size);
     height: var(--puyo-size);
@@ -68,106 +57,77 @@ html, body {
     position: absolute;
     transition: transform 0.1s ease-out;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    border: 2px solid transparent; /* 枠線用に透明なボーダーを設定 */
 }
 
-/* ぷよの色 */
-.puyo-red { background-color: var(--color-red); }
-.puyo-green { background-color: var(--color-green); }
-.puyo-blue { background-color: var(--color-blue); }
-.puyo-yellow { background-color: var(--color-yellow); }
-.puyo-purple { background-color: var(--color-purple); }
-.puyo-garbage { background-color: var(--color-garbage); }
+.puyo.color-red { background-color: #bf616a; }
+.puyo.color-green { background-color: #a3be8c; }
+.puyo.color-blue { background-color: #81a1c1; }
+.puyo.color-yellow { background-color: #ebcb8b; }
+.puyo.color-purple { background-color: #b48ead; }
+.puyo.color-garbage { 
+    background-color: #4c566a; 
+    border-radius: 0;
+    box-shadow: none;
+    border: 2px solid #d8dee9;
+}
+.puyo.color-empty { background-color: transparent; }
 
 /* 落下中のぷよ */
-.puyo-falling {
+.falling {
     z-index: 10;
-    transition: none; /* 落下中はアニメーションを無効化 */
 }
 
 /* ゴーストぷよ */
-.puyo-ghost {
+.ghost {
     opacity: 0.3;
+    z-index: 5;
+    border: 2px dashed #d8dee9;
     box-shadow: none;
-    border: 2px dashed white;
-    background-color: transparent !important;
 }
 
-/* 最大連鎖の起点ぷよのハイライト */
+/* --- 最大連鎖の起点ぷよのハイライト --- */
 .puyo-max-chain-starter {
-    border: 3px solid var(--color-button-danger); /* 赤い枠線 */
-    box-shadow: 0 0 10px var(--color-button-danger);
+    border: 3px solid #bf616a !important; /* 赤色で強調 */
+    box-shadow: 0 0 10px #bf616a;
 }
 
 /* --- 情報パネル --- */
 #info-panel {
-    width: 200px;
+    width: 250px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 15px;
 }
 
 .info-box {
-    background-color: var(--color-info-bg);
-    padding: 10px;
-    border-radius: 5px;
-    text-align: center;
+    background-color: #3b4252;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
 .info-box h2 {
-    margin: 0 0 5px 0;
-    font-size: 0.9em;
-    color: #bdc3c7;
-}
-
-.info-box div {
-    font-size: 1.5em;
-    font-weight: bold;
-}
-
-.info-group-a {
+    margin-top: 0;
     margin-bottom: 10px;
+    font-size: 1.2em;
+    color: #88c0d0;
+    border-bottom: 1px solid #4c566a;
+    padding-bottom: 5px;
 }
 
-.info-group-b button {
-    width: 100%;
-    padding: 10px;
-    margin-bottom: 5px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 1em;
+/* スコアと最大連鎖の表示 */
+#score-display, #max-chain-display {
+    font-size: 2em;
+    text-align: center;
+    color: #a3be8c;
     font-weight: bold;
-    color: white;
-    background-color: var(--color-button-bg);
-    transition: background-color 0.2s;
-}
-
-.info-group-b button:hover {
-    background-color: var(--color-button-hover);
-}
-
-/* 最大連鎖ボタンのスタイル */
-#max-chain-button {
-    background-color: var(--color-button-danger);
-}
-
-#max-chain-button:hover {
-    background-color: var(--color-button-danger-hover);
-}
-
-/* モード切り替えボタン */
-#mode-toggle-button {
-    background-color: var(--color-button-success);
-}
-
-#mode-toggle-button:hover {
-    background-color: var(--color-button-success-hover);
 }
 
 /* NEXTぷよ */
 .next-puyo-row {
     display: flex;
-    justify-content: center;
+    justify-content: space-around;
     gap: 10px;
 }
 
@@ -175,36 +135,74 @@ html, body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 5px;
+    justify-content: center;
+    width: 60px;
+    height: 60px;
+    border: 1px solid #4c566a;
+    border-radius: 4px;
 }
 
 .next-puyo-slot .puyo {
     position: static;
-    box-shadow: none;
+    transform: none;
+    width: 30px;
+    height: 30px;
+}
+
+/* ボタン */
+#play-buttons button, #edit-buttons button {
+    width: 100%;
+    padding: 10px;
+    margin-top: 10px;
+    background-color: #5e81ac;
+    color: #eceff4;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1em;
+    transition: background-color 0.2s;
+}
+
+#play-buttons button:hover, #edit-buttons button:hover {
+    background-color: #88c0d0;
+}
+
+#play-buttons button:disabled {
+    background-color: #4c566a;
+    cursor: not-allowed;
+}
+
+/* 最大連鎖ボタンのスタイル */
+#max-chain-button {
+    background-color: #bf616a; /* 赤色 */
+}
+
+#max-chain-button:hover {
+    background-color: #d08770;
 }
 
 /* 編集モード */
-#color-select-buttons {
+#puyo-palette {
     display: flex;
     justify-content: space-around;
+    gap: 5px;
 }
 
-.color-select-button {
-    width: 25px;
-    height: 25px;
-    border-radius: 50%;
-    border: 2px solid transparent;
+#puyo-palette .puyo {
+    position: static;
+    transform: none;
+    width: 30px;
+    height: 30px;
     cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    border: 2px solid transparent;
 }
 
-.color-select-button:hover {
-    border-color: white;
+#puyo-palette .puyo:hover {
+    border: 2px solid #eceff4;
 }
 
-.color-select-button.selected {
-    border-color: #f1c40f;
-    box-shadow: 0 0 10px #f1c40f;
+.selected-puyo {
+    border: 2px solid #a3be8c !important;
 }
 
 /* --- モバイルコントロール --- */
@@ -228,18 +226,7 @@ html, body {
     flex: 1;
     margin: 0 5px;
     padding: 15px 0;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
     font-size: 1.1em;
-    font-weight: bold;
-    color: white;
-    background-color: var(--color-button-bg);
-    transition: background-color 0.2s;
-}
-
-#mobile-controls button:hover {
-    background-color: var(--color-button-hover);
 }
 
 @media (max-width: 650px) {
@@ -253,8 +240,5 @@ html, body {
     }
     #puyo-board {
         margin-bottom: 70px; /* モバイルコントロールの高さ分 */
-    }
-    #mobile-controls {
-        display: flex;
     }
 }
