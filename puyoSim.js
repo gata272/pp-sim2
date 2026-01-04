@@ -548,12 +548,14 @@ function createBoardDOM() {
     const boardElement = document.getElementById('puyo-board');
     boardElement.innerHTML = '';
     
-    // Y=13 (最上段) から Y=0 (最下段) の順にDOMを生成
+    // Y=0 (最上段) から Y=13 (最下段) の順にDOMを生成
     for (let y = HEIGHT - 1; y >= 0; y--) {
         for (let x = 0; x < WIDTH; x++) {
             const cell = document.createElement('div');
             cell.className = 'cell';
-            cell.id = `cell-<LaTex>${x}-$</LaTex>{y}`;
+            // Y座標を反転させてIDを設定 (DOMのY=0がゲームのY=13に対応)
+            const domY = HEIGHT - 1 - y;
+            cell.id = `cell-<LaTex>${x}-$</LaTex>{domY}`;
             
             if (gameState === 'editing') {
                 cell.onclick = () => {
