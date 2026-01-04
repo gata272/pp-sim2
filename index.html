@@ -9,8 +9,8 @@
     <meta name="application-name" content="Puyo Sim Test">
     
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="android-icon-192x192.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="android-icon-192x192.png.png">
     <meta name="theme-color" content="#5e81ac">
     
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -39,66 +39,56 @@
                     </div>
                 </div>
 
-                <div id="score-info" class="info-box info-group-a">
-                    <h2>スコア</h2>
-                    <div id="score">0</div>
-                </div>
-
-                <div id="chain-info" class="info-box info-group-a">
-                    <h2>連鎖数</h2>
-                    <div id="chain-count">0</div>
+                <div id="play-score-info" class="info-box info-group-a">
+                    <h2>SCORE</h2>
+                    <div id="score-display">0</div>
                 </div>
 
                 <!-- 最大連鎖数表示の追加 -->
-                <div id="max-chain-info" class="info-box info-group-a">
+                <div id="max-chain-box" class="info-box info-group-a">
                     <h2>最大連鎖</h2>
-                    <div id="max-chain-count">0</div>
+                    <div id="max-chain-display">0</div>
                 </div>
-                <!-- /最大連鎖数表示の追加 -->
-
-                <div id="control-buttons" class="info-group-b">
-                    <button id="undo-button" onclick="undo()">一手戻す (U)</button>
-                    <button id="redo-button" onclick="redo()">一手やり直す (Y)</button>
-                    
+                
+                <div id="play-buttons" class="info-box info-group-b">
+                    <button id="undo-button" onclick="undoMove()">一手戻す</button>
+                    <button id="redo-button" onclick="redoMove()">一手やり直す</button>
+                    <button id="auto-drop-button" onclick="toggleAutoDrop()">自動落下: ON</button>
+                    <button id="reset-button" onclick="resetBoard()">盤面リセット</button>
+                    <button id="edit-button" onclick="toggleEditMode()">編集モード</button>
+                    <button id="ai-hint-button" onclick="toggleAIHint()">AIヒント: OFF</button>
                     <!-- 最大連鎖ボタンの追加 -->
-                    <button id="max-chain-button" onclick="findMaxChain()">最大連鎖</button>
-                    <!-- /最大連鎖ボタンの追加 -->
-
-                    <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: OFF</button>
-                    <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
+                    <button id="max-chain-button" onclick="window.findMaxChain()">最大連鎖</button>
                 </div>
             </div>
 
             <div id="edit-info-container" class="edit-info" style="display: none;">
-                <div id="edit-color-select" class="info-box info-group-a">
-                    <h2>編集色</h2>
-                    <div id="color-select-buttons">
-                        <button class="color-select-button puyo-red" onclick="selectEditColor('red')"></button>
-                        <button class="color-select-button puyo-green" onclick="selectEditColor('green')"></button>
-                        <button class="color-select-button puyo-blue" onclick="selectEditColor('blue')"></button>
-                        <button class="color-select-button puyo-yellow" onclick="selectEditColor('yellow')"></button>
-                        <button class="color-select-button puyo-purple" onclick="selectEditColor('purple')"></button>
-                        <button class="color-select-button puyo-garbage" onclick="selectEditColor('garbage')"></button>
-                        <button class="color-select-button puyo-empty" onclick="selectEditColor('empty')"></button>
+                <div id="edit-puyo-select" class="info-box info-group-a">
+                    <h2>設置ぷよ</h2>
+                    <div id="puyo-palette">
+                        <div class="puyo color-red" onclick="selectPuyo('red')"></div>
+                        <div class="puyo color-green" onclick="selectPuyo('green')"></div>
+                        <div class="puyo color-blue" onclick="selectPuyo('blue')"></div>
+                        <div class="puyo color-yellow" onclick="selectPuyo('yellow')"></div>
+                        <div class="puyo color-purple" onclick="selectPuyo('purple')"></div>
+                        <div class="puyo color-garbage" onclick="selectPuyo('garbage')"></div>
+                        <div class="puyo color-empty" onclick="selectPuyo('empty')"></div>
                     </div>
                 </div>
-                <div id="edit-buttons" class="info-group-b">
-                    <button id="reset-button-edit" onclick="resetGame()">盤面リセット (R)</button>
+                <div id="edit-buttons" class="info-box info-group-b">
+                    <button id="clear-all-button" onclick="clearAllPuyos()">全てクリア</button>
+                    <button id="play-button" onclick="toggleEditMode()">プレイモード</button>
                 </div>
-            </div>
-
-            <div id="mode-toggle" class="info-group-c">
-                <button id="mode-toggle-button" onclick="toggleMode()">edit</button>
             </div>
         </div>
     </div>
 
-    <div id="mobile-controls">
-        <button onclick="movePuyo(-1, 0)">←</button>
-        <button onclick="rotatePuyoCW()">↻</button>
-        <button onclick="rotatePuyoCCW()">↺</button>
-        <button onclick="hardDrop()">↓</button>
-        <button onclick="movePuyo(1, 0)">→</button>
+    <div id="mobile-controls" class="visible">
+        <button onclick="window.rotatePuyoCCW()">左回転</button>
+        <button onclick="movePuyo(-1, 0)">左移動</button>
+        <button onclick="hardDrop()">ハードドロップ</button>
+        <button onclick="movePuyo(1, 0)">右移動</button>
+        <button onclick="window.rotatePuyoCW()">右回転</button>
     </div>
 
     <script src="puyoSim.js"></script>
