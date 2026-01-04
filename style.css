@@ -1,244 +1,340 @@
 /* style.css の全体 */
 
-:root {
-    --puyo-cell-size: 36px;
-    --puyo-size: 32px;
-    --board-width: 6;
-    --board-height: 14;
-}
-
 html, body {
     height: 100%; 
     margin: 0;
-    font-family: 'Arial', sans-serif;
-    background-color: #2e3440;
-    color: #d8dee9;
 }
 
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-color: #111;
+    color: #fff;
+    padding: 10px;
+}
+
+/* --- 【重要】レイアウトの強制横並び --- */
 #wrapper {
     display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    padding: 20px;
-    gap: 20px;
-    min-height: 100vh;
-    box-sizing: border-box;
-}
-
-/* --- 盤面 --- */
-#puyo-board {
-    width: calc(var(--puyo-cell-size) * var(--board-width));
-    height: calc(var(--puyo-cell-size) * 12); /* 可視領域は12段 */
-    display: grid;
-    grid-template-columns: repeat(var(--board-width), var(--puyo-cell-size));
-    grid-template-rows: repeat(var(--board-height), var(--puyo-cell-size));
-    border: 4px solid #4c566a;
-    background-color: #3b4252;
-    overflow: hidden; /* 隠し領域を非表示にする */
-    position: relative;
-    top: calc(var(--puyo-cell-size) * -2); /* 隠し領域の2段分上にずらす */
-}
-
-.cell {
-    width: var(--puyo-cell-size);
-    height: var(--puyo-cell-size);
-    box-sizing: border-box;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    position: relative;
-}
-
-/* --- ぷよ --- */
-.puyo {
-    width: var(--puyo-size);
-    height: var(--puyo-size);
-    border-radius: 50%;
-    position: absolute;
-    transition: transform 0.1s ease-out;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-    border: 2px solid transparent; /* 枠線用に透明なボーダーを設定 */
-}
-
-.puyo.color-red { background-color: #bf616a; }
-.puyo.color-green { background-color: #a3be8c; }
-.puyo.color-blue { background-color: #81a1c1; }
-.puyo.color-yellow { background-color: #ebcb8b; }
-.puyo.color-purple { background-color: #b48ead; }
-.puyo.color-garbage { 
-    background-color: #4c566a; 
-    border-radius: 0;
+    flex-direction: row; 
+    gap: 8px; /* iPhone16向けに15pxから8pxに短縮 */
+    background-color: #222;
+    padding: 10px;
     box-shadow: none;
-    border: 2px solid #d8dee9;
+    max-width: 800px;
+    margin: 0 auto;
+    width: 100%; /* 95%から100%に変更して端まで活用 */
+    box-sizing: border-box;
+    flex-grow: 1; 
+    align-items: flex-start;
 }
-.puyo.color-empty { background-color: transparent; }
 
-/* 落下中のぷよ */
-.falling {
+/* ぷよのセルサイズを 36px に微調整 (iPhone16の横幅 393px に収めるため) */
+#puyo-board {
+    --puyo-cell-size: 36px; 
+    
+    display: grid;
+    grid-template-rows: repeat(14, var(--puyo-cell-size)); 
+    grid-template-columns: repeat(6, var(--puyo-cell-size)) !important; 
+    
+    border: 3px solid #666;
+    background-color: #000;
+    
+    background-image: linear-gradient(to right, #1a1a1a 1px, transparent 1px),
+                      linear-gradient(to bottom, #1a1a1a 1px, transparent 1px);
+    background-size: var(--puyo-cell-size) var(--puyo-cell-size); 
+    background-position: -1px -1px; 
+    
+    /* 幅を自動計算 (36 * 6 = 216px) */
+    width: calc(var(--puyo-cell-size) * 6) !important; 
+    height: calc(var(--puyo-cell-size) * 14) !important; 
+    
+    flex: 0 0 calc(var(--puyo-cell-size) * 6); 
+    min-width: calc(var(--puyo-cell-size) * 6); 
+    margin: 0;
+    
+    max-width: 100%; 
+    max-height: 90vh; 
+    position: relative; 
+}
+
+/* --- 隠し領域の視覚化 --- */
+#puyo-board > div:nth-child(-n+12)
+{
+    opacity: 0.5;
+    background-color: rgba(50, 50, 50, 0.5); 
+    border-bottom: 1px solid rgba(255, 0, 0, 0.5); 
+}
+
+/* --- ゲームオーバーライン --- */
+#puyo-board > div:nth-child(15) {
+    position: relative;
+    opacity: 1 !important; 
+}
+
+#puyo-board > div:nth-child(15):after {
+    content: 'X'; 
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 2.2em; 
+    color: red;
+    font-weight: bold;
+    opacity: 0.8;
+    pointer-events: none; 
     z-index: 10;
 }
 
-/* ゴーストぷよ */
-.ghost {
-    opacity: 0.3;
-    z-index: 5;
-    border: 2px dashed #d8dee9;
-    box-shadow: none;
+/* --- ぷよのデザイン --- */
+.puyo {
+    border-radius: 50%;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2); 
+    display: block; 
+    box-sizing: border-box;
+}
+#puyo-board > div {
+    display: flex; 
+    justify-content: center;
+    align-items: center;
+}
+#puyo-board > div > .puyo {
+    width: 90%; 
+    height: 90%;
 }
 
-/* --- 最大連鎖の起点ぷよのハイライト --- */
-.puyo-max-chain-starter {
-    border: 3px solid #bf616a !important; /* 赤色で強調 */
-    box-shadow: 0 0 10px #bf616a;
-}
-
-/* --- 情報パネル --- */
+/* --- 情報パネルのレスポンシブ調整 --- */
 #info-panel {
-    width: 250px;
+    display: flex;
+    flex-direction: column; 
+    gap: 8px;
+    flex: 1; /* 残りの幅をすべて使う */
+    min-width: 0; /* 150pxの制限を解除して縮めるようにする */
+    max-width: 200px;
+    overflow: hidden; /* はみ出し防止 */
+}
+
+#play-info-container, #edit-info-container {
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 10px;
+    width: 100%;
 }
 
 .info-box {
-    background-color: #3b4252;
-    padding: 15px;
-    border-radius: 8px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    padding: 8px 5px; /* 余白を少し詰める */
+    border: 1px solid #444; 
+    background-color: #333; 
+    border-radius: 5px;
+    text-align: center;
+    width: 100%; 
+    box-sizing: border-box;
 }
 
 .info-box h2 {
-    margin-top: 0;
-    margin-bottom: 10px;
-    font-size: 1.2em;
-    color: #88c0d0;
-    border-bottom: 1px solid #4c566a;
-    padding-bottom: 5px;
+    margin: 0 0 3px 0;
+    font-size: 0.85em; /* 文字を少し小さく */
+    color: #ccc;
 }
 
-/* スコアと最大連鎖の表示 */
-#score-display, #max-chain-display {
-    font-size: 2em;
-    text-align: center;
-    color: #a3be8c;
+#score, #chain-count {
+    font-size: 1.25em; /* 数字を少し小さく */
     font-weight: bold;
+    color: #e63946;
 }
 
 /* NEXTぷよ */
 .next-puyo-row {
-    display: flex;
-    justify-content: space-around;
-    gap: 10px;
-}
-
-.next-puyo-slot {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+    display: flex; 
     justify-content: center;
-    width: 60px;
-    height: 60px;
-    border: 1px solid #4c566a;
-    border-radius: 4px;
+    gap: 10px;
+    margin-top: 5px;
+}
+#play-next-info .puyo {
+    width: 22px; 
+    height: 22px; 
 }
 
-.next-puyo-slot .puyo {
-    position: static;
-    transform: none;
-    width: 30px;
-    height: 30px;
-}
-
-/* ボタン */
-#play-buttons button, #edit-buttons button {
-    width: 100%;
-    padding: 10px;
-    margin-top: 10px;
-    background-color: #5e81ac;
-    color: #eceff4;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 1em;
-    transition: background-color 0.2s;
-}
-
-#play-buttons button:hover, #edit-buttons button:hover {
-    background-color: #88c0d0;
-}
-
-#play-buttons button:disabled {
-    background-color: #4c566a;
-    cursor: not-allowed;
-}
-
-/* 最大連鎖ボタンのスタイル */
-#max-chain-button {
-    background-color: #bf616a; /* 赤色 */
-}
-
-#max-chain-button:hover {
-    background-color: #d08770;
-}
-
-/* 編集モード */
-#puyo-palette {
+/* --- ボタン類 --- */
+#history-controls {
     display: flex;
-    justify-content: space-around;
-    gap: 5px;
+    flex-direction: row; 
+    gap: 5px; 
+    margin-bottom: 5px; 
 }
 
-#puyo-palette .puyo {
-    position: static;
-    transform: none;
-    width: 30px;
-    height: 30px;
-    cursor: pointer;
-    border: 2px solid transparent;
+#undo-button, #redo-button {
+    flex-grow: 1; 
+    padding: 8px 2px;
+    border: none;
+    border-radius: 5px;
+    font-size: 0.75em; /* iPhone向けに縮小 */
+    font-weight: bold;
+    color: white;
+    background-color: #f4a261; 
 }
 
-#puyo-palette .puyo:hover {
-    border: 2px solid #eceff4;
+.mode-toggle-btn, #reset-button-play, #auto-drop-toggle-button {
+    width: 100%;
+    padding: 8px;
+    border: none;
+    border-radius: 5px;
+    font-size: 0.85em;
+    font-weight: bold;
 }
 
-.selected-puyo {
-    border: 2px solid #a3be8c !important;
-}
+.mode-toggle-btn { background-color: #457b9d; color: white; }
+#reset-button-play { background-color: #e63946; color: white; }
+#auto-drop-toggle-button { background-color: #2a9d8f; color: white; }
 
-/* --- モバイルコントロール --- */
+/* --- モード表示 --- */
+.edit-info { display: none !important; } 
+.play-info { display: flex; flex-direction: column; } 
+.edit-mode-active .play-info { display: none !important; }
+.edit-mode-active .edit-info { display: flex !important; flex-direction: column; gap: 10px; }
+
+/* --- パレット --- */
+.palette-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5px; 
+    margin-top: 5px; 
+}
+#color-palette .puyo { width: 100%; aspect-ratio: 1/1; cursor: pointer; }
+#color-palette .puyo.selected { box-shadow: 0 0 0 2px #fff, 0 0 4px 2px #ffc107; }
+
+/* --- 色定義 --- */
+.puyo-1 { background-color: #e63946; } 
+.puyo-2 { background-color: #457b9d; } 
+.puyo-3 { background-color: #8ac926; } 
+.puyo-4 { background-color: #fca311; } 
+.puyo-5 { background-color: #ccc; } 
+.puyo-0 { background-color: transparent !important; border: 2px dashed #666; }
+
+.puyo-ghost { opacity: 0.4; border: 2px dashed #fff; }
+
+/* --- ★ モバイル操作ボタン (2段スタック版) ★ --- */
 #mobile-controls {
-    display: none;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background-color: #34495e;
-    padding: 10px;
-    justify-content: space-around;
-    z-index: 1000;
+    display: none; 
+    margin-top: 15px;
+    width: 100%;
+    max-width: 500px; 
+    flex-direction: row; 
+    justify-content: center; 
+    gap: 6px; 
+    padding: 0 5px;
+    box-sizing: border-box;
+    align-items: stretch;
 }
 
 #mobile-controls.visible {
     display: flex;
 }
 
-#mobile-controls button {
-    flex: 1;
-    margin: 0 5px;
-    padding: 15px 0;
-    font-size: 1.1em;
+.btn-stack {
+    display: flex;
+    flex-direction: column;
+    flex: 1.5; /* 落下ボタン列を少し広く */
+    gap: 4px;
+    min-width: 0;
 }
 
-@media (max-width: 650px) {
-    #wrapper {
-        flex-direction: column;
-        align-items: center;
-    }
-    #info-panel {
-        width: 90%;
-        order: -1;
-    }
-    #puyo-board {
-        margin-bottom: 70px; /* モバイルコントロールの高さ分 */
-    }
+.mobile-btn {
+    flex: 1; 
+    min-width: 0;
+    height: 120px; /* iPhone16の画面縦幅に合わせて120pxから100pxに微調整 */
+    font-size: 1.2em; 
+    font-weight: bold;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background-color: #457b9d; 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+    transition: background-color 0.1s, transform 0.05s;
+}
+
+.small-btn {
+    flex: none;
+    height: calc(50% - 2px);
+    font-size: 0.9em; 
+    white-space: nowrap;
+}
+
+#btn-soft-drop, #btn-hard-drop { background-color: #5e81ac; }
+#btn-rotate-cw, #btn-rotate-ccw { background-color: #6a0dad; }
+
+.mobile-btn:active {
+    filter: brightness(1.2);
+    transform: scale(0.95);
+}
+
+/* 50手リスト */
+#edit-next-list-container {
+    max-height: 180px; 
+    overflow-y: auto;
+    background-color: #2a2a2a;
+    border: 1px dashed #555;
+}
+
+/* --- エディットモード：ネクスト設定の表示復元 --- */
+
+/* ネクストの器（これがないと中身が0pxで潰れます） */
+.next-puyo-slot {
+    width: 36px;
+    height: 72px; 
+    background-color: rgba(0, 0, 0, 0.4);
+    border: 1px solid #555;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column; /* ぷよを縦に並べる */
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+}
+
+/* スロット内のぷよサイズ */
+.next-puyo-slot .puyo {
+    width: 28px !important;
+    height: 28px !important;
+    margin: 1px 0;
+}
+
+/* 50手リスト（N3以降）の1行分のレイアウト */
+.next-puyo-slot-pair {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid #333;
+    background-color: #2a2a2a;
+}
+
+.next-puyo-slot-pair span {
+    font-size: 0.8em;
+    color: #888;
+    width: 30px;
+}
+
+/* リスト内のスロットは少しだけコンパクトに */
+#edit-next-list-container .next-puyo-slot {
+    width: 28px;
+    height: 56px;
+}
+
+#edit-next-list-container .puyo {
+    width: 20px !important;
+    height: 20px !important;
+}
+
+/* リスト全体のスクロール設定 */
+#edit-next-list-container {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #444;
 }
