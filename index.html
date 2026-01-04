@@ -39,58 +39,101 @@
                     </div>
                 </div>
 
-                <div id="play-score-info" class="info-box info-group-a">
-                    <h2>SCORE</h2>
-                    <div id="score-display">0</div>
-                </div>
-
-                <!-- 最大連鎖数表示の追加 -->
-                <div id="max-chain-box" class="info-box info-group-a">
-                    <h2>最大連鎖</h2>
-                    <div id="max-chain-display">0</div>
-                </div>
-                
-                <div id="play-buttons" class="info-box info-group-b">
-                    <button id="undo-button" onclick="undoMove()">一手戻す</button>
-                    <button id="redo-button" onclick="redoMove()">一手やり直す</button>
-                    <button id="auto-drop-button" onclick="toggleAutoDrop()">自動落下: ON</button>
-                    <button id="reset-button" onclick="resetBoard()">盤面リセット</button>
-                    <button id="edit-button" onclick="toggleEditMode()">編集モード</button>
-                    <button id="ai-hint-button" onclick="toggleAIHint()">AIヒント: OFF</button>
-                    <!-- 最大連鎖ボタンの追加 -->
-                    <button id="max-chain-button" onclick="window.findMaxChain()">最大連鎖</button>
-                </div>
-            </div>
-
-            <div id="edit-info-container" class="edit-info" style="display: none;">
-                <div id="edit-puyo-select" class="info-box info-group-a">
-                    <h2>設置ぷよ</h2>
-                    <div id="puyo-palette">
-                        <div class="puyo color-red" onclick="selectPuyo('red')"></div>
-                        <div class="puyo color-green" onclick="selectPuyo('green')"></div>
-                        <div class="puyo color-blue" onclick="selectPuyo('blue')"></div>
-                        <div class="puyo color-yellow" onclick="selectPuyo('yellow')"></div>
-                        <div class="puyo color-purple" onclick="selectPuyo('purple')"></div>
-                        <div class="puyo color-garbage" onclick="selectPuyo('garbage')"></div>
-                        <div class="puyo color-empty" onclick="selectPuyo('empty')"></div>
+                <div id="play-stats-info">
+                    <div id="score-box" class="info-box">
+                        <h2>スコア</h2>
+                        <span id="score">0</span>
+                    </div>
+                    <div id="chain-box" class="info-box">
+                        <h2>連鎖数</h2>
+                        <span id="chain-count">0</span>
                     </div>
                 </div>
-                <div id="edit-buttons" class="info-box info-group-b">
-                    <button id="clear-all-button" onclick="clearAllPuyos()">全てクリア</button>
-                    <button id="play-button" onclick="toggleEditMode()">プレイモード</button>
+                
+                <div id="history-controls" class="common-control">
+                    <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
+                    <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
+                </div>
+                
+                <div id="play-controls" class="common-control">
+                    <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
+                    <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
+                    <button id="ai-button">AIヒント</button>
+                    <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
+                </div>
+
+            </div>
+            
+            <div id="edit-info-container" class="edit-info">
+                
+                <div id="color-palette" class="info-box edit-group-a">
+                    <h2>パレット</h2>
+                    <div class="palette-row">
+                        <div class="puyo palette-color puyo-1" data-color="1"></div> <div class="puyo palette-color puyo-2" data-color="2"></div> <div class="puyo palette-color puyo-3" data-color="3"></div> </div>
+                    <div class="palette-row">
+                        <div class="puyo palette-color puyo-4" data-color="4"></div> <div class="puyo palette-color puyo-5" data-color="5"></div> <div class="puyo palette-color puyo-0" data-color="0"></div> </div>
+                </div>
+
+                <div id="stage-code-info" class="info-box">
+                    <h2>ステージコード管理</h2>
+                    <div style="margin-bottom: 10px;">
+                        <textarea id="stage-code-input" placeholder="ステージコードを入力" rows="3" style="width: 100%; box-sizing: border-box; resize: none;"></textarea>
+                        <button onclick="loadStageCode()" style="width: 100%; padding: 8px; background-color: #f4a261; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 5px;">コードを読み込む</button>
+                    </div>
+                    <button onclick="copyStageCode()" style="width: 100%; padding: 8px; background-color: #2a9d8f; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">現在のステージをコード化 (コピー)</button>
+                </div>
+                <div id="edit-next-info" class="info-box"> 
+                    <h2>ネクスト設定</h2>
+                    
+                    <div class="next-puyo-row">
+                        <div class="next-puyo-slot" id="edit-next-1"></div>
+                        <div class="next-puyo-slot" id="edit-next-2"></div>
+                    </div>
+                    
+                    <div id="edit-next-list-container">
+                        </div>
+
+                    <button id="apply-next-button" onclick="applyNextPuyos()" style="margin-top:10px; width:100%; padding:8px; background-color: #457b9d; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクスト設定を適用</button>
+                    <button onclick="clearEditNext()" style="margin-top:10px; width:100%; padding:5px; background-color: #e63946; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクストをランダムで再生成</button>
+                </div>
+                
+                <div id="edit-action-buttons" class="common-control">
+                    <div id="mode-toggle-container">
+                        <button class="mode-toggle-btn" onclick="toggleMode()">play (E)</button>
+                    </div>
+                    <div id="reset-button-container">
+                        <button id="reset-button-edit" onclick="resetGame(); toggleMode();">盤面リセット (R)</button>
+                    </div>
                 </div>
             </div>
+            
         </div>
     </div>
-
-    <div id="mobile-controls" class="visible">
-        <button onclick="window.rotatePuyoCCW()">左回転</button>
-        <button onclick="movePuyo(-1, 0)">左移動</button>
-        <button onclick="hardDrop()">ハードドロップ</button>
-        <button onclick="movePuyo(1, 0)">右移動</button>
-        <button onclick="window.rotatePuyoCW()">右回転</button>
+<div id="mobile-controls">
+    <button class="mobile-btn" id="btn-left">←</button>
+    <div class="btn-stack">
+        <button class="mobile-btn small-btn" id="btn-soft-drop">1↓</button>
+        <button class="mobile-btn small-btn" id="btn-hard-drop">M↓</button>
     </div>
+    <button class="mobile-btn" id="btn-right">→</button>
+    <button class="mobile-btn" id="btn-rotate-cw">B</button>
+    <button class="mobile-btn" id="btn-rotate-ccw">A</button>
+</div>
 
+    <script src="puyoAI.js"></script>
     <script src="puyoSim.js"></script>
+    
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('sw.js').then(function(registration) {
+                    console.log('Service Worker registered successfully:', registration);
+                }).catch(function(error) {
+                    console.log('Service Worker registration failed:', error);
+                });
+            });
+        }
+    </script>
+
 </body>
 </html>
