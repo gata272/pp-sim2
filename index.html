@@ -9,8 +9,8 @@
     <meta name="application-name" content="Puyo Sim Test">
     
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="android-icon-192x192.png.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="android-icon-192x192.png">
     <meta name="theme-color" content="#5e81ac">
     
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -33,95 +33,74 @@
                     <h2>NEXT</h2>
                     <div class="next-puyo-row">
                         <div id="next-puyo-1" class="next-puyo-slot">
-                        </div>
+                            </div>
                         <div id="next-puyo-2" class="next-puyo-slot">
-                        </div>
+                            </div>
                     </div>
                 </div>
 
                 <div id="score-info" class="info-box info-group-a">
-                    <h2>SCORE</h2>
-                    <span id="score">0</span>
+                    <h2>スコア</h2>
+                    <div id="score">0</div>
                 </div>
 
                 <div id="chain-info" class="info-box info-group-a">
-                    <h2>CHAIN</h2>
-                    <span id="chain-count">0</span>
+                    <h2>連鎖数</h2>
+                    <div id="chain-count">0</div>
                 </div>
-                
-                <!-- ★ 新規追加: 最大連鎖数表示 ★ -->
-                <div id="max-chain-box" class="info-box info-group-a">
-                    <h2>MAX CHAIN</h2>
-                    <span id="max-chain-count">0</span>
-                </div>
-                <!-- ★ 新規追加: 最大連鎖数表示 終わり ★ -->
 
-                <div id="history-controls">
-                    <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
-                    <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
+                <!-- 最大連鎖数表示の追加 -->
+                <div id="max-chain-info" class="info-box info-group-a">
+                    <h2>最大連鎖</h2>
+                    <div id="max-chain-count">0</div>
                 </div>
-                
-                <div id="max-chain-controls">
-                    <!-- ★ 新規追加: 最大連鎖ボタン ★ -->
+                <!-- /最大連鎖数表示の追加 -->
+
+                <div id="control-buttons" class="info-group-b">
+                    <button id="undo-button" onclick="undo()">一手戻す (U)</button>
+                    <button id="redo-button" onclick="redo()">一手やり直す (Y)</button>
+                    
+                    <!-- 最大連鎖ボタンの追加 -->
                     <button id="max-chain-button" onclick="findMaxChain()">最大連鎖</button>
-                    <!-- ★ 新規追加: 最大連鎖ボタン 終わり ★ -->
-                </div>
+                    <!-- /最大連鎖ボタンの追加 -->
 
-                <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: OFF</button>
-                <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
-                <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
+                    <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: OFF</button>
+                    <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
+                </div>
             </div>
 
-            <div id="edit-info-container" class="edit-info">
-                <div id="palette-info" class="info-box">
-                    <h2>COLOR PALETTE</h2>
-                    <div id="color-palette" class="palette-row">
-                        <div class="puyo puyo-1 palette-color" data-color="1"></div>
-                        <div class="puyo puyo-2 palette-color" data-color="2"></div>
-                        <div class="puyo puyo-3 palette-color" data-color="3"></div>
-                        <div class="puyo puyo-4 palette-color" data-color="4"></div>
-                        <div class="puyo puyo-5 palette-color" data-color="5"></div>
-                        <div class="puyo puyo-0 palette-color" data-color="0"></div>
+            <div id="edit-info-container" class="edit-info" style="display: none;">
+                <div id="edit-color-select" class="info-box info-group-a">
+                    <h2>編集色</h2>
+                    <div id="color-select-buttons">
+                        <button class="color-select-button puyo-red" onclick="selectEditColor('red')"></button>
+                        <button class="color-select-button puyo-green" onclick="selectEditColor('green')"></button>
+                        <button class="color-select-button puyo-blue" onclick="selectEditColor('blue')"></button>
+                        <button class="color-select-button puyo-yellow" onclick="selectEditColor('yellow')"></button>
+                        <button class="color-select-button puyo-purple" onclick="selectEditColor('purple')"></button>
+                        <button class="color-select-button puyo-garbage" onclick="selectEditColor('garbage')"></button>
+                        <button class="color-select-button puyo-empty" onclick="selectEditColor('empty')"></button>
                     </div>
                 </div>
-                
-                <div id="edit-next-info" class="info-box">
-                    <h2>NEXT PUYOS (N1-N2)</h2>
-                    <div class="next-puyo-row">
-                        <div id="edit-next-1" class="next-puyo-slot"></div>
-                        <div id="edit-next-2" class="next-puyo-slot"></div>
-                    </div>
-                    <button onclick="applyNextPuyos()">ネクスト設定を保存</button>
-                    <button onclick="clearEditNext()">ネクストをランダム生成</button>
+                <div id="edit-buttons" class="info-group-b">
+                    <button id="reset-button-edit" onclick="resetGame()">盤面リセット (R)</button>
                 </div>
-                
-                <div id="stage-code-info" class="info-box">
-                    <h2>STAGE CODE</h2>
-                    <input type="text" id="stage-code-input" placeholder="ステージコードを入力">
-                    <button onclick="copyStageCode()">コードをコピー</button>
-                    <button onclick="loadStageCode()">コードを読み込み</button>
-                </div>
+            </div>
 
-                <button class="mode-toggle-btn" onclick="toggleMode()">play (E)</button>
+            <div id="mode-toggle" class="info-group-c">
+                <button id="mode-toggle-button" onclick="toggleMode()">edit</button>
             </div>
         </div>
     </div>
-    
-    <!-- モバイル操作ボタン -->
+
     <div id="mobile-controls">
-        <button id="btn-left" class="mobile-btn">←</button>
-        <div class="btn-stack">
-            <button id="btn-rotate-cw" class="mobile-btn small-btn">↻</button>
-            <button id="btn-rotate-ccw" class="mobile-btn small-btn">↺</button>
-        </div>
-        <button id="btn-right" class="mobile-btn">→</button>
-        <div class="btn-stack">
-            <button id="btn-soft-drop" class="mobile-btn small-btn">↓</button>
-            <button id="btn-hard-drop" class="mobile-btn small-btn">↓(Hard)</button>
-        </div>
+        <button onclick="movePuyo(-1, 0)">←</button>
+        <button onclick="rotatePuyoCW()">↻</button>
+        <button onclick="rotatePuyoCCW()">↺</button>
+        <button onclick="hardDrop()">↓</button>
+        <button onclick="movePuyo(1, 0)">→</button>
     </div>
 
     <script src="puyoSim.js"></script>
-    <script src="puyoAI.js"></script>
 </body>
 </html>
