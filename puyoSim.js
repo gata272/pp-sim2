@@ -1058,6 +1058,47 @@ function renderBoard() {
     if (currentPuyo && gameState === 'playing') {
         renderCurrentPuyo();
     }
+    
+    if (gameState === 'playing') {
+        renderPlayNextPuyo();
+    } else if (gameState === 'editing') {
+        renderEditNextPuyos();
+    }
+}
+
+function renderCurrentPuyo() {
+    if (!currentPuyo) return;
+    
+    const currentPuyoCoords = getPuyoCoords();
+    const ghostPuyoCoords = getGhostFinalPositions();
+    
+    for (let y = 0; y < HEIGHT; y++) {
+        for (let x = 0; x < WIDTH; x++) {
+            const cellElement = document.getElementById('cell-' + x + '-' + y);
+            if (!cellElement) continue;
+            
+            const puyoElement = cellElement.firstChild;
+            if (!puyoElement) continue;
+            
+            let cellColor = board[y][x];
+            let puyoClasses = 'puyo puyo-' + cellColor;
+            
+            const puyoInFlight = currentPuyoCoords.find(p => p.x === x && p.y === y);
+            if (puyoInFlight) {
+                cellColor = puyoInFlight.color;
+                puyoClasses = 'puyo puyo-' + cellColor;
+            } else {
+                const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
+                if (puyoGhost) {
+                    cellColor = puyoGhost.color;
+                    puyoClasses = 'puyo puyo-' + cellColor + ' puyo-ghost';
+                }
+            }
+            
+            puyoElement.className = puyoClasses;
+            puyoElement.setAttribute('data-color', cellColor);
+        }
+    }
 }
 
 function renderPlayNextPuyo() {
