@@ -678,9 +678,6 @@ function checkCollision(coords) {
     }
     return false;
 }
-    }
-    return false;
-}
 
 function movePuyo(dx, dy, newRotation, shouldRender = true) {
     if (gameState !== 'playing' || !currentPuyo) return false; 
@@ -847,22 +844,6 @@ function lockPuyo() {
     runChain();
     
     if (window.clearAIHint) window.clearAIHint();
-}
-    }
-
-    for (let x = 0; x < WIDTH; x++) {
-        if (board[HEIGHT - 1][x] !== COLORS.EMPTY) {
-            board[HEIGHT - 1][x] = COLORS.EMPTY;
-        }
-    }
-
-    currentPuyo = null;
-    saveState(true); 
-    
-    gameState = 'chaining';
-    chainCount = 0;
-    
-    runChain();
 }
 
 function findConnectedPuyos() {
@@ -1076,37 +1057,6 @@ function renderBoard() {
     }
     if (currentPuyo && gameState === 'playing') {
         renderCurrentPuyo();
-    }
-}-${y}`);
-            if (!cellElement) continue;
-
-            const puyoElement = cellElement.firstChild; 
-            
-            let cellColor = board[y][x]; 
-            let puyoClasses = `puyo puyo-${cellColor}`;
-            
-            const puyoInFlight = currentPuyoCoords.find(p => p.x === x && p.y === y);
-            if (puyoInFlight) {
-                cellColor = puyoInFlight.color; 
-                puyoClasses = `puyo puyo-${cellColor}`; 
-            } 
-            else {
-                const puyoGhost = ghostPuyoCoords.find(p => p.x === x && p.y === y);
-                if (puyoGhost) {
-                    cellColor = puyoGhost.color; 
-                    puyoClasses = `puyo puyo-${cellColor} puyo-ghost`;
-                }
-            }
-            
-            puyoElement.className = puyoClasses;
-            puyoElement.setAttribute('data-color', cellColor);
-        }
-    }
-
-    if (gameState === 'playing') {
-        renderPlayNextPuyo();
-    } else if (gameState === 'editing') {
-        renderEditNextPuyos(); 
     }
 }
 
@@ -1421,7 +1371,6 @@ document.addEventListener('DOMContentLoaded', () => {
         aiHint = null;
         document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
     };
-})();
 })();
 
 // --- 最大連鎖数表示機能 (Manus AI) ---
