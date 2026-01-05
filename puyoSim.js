@@ -678,6 +678,9 @@ function checkCollision(coords) {
     }
     return false;
 }
+    }
+    return false;
+}
 
 function movePuyo(dx, dy, newRotation, shouldRender = true) {
     if (gameState !== 'playing' || !currentPuyo) return false; 
@@ -844,6 +847,22 @@ function lockPuyo() {
     runChain();
     
     if (window.clearAIHint) window.clearAIHint();
+}
+    }
+
+    for (let x = 0; x < WIDTH; x++) {
+        if (board[HEIGHT - 1][x] !== COLORS.EMPTY) {
+            board[HEIGHT - 1][x] = COLORS.EMPTY;
+        }
+    }
+
+    currentPuyo = null;
+    saveState(true); 
+    
+    gameState = 'chaining';
+    chainCount = 0;
+    
+    runChain();
 }
 
 function findConnectedPuyos() {
@@ -1040,13 +1059,25 @@ function checkBoardEmpty() {
 // --- 描画とUI更新 ---
 
 function renderBoard() {
-    const isPlaying = gameState === 'playing';
-    const currentPuyoCoords = isPlaying ? getPuyoCoords() : [];
-    const ghostPuyoCoords = isPlaying && currentPuyo ? getGhostFinalPositions() : []; 
-
-    for (let y = HEIGHT - 1; y >= 0; y--) { 
+    const boardElement = document.getElementById('puyo-board');
+    boardElement.innerHTML = '';
+    // 14列目(Y=13)から描画を開始する
+    for (let y = HEIGHT - 1; y >= 0; y--) {
         for (let x = 0; x < WIDTH; x++) {
-            const cellElement = document.getElementById(`cell-${x}-${y}`);
+            const cell = document.createElement('div');
+            const color = board[y][x];
+            if (color !== COLORS.EMPTY) {
+                const puyo = document.createElement('div');
+                puyo.className = `puyo puyo-${color}`;
+                cell.appendChild(puyo);
+            }
+            boardElement.appendChild(cell);
+        }
+    }
+    if (currentPuyo && gameState === 'playing') {
+        renderCurrentPuyo();
+    }
+}-${y}`);
             if (!cellElement) continue;
 
             const puyoElement = cellElement.firstChild; 
@@ -1389,5 +1420,72 @@ document.addEventListener('DOMContentLoaded', () => {
     window.clearAIHint = function() {
         aiHint = null;
         document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
+    };
+})();
+})();
+
+// --- 最大連鎖数表示機能 (Manus AI) ---
+(function() {
+    let maxChainPuyo = null;
+    const PUYO_COLORS = { 1: '#e63946', 2: '#457b9d', 3: '#8ac926', 4: '#fca311', 5: '#ccc', 0: 'transparent' };
+
+    const maxChainButton = document.getElementById('max-chain-button');
+    if (maxChainButton) {
+        maxChainButton.addEventListener('click', () => {
+            if (gameState !== 'playing') {
+                alert('プレイ中のみ最大連鎖数を表示できます。');
+                return;
+            }
+            
+            // 盤面のコピーを作成してAIに渡す
+            const boardCopy = board.map(row => [...row]);
+            maxChainPuyo = PuyoAI.findMaxChainPuyo(boardCopy);
+            
+            if (maxChainPuyo) {
+                showMaxChainPuyoOnBoard();
+            } else {
+                alert('連鎖が発生するぷよが見つかりません。');
+                clearMaxChainHint();
+            }
+        });
+    }
+
+    function showMaxChainPuyoOnBoard() {
+        if (!maxChainPuyo) return;
+        document.querySelectorAll('.max-chain-hint-box').forEach(el => el.remove());
+        
+        const x = maxChainPuyo.x;
+        const y = maxChainPuyo.y;
+        const chainCount = maxChainPuyo.chain;
+        
+        // 赤枠を描画
+        drawRedBox(x, y);
+        
+        // コンソールにも出力（デバッグ用）
+        console.log(`最大連鎖: ${chainCount}鎖 at (${x}, ${y})`);
+    }
+
+    function drawRedBox(x, y) {
+        const cell = document.getElementById('cell-' + x + '-' + y);
+        if (cell) {
+            const box = document.createElement('div');
+            box.className = 'max-chain-hint-box';
+            box.style.position = 'absolute';
+            box.style.width = '100%';
+            box.style.height = '100%';
+            box.style.top = '0';
+            box.style.left = '0';
+            box.style.border = '3px solid #e74c3c';
+            box.style.boxSizing = 'border-box';
+            box.style.zIndex = '99';
+            box.style.borderRadius = '4px';
+            cell.style.position = 'relative';
+            cell.appendChild(box);
+        }
+    }
+
+    window.clearMaxChainHint = function() {
+        maxChainPuyo = null;
+        document.querySelectorAll('.max-chain-hint-box').forEach(el => el.remove());
     };
 })();
