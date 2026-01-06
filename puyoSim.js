@@ -564,8 +564,8 @@ function generateNewPuyo() {
     const [c1, c2] = nextPuyoColors.shift();
 
     currentPuyo = {
-        mainColor: c1,
-        subColor: c2,
+        mainColor: c2,
+        subColor: c1,
         mainX: 2, 
         mainY: HEIGHT - 2, 
         rotation: 0 
@@ -1578,7 +1578,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const chainCount = maxChainPuyo.chain;
         
         drawRedBox(x, y);
+        updateMaxChainDisplay(chainCount);
         console.log('最大連鎖: ' + chainCount + '鎖 at (' + x + ', ' + y + ')');
+    }
+    
+    function updateMaxChainDisplay(chainCount) {
+        const maxChainDisplay = document.getElementById('max-chain-display');
+        if (maxChainDisplay) {
+            maxChainDisplay.textContent = chainCount;
+        }
     }
 
     function drawRedBox(x, y) {
@@ -1603,5 +1611,9 @@ document.addEventListener('DOMContentLoaded', () => {
     window.clearMaxChainHint = function() {
         maxChainPuyo = null;
         document.querySelectorAll('.max-chain-hint-box').forEach(el => el.remove());
+        const maxChainDisplay = document.getElementById('max-chain-display');
+        if (maxChainDisplay) {
+            maxChainDisplay.textContent = '-';
+        }
     };
 })();
