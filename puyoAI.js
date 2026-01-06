@@ -103,10 +103,14 @@ const PuyoAI = (function() {
     function simulatePureChain(board) {
         let tempBoard = board.map(row => [...row]);
         let chainCount = 0;
-        while (true) {
-            let exploded = processStep(tempBoard);
-            if (!exploded) break;
+        let exploded = processStep(tempBoard); // 最初の連鎖判定
+        if (exploded) {
             chainCount++;
+            while (true) {
+                exploded = processStep(tempBoard);
+                if (!exploded) break;
+                chainCount++;
+            }
         }
         return { chains: chainCount, finalBoard: tempBoard };
     }
