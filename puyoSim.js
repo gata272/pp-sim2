@@ -1150,68 +1150,7 @@ function renderPlayNextPuyo() {
     });
 }
 
-function renderEditNextPuyos() {
-    const listContainer = document.getElementById('edit-next-list-container');
-    const visibleSlots = [
-        document.getElementById('edit-next-1'),
-        document.getElementById('edit-next-2')
-    ];
 
-    if (!listContainer || !visibleSlots[0] || !visibleSlots[1]) return;
-
-    const createEditablePuyo = (color, listIndex, puyoIndex) => {
-        let puyo = document.createElement('div');
-        puyo.className = 'puyo puyo-' + color;
-        puyo.style.cursor = 'pointer';
-        
-        puyo.onclick = (event) => {
-            event.stopPropagation();
-            if (gameState !== 'editing') return;
-            
-            if (editingNextPuyos.length > listIndex) {
-                editingNextPuyos[listIndex][puyoIndex] = currentEditColor;
-                renderEditNextPuyos();
-            }
-        };
-        
-        return puyo;
-    };
-
-    listContainer.innerHTML = '';
-    for (let i = 2; i < editingNextPuyos.length; i++) {
-        const pair = editingNextPuyos[i];
-        const item = document.createElement('div');
-        item.className = 'edit-next-item';
-        
-        const label = document.createElement('span');
-        label.className = 'edit-next-label';
-        label.textContent = 'N' + (i + 1) + ':';
-        
-        const puyosContainer = document.createElement('div');
-        puyosContainer.className = 'edit-next-puyos';
-        puyosContainer.appendChild(createEditablePuyo(pair[0], i, 0));
-        puyosContainer.appendChild(createEditablePuyo(pair[1], i, 1));
-        
-        item.appendChild(label);
-        item.appendChild(puyosContainer);
-        listContainer.appendChild(item);
-    }
-
-    const updateVisibleSlots = () => {
-        if (visibleSlots[0] && editingNextPuyos[0]) {
-            visibleSlots[0].innerHTML = '<span style="font-size:10px;color:#888">N1</span>';
-            visibleSlots[0].appendChild(createEditablePuyo(editingNextPuyos[0][1], 0, 1));
-            visibleSlots[0].appendChild(createEditablePuyo(editingNextPuyos[0][0], 0, 0));
-        }
-        if (visibleSlots[1] && editingNextPuyos[1]) {
-            visibleSlots[1].innerHTML = '<span style="font-size:10px;color:#888">N2</span>';
-            visibleSlots[1].appendChild(createEditablePuyo(editingNextPuyos[1][1], 1, 1));
-            visibleSlots[1].appendChild(createEditablePuyo(editingNextPuyos[1][0], 1, 0));
-        }
-    };
-    
-    updateVisibleSlots();
-}
 
 function updateUI() {
     const scoreElement = document.getElementById('score');
@@ -1262,12 +1201,20 @@ function renderEditNextPuyos() {
         puyo.style.cursor = 'pointer';
         
         puyo.onclick = (event) => {
-            event.stopPropagation(); 
-            if (gameState !== 'editing') return;
+            event.stopPropagation();
+            console.log('Clicked puyo at [' + listIndex + '][' + puyoIndex + '], currentEditColor=' + currentEditColor + ', gameState=' + gameState);
+            if (gameState !== 'editing') {
+                console.log('Not in editing mode');
+                return;
+            }
             
             if (editingNextPuyos.length > listIndex) {
-                editingNextPuyos[listIndex][puyoIndex] = currentEditColor; 
-                renderEditNextPuyos(); 
+                console.log('Before: editingNextPuyos[' + listIndex + '] = [' + editingNextPuyos[listIndex][0] + ', ' + editingNextPuyos[listIndex][1] + ']');
+                editingNextPuyos[listIndex][puyoIndex] = currentEditColor;
+                console.log('After: editingNextPuyos[' + listIndex + '] = [' + editingNextPuyos[listIndex][0] + ', ' + editingNextPuyos[listIndex][1] + ']');
+                renderEditNextPuyos();
+            } else {
+                console.log('editingNextPuyos.length (' + editingNextPuyos.length + ') <= listIndex (' + listIndex + ')');
             }
         };
         return puyo;
