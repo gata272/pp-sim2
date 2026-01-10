@@ -1,10 +1,10 @@
-// --- ぷよぷよシミュレーションの定数と設定 ---
+// ぷよぷよシミュレーションのシステム
 
 // 盤面サイズ
 const WIDTH = 6;
-const HEIGHT = 14; // 可視領域12 + 隠し領域2 (Y=0 から Y=13)
+const HEIGHT = 14; // 可視領域12 + 隠し領域2 (Y=0~13)
 const MAX_NEXT_PUYOS = 50; 
-const NUM_VISIBLE_NEXT_PUYOS = 2; // プレイ画面に表示する NEXT の数 (NEXT 1とNEXT 2)
+const NUM_VISIBLE_NEXT_PUYOS = 2; // 表示する NEXT の数 (NEXT 1とNEXT 2)
 
 // ぷよの色定義
 const COLORS = {
@@ -13,19 +13,17 @@ const COLORS = {
     BLUE: 2,
     GREEN: 3,
     YELLOW: 4,
-    GARBAGE: 5 // 灰色のおじゃまぷよ
+    GARBAGE: 5 // おじゃまぷよ
 };
 
-// スコア計算に必要なボーナス値（ぷよぷよ通準拠）
+// スコア計算の値
 const BONUS_TABLE = {
     CHAIN: [0, 8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512],
     GROUP: [0, 0, 0, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     COLOR: [0, 0, 3, 6, 12]
 };
 
-
-// --- ゲームの状態管理 ---
-
+// ゲームの状態管理
 let board = []; 
 let currentPuyo = null; 
 let nextPuyoColors = []; 
@@ -39,22 +37,19 @@ let editingNextPuyos = []; // エディットモードで使用するNEXT 50組
 let historyStack = []; // 過去の状態を保存 (Undo用)
 let redoStack = [];    // 戻した状態を保存 (Redo用)
 
-
-// --- 落下ループのための変数 ---
+// 落下ループのための変数
 let dropInterval = 1000; // 1秒ごとに落下
 let dropTimer = null; 
 let autoDropEnabled = false; 
 
-// --- クイックターン用変数 ---
+// クイックターン用変数
 let lastFailedRotation = {
     type: null, // 'CW' or 'CCW'
     timestamp: 0
 };
 const QUICK_TURN_WINDOW = 300; // 0.3 seconds in milliseconds
 
-
-// --- 初期化関数 ---
-
+// 初期化関数
 function createBoardDOM() {
     const boardElement = document.getElementById('puyo-board');
     boardElement.innerHTML = ''; 
@@ -236,8 +231,7 @@ window.toggleMode = function() {
 }
 
 
-// --- ステージコード化/復元機能 ---
-
+// ステージコード化/復元機能
 window.copyStageCode = function() {
     if (gameState !== 'editing') {
         alert("ステージコード化はエディットモードでのみ実行できます。");
@@ -340,8 +334,7 @@ window.loadStageCode = function() {
     }
 }
 
-// --- 履歴管理関数 ---
-
+// 履歴管理関数
 function saveState(clearRedoStack = true) {
     const state = {
         board: board.map(row => [...row]),
@@ -441,8 +434,7 @@ function updateHistoryButtons() {
 }
 
 
-// --- メインゲームループ ---
-
+// メインゲームループ
 function startPuyoDropLoop() {
     if (dropTimer) clearInterval(dropTimer);
     if (gameState === 'playing' && autoDropEnabled) { 
@@ -484,8 +476,7 @@ window.toggleAutoDrop = function() {
 };
 
 
-// --- エディットモード機能 ---
-
+// エディットモード機能
 function setupEditModeListeners() {
     const palette = document.getElementById('color-palette');
     if (palette) {
@@ -544,8 +535,7 @@ window.clearEditNext = function() {
 }
 
 
-// --- ぷよの生成と操作 ---
-
+// ぷよの生成と操作
 function getRandomColor() {
     return Math.floor(Math.random() * 4) + 1; 
 }
@@ -671,7 +661,6 @@ function getGhostFinalPositions() {
 function checkCollision(coords) {
     for (const puyo of coords) {
         if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0) return true;
-        // 14列目(Y=13)は衝突判定から除外する（設置を許可するため）
         if (puyo.y < HEIGHT - 1 && board[puyo.y][puyo.x] !== COLORS.EMPTY) {
             return true;
         }
@@ -816,7 +805,7 @@ function lockPuyo() {
 
     const coords = getPuyoCoords();
     
-    // 1. 設置（14列目も含めて一旦盤面に書き込む）
+    // 1. 設置（一旦盤面に書き込む）
     coords.forEach(p => {
         if (p.y >= 0 && p.y < HEIGHT && p.x >= 0 && p.x < WIDTH) {
             board[p.y][p.x] = p.color;
@@ -825,7 +814,7 @@ function lockPuyo() {
 
     currentPuyo = null;
     
-    // 2. 自由落下を実行（これにより、14列目から13列目以下へ移動する）
+    // 2. 自由落下（14列目から13列目以下へ移動する）
     gravity();
 
     // 3. 14列目（Y=13）をクリア
@@ -1037,9 +1026,7 @@ function checkBoardEmpty() {
 }
 
 
-// --- 描画とUI更新 ---
-
-
+// 描画とUI更新
 function renderBoard() {
     const boardElement = document.getElementById('puyo-board');
     if (!boardElement) return;
@@ -1185,7 +1172,7 @@ function renderPlayNextPuyo() {
     });
 }
 
-// --- 【修正済み】エディットモードのネクスト表示 ---
+// エディットモードのネクスト表示
 function renderEditNextPuyos() {
     const listContainer = document.getElementById('edit-next-list-container');
     const visibleSlots = [
@@ -1195,9 +1182,7 @@ function renderEditNextPuyos() {
 
     if (!listContainer || !visibleSlots[0] || !visibleSlots[1]) return;
 
-    /**
-     * クリックで編集可能なぷよ要素を作成するヘルパー関数
-     */
+    //クリックで編集可能なぷよ要素を作成するヘルパー関数
     const createEditablePuyo = (color, listIndex, puyoIndex) => {
         let puyo = document.createElement('div');
         puyo.className = `puyo puyo-${color}`;
@@ -1217,7 +1202,7 @@ function renderEditNextPuyos() {
     };
 
 
-    // --- 1. 現在のNEXT 1, NEXT 2 の描画 (リストの先頭 2つ) ---
+    // 1. 現在のNEXT 1, NEXT 2 の描画 (リストの先頭 2つ)
     visibleSlots.forEach((slot, index) => {
         slot.innerHTML = '';
         if (editingNextPuyos.length > index) {
@@ -1228,7 +1213,7 @@ function renderEditNextPuyos() {
         }
     });
 
-    // --- 2. 50手先までのリストの描画 ---
+    // 2. 50手先までのリストの描画
     listContainer.innerHTML = '';
     
     // NEXT 3 以降 (index 2 から MAX_NEXT_PUYOS - 1 まで)
@@ -1238,7 +1223,7 @@ function renderEditNextPuyos() {
         const pairContainer = document.createElement('div');
         pairContainer.className = 'next-puyo-slot-pair';
 
-        // 手数 (例: N3, N4...)
+        // 手数 (N3, N4...)
         const countSpan = document.createElement('span');
         countSpan.textContent = `N${i + 1}`;
         pairContainer.appendChild(countSpan);
@@ -1264,8 +1249,7 @@ function updateUI() {
     updateHistoryButtons(); 
 }
 
-// --- 入力処理 ---
-
+// 入力処理
 function handleInput(event) {
     if (gameState !== 'playing') return; 
 
@@ -1304,11 +1288,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('resize', checkMobileControlsVisibility);
 });
 
-/**
- * puyoSim.js の末尾に追加してください。
- * 2手先読みAI(v2)に対応した統合コードです。
- */
-
+// puyoAI
 (function() {
     let aiHint = null;
 
@@ -1419,7 +1399,7 @@ document.addEventListener('DOMContentLoaded', () => {
 })();
 
 
-// --- AI連携コード (Manus AI) ---
+// AI連携コード
 (function() {
     let aiHint = null;
     const PUYO_COLORS = { 1: '#e63946', 2: '#457b9d', 3: '#8ac926', 4: '#fca311', 5: '#ccc', 0: 'transparent' };
@@ -1491,7 +1471,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 })();
 
-// --- 最大連鎖数表示機能 (Manus AI) ---
+// 最大連鎖数表示機能
 (function() {
     let maxChainPuyo = null;
 
