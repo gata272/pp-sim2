@@ -1,4 +1,4 @@
-/* style.css の全体 */
+/* style.css */
 
 html, body {
     height: 100%; 
@@ -15,23 +15,22 @@ body {
     padding: 10px;
 }
 
-/* --- 【重要】レイアウトの強制横並び --- */
+/* レイアウトの強制横並び */
 #wrapper {
     display: flex;
     flex-direction: row; 
-    gap: 8px; /* iPhone16向けに15pxから8pxに短縮 */
+    gap: 8px;
     background-color: #222;
     padding: 10px;
     box-shadow: none;
     max-width: 800px;
     margin: 0 auto;
-    width: 100%; /* 95%から100%に変更して端まで活用 */
+    width: 100%;
     box-sizing: border-box;
     flex-grow: 1; 
     align-items: flex-start;
 }
 
-/* ぷよのセルサイズを 36px に微調整 (iPhone16の横幅 393px に収めるため) */
 #puyo-board {
     --puyo-cell-size: 36px; 
     
@@ -60,7 +59,7 @@ body {
     position: relative; 
 }
 
-/* --- 隠し領域の視覚化 --- */
+/* 隠し領域の視覚化 */
 #puyo-board > div:nth-child(-n+12)
 {
     opacity: 0.5;
@@ -68,7 +67,7 @@ body {
     border-bottom: 1px solid rgba(255, 0, 0, 0.5); 
 }
 
-/* --- ゲームオーバーライン --- */
+/* ゲームオーバーライン */
 #puyo-board > div:nth-child(15) {
     position: relative;
     opacity: 1 !important; 
@@ -88,7 +87,7 @@ body {
     z-index: 10;
 }
 
-/* --- ぷよのデザイン --- */
+/* ぷよのデザイン */
 .puyo {
     border-radius: 50%;
     box-shadow: inset 0 -3px 0 rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2); 
@@ -105,15 +104,15 @@ body {
     height: 90%;
 }
 
-/* --- 情報パネルのレスポンシブ調整 --- */
+/* 情報パネルのレスポンシブ調整 */
 #info-panel {
     display: flex;
     flex-direction: column; 
     gap: 8px;
-    flex: 1; /* 残りの幅をすべて使う */
-    min-width: 0; /* 150pxの制限を解除して縮めるようにする */
+    flex: 1;
+    min-width: 0;
     max-width: 200px;
-    overflow: hidden; /* はみ出し防止 */
+    overflow: hidden;
 }
 
 #play-info-container, #edit-info-container {
@@ -124,7 +123,7 @@ body {
 }
 
 .info-box {
-    padding: 8px 5px; /* 余白を少し詰める */
+    padding: 8px 5px;
     border: 1px solid #444; 
     background-color: #333; 
     border-radius: 5px;
@@ -135,14 +134,19 @@ body {
 
 .info-box h2 {
     margin: 0 0 3px 0;
-    font-size: 0.85em; /* 文字を少し小さく */
+    font-size: 0.85em;
     color: #ccc;
 }
 
 #score, #chain-count {
-    font-size: 1.25em; /* 数字を少し小さく */
+    font-size: 1.25em;
     font-weight: bold;
     color: #e63946;
+}
+
+.small-text {
+  font-size: 8px;
+  color: #666666;
 }
 
 /* NEXTぷよ */
@@ -157,7 +161,7 @@ body {
     height: 22px; 
 }
 
-/* --- ボタン類 --- */
+/* ボタン類 */
 #history-controls {
     display: flex;
     flex-direction: row; 
@@ -170,13 +174,13 @@ body {
     padding: 8px 2px;
     border: none;
     border-radius: 5px;
-    font-size: 0.75em; /* iPhone向けに縮小 */
+    font-size: 0.75em;
     font-weight: bold;
     color: white;
     background-color: #f4a261; 
 }
 
-.mode-toggle-btn, #reset-button-play, #auto-drop-toggle-button {
+.mode-toggle-btn, #reset-button-edit, #reset-button-play, #auto-drop-toggle-button {
     width: 100%;
     padding: 8px;
     border: none;
@@ -186,16 +190,16 @@ body {
 }
 
 .mode-toggle-btn { background-color: #457b9d; color: white; }
-#reset-button-play { background-color: #e63946; color: white; }
+#reset-button-edit #reset-button-play { background-color: #e63946; color: white; }
 #auto-drop-toggle-button { background-color: #2a9d8f; color: white; }
 
-/* --- モード表示 --- */
+/* モード表示 */
 .edit-info { display: none !important; } 
 .play-info { display: flex; flex-direction: column; } 
 .edit-mode-active .play-info { display: none !important; }
 .edit-mode-active .edit-info { display: flex !important; flex-direction: column; gap: 10px; }
 
-/* --- パレット --- */
+/* パレット */
 .palette-row {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -205,7 +209,7 @@ body {
 #color-palette .puyo { width: 100%; aspect-ratio: 1/1; cursor: pointer; }
 #color-palette .puyo.selected { box-shadow: 0 0 0 2px #fff, 0 0 4px 2px #ffc107; }
 
-/* --- 色定義 --- */
+/* 色定義 */
 .puyo-1 { background-color: #e63946; } 
 .puyo-2 { background-color: #457b9d; } 
 .puyo-3 { background-color: #8ac926; } 
@@ -215,7 +219,7 @@ body {
 
 .puyo-ghost { opacity: 0.4; border: 2px dashed #fff; }
 
-/* --- ★ モバイル操作ボタン (2段スタック版) ★ --- */
+/* モバイル操作ボタン */
 #mobile-controls {
     display: none; 
     margin-top: 15px;
@@ -236,7 +240,7 @@ body {
 .btn-stack {
     display: flex;
     flex-direction: column;
-    flex: 1.5; /* 落下ボタン列を少し広く */
+    flex: 1.5;
     gap: 4px;
     min-width: 0;
 }
@@ -244,7 +248,7 @@ body {
 .mobile-btn {
     flex: 1; 
     min-width: 0;
-    height: 120px; /* iPhone16の画面縦幅に合わせて120pxから100pxに微調整 */
+    height: 120px;
     font-size: 1.2em; 
     font-weight: bold;
     color: white;
@@ -282,9 +286,7 @@ body {
     border: 1px dashed #555;
 }
 
-/* --- エディットモード：ネクスト設定の表示復元 --- */
-
-/* ネクストの器（これがないと中身が0pxで潰れます） */
+/* ネクスト */
 .next-puyo-slot {
     width: 36px;
     height: 72px; 
@@ -292,7 +294,7 @@ body {
     border: 1px solid #555;
     border-radius: 4px;
     display: flex;
-    flex-direction: column; /* ぷよを縦に並べる */
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     margin: 0 auto;
@@ -321,7 +323,6 @@ body {
     width: 30px;
 }
 
-/* リスト内のスロットは少しだけコンパクトに */
 #edit-next-list-container .next-puyo-slot {
     width: 28px;
     height: 56px;
@@ -333,7 +334,6 @@ body {
     cursor: pointer;
 }
 
-/* next-puyo-rowのスタイル（旧バージョンから追加） */
 .next-puyo-slot-pair .next-puyo-row {
     margin: 0; 
     gap: 8px; 
