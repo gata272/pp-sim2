@@ -29,33 +29,41 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 盤面の質を詳細に評価する (v2)
-     * 連鎖ポテンシャル、連結数、平滑度、高さを総合的に判断
+     * 盤面の質を詳細に評価する (v3) - 大連鎖特化型
+     * 連鎖尾、折り返し、連結の質を重視
      */
     function evaluateBoardQuality(board) {
         let score = 0;
         const heights = [];
         
-        // 1. 各列の高さと平滑度の評価
+        // 1. 各列の高さと地形の評価
         for (let x = 0; x < WIDTH; x++) {
             let h = 0;
             while (h < HEIGHT && board[h][x] !== 0) h++;
             heights.push(h);
             
-            // 高さペナルティ
-            if (h > 11) score -= 500;
-            if (h > 12) score -= 2000;
-            if (x === 2 && h > 10) score -= 300; // 軸列の高さ制限
+            // 高さペナルティ (窒息防止)
+            if (h > 11) score -= 1000;
+            if (h > 12) score -= 5000;
         }
         
-        for (let x = 0; x < WIDTH - 1; x++) {
-            let diff = Math.abs(heights[x] - heights[x+1]);
-            if (diff === 0) score += 10;
-            else if (diff === 1) score += 5;
-            else score -= diff * 20;
+        // 地形評価: U字型（端が高く中央が低い）を好む
+        const idealU = [10, 8, 6, 6, 8, 10]; // 理想的な高さの比率
+        for (let x = 0; x < WIDTH; x++) {
+            // 理想の形に近いほど加点
+            let diffFromIdeal = Math.abs(heights[x] - (idealU[x] * 0.5));
+            score += (5 - diffFromIdeal) * 10;
         }
 
-        // 2. 連結ボーナスの評価
+        // 2. 連鎖尾・段差の評価
+        for (let x = 0; x < WIDTH - 1; x++) {
+            let diff = heights[x] - heights[x+1];
+            // 階段状の段差（1〜2段）を高く評価
+            if (diff === 1 || diff === 2) score += 50; 
+            if (diff === -1 || diff === -2) score += 50;
+        }
+
+        // 3. 連結ボーナスの評価 (3連結を非常に重視)
         let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
         for (let y = 0; y < 12; y++) {
             for (let x = 0; x < WIDTH; x++) {
@@ -76,14 +84,19 @@ const PuyoAI = (function() {
                             }
                         });
                     }
-                    // 連結数に応じた加点 (4連結以上は消えるので評価外)
-                    if (groupSize === 2) score += 20;
-                    if (groupSize === 3) score += 100;
+                    if (groupSize === 2) score += 30;
+                    if (groupSize === 3) score += 300; // 3連結は連鎖の種として強力に評価
                 }
             }
         }
 
-        // 3. 連鎖ポテンシャルの評価 (既存ロジックの統合)
+        // 4. GTR（折り返し）の簡易パターンマッチング
+        // 左側GTRの核となる形をチェック
+        if (board[0][0] !== 0 && board[0][0] === board[0][1] && board[1][0] === board[0][0]) {
+            score += 500; // GTRの土台部分
+        }
+
+        // 5. 連鎖ポテンシャルの評価
         let maxChain = 0;
         const allowed14 = is14thRowAllowed(board);
         for (let x = 0; x < WIDTH; x++) {
@@ -97,7 +110,7 @@ const PuyoAI = (function() {
                 if (res.chains > maxChain) maxChain = res.chains;
             }
         }
-        score += maxChain * 500;
+        score += maxChain * 1000; // 連鎖ポテンシャルの重みを強化
 
         return score;
     }
