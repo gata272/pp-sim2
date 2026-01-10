@@ -348,14 +348,14 @@ const PuyoAI = (function() {
                                     }
                                 }
                             }
-                            let totalScore2 = score2 + (bestScore3 === -Infinity ? 0 : bestScore3 * 0.5); // 3手目の評価を2手目に加算 (重み付け)
+                            let totalScore2 = score2 + (bestScore3 === -Infinity ? 0 : bestScore3 * 0.7); // 3手目の評価を2手目に加算 (重み付けを強化)
                             if (totalScore2 > bestScore2) {
                                 bestScore2 = totalScore2;
                             }
                         }
                     }
                 }
-                let totalScore1 = score1 + (bestScore2 === -Infinity ? 0 : bestScore2 * 0.7); // 2手目の評価を1手目に加算 (重み付け)
+                let totalScore1 = score1 + (bestScore2 === -Infinity ? 0 : bestScore2 * 0.9); // 2手目の評価を1手目に加算 (重み付けを強化)
 
                 if (tempBoard1[11][2] !== 0) totalScore1 = -1000000; // 窒息点チェック
 
@@ -395,7 +395,18 @@ const PuyoAI = (function() {
     }
 
     function calculateBoardScore(board, chains) {
-        let score = chains * 1000; // 連鎖数を高く評価
+        let score = 0;
+        // 小連鎖を抑制し、大連鎖を高く評価
+        if (chains === 0) {
+            score += chains * 0; // 0連鎖は評価しない
+        } else if (chains <= 2) {
+            score += chains * 100; // 1-2連鎖は低く評価
+        } else if (chains <= 5) {
+            score += chains * 500; // 3-5連鎖は中程度に評価
+        } else {
+            score += chains * 2000; // 6連鎖以上は非常に高く評価
+        }
+
         score += evaluateBoardStability(board); // 盤面の安定性を評価
         score += evaluateChainPotential(board); // 将来の連鎖の可能性を評価
         return score;
@@ -422,22 +433,32 @@ const PuyoAI = (function() {
 
     function evaluateChainPotential(board) {
         let potential = 0;
-        // 3連結の数を数える
+        // 3連結の数を数える (4連結で消える直前の状態を高く評価)
         for (let y = 0; y < HEIGHT - 1; y++) { // 14段目は連鎖しないので除外
             for (let x = 0; x < WIDTH; x++) {
                 if (board[y][x] !== 0) {
                     let color = board[y][x];
-                    let connected = 0;
-                    // 右方向
-                    if (x + 1 < WIDTH && board[y][x+1] === color) connected++;
-                    // 上方向
-                    if (y + 1 < HEIGHT - 1 && board[y+1][x] === color) connected++;
-                    // 左方向
-                    if (x - 1 >= 0 && board[y][x-1] === color) connected++;
-                    // 下方向
-                    if (y - 1 >= 0 && board[y-1][x] === color) connected++;
+                    let groupSize = 0;
+                    let visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+                    let stack = [{x, y}];
+                    visited[y][x] = true;
 
-                    if (connected >= 2) potential += 50; // 3連結以上になりそうなぷよを評価
+                    while (stack.length > 0) {
+                        let p = stack.pop();
+                        groupSize++;
+                        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+                            let nx = p.x + dx, ny = p.y + dy;
+                            if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT - 1 && 
+                                board[ny][nx] === color && !visited[ny][nx]) {
+                                visited[ny][nx] = true;
+                                stack.push({x: nx, y: ny});
+                            }
+                        });
+                    }
+                    // 3連結を非常に高く評価 (4つで消えるため、3つで止まっている状態が重要)
+                    if (groupSize === 3) potential += 500; 
+                    // 2連結も評価 (将来の3連結の可能性)
+                    else if (groupSize === 2) potential += 50;
                 }
             }
         }
