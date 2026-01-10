@@ -428,37 +428,76 @@ const PuyoAI = (function() {
         }
         // 窒息点に近いほどマイナス
         if (board[11][2] !== 0) stabilityScore -= 5000; 
+        
+        // 発火点連動の評価
+        for (let y = 1; y < 11; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                if (board[y][x] !== 0 && board[y + 1][x] === 0 && y + 2 < HEIGHT - 1 && board[y + 2][x] !== 0) {
+                    if (board[y][x] === board[y + 2][x]) {
+                        stabilityScore += 300;
+                    } else {
+                        stabilityScore += 100;
+                    }
+                }
+            }
+        }
         return stabilityScore;
     }
 
     function evaluateChainPotential(board) {
         let potential = 0;
-        // 3連結の数を数える (4連結で消える直前の状態を高く評価)
+        let visitedGroups = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+
         for (let y = 0; y < HEIGHT - 1; y++) { // 14段目は連鎖しないので除外
             for (let x = 0; x < WIDTH; x++) {
-                if (board[y][x] !== 0) {
+                if (board[y][x] !== 0 && !visitedGroups[y][x]) {
                     let color = board[y][x];
-                    let groupSize = 0;
-                    let visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+                    let group = [];
                     let stack = [{x, y}];
-                    visited[y][x] = true;
+                    let currentVisited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+                    currentVisited[y][x] = true;
 
                     while (stack.length > 0) {
                         let p = stack.pop();
-                        groupSize++;
+                        group.push(p);
                         [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
                             let nx = p.x + dx, ny = p.y + dy;
                             if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT - 1 && 
-                                board[ny][nx] === color && !visited[ny][nx]) {
-                                visited[ny][nx] = true;
+                                board[ny][nx] === color && !currentVisited[ny][nx]) {
+                                currentVisited[ny][nx] = true;
                                 stack.push({x: nx, y: ny});
                             }
                         });
                     }
+
+                    // グループ内のぷよをvisitedGroupsにマーク
+                    group.forEach(p => visitedGroups[p.y][p.x] = true);
+
+                    let groupSize = group.length;
+
                     // 3連結を非常に高く評価 (4つで消えるため、3つで止まっている状態が重要)
-                    if (groupSize === 3) potential += 500; 
+                    if (groupSize === 3) {
+                        potential += 1000; // 以前より高く評価
+
+                        // 「3+1」構造の評価
+                        for (let p of group) {
+                            // 縦の「3+1」 (3連結の上に1つ同じ色がある)
+                            if (p.y + 2 < HEIGHT - 1 && board[p.y + 1][p.x] === 0 && board[p.y + 2][p.x] === color) {
+                                potential += 1500; // 縦の3+1は特に高く評価
+                            }
+                            // 横の「3+1」 (3連結の横に1つ同じ色がある)
+                            if (p.x + 2 < WIDTH && board[p.y][p.x + 1] === 0 && board[p.y][p.x + 2] === color) {
+                                potential += 1000; // 横の3+1も高く評価
+                            }
+                            if (p.x - 2 >= 0 && board[p.y][p.x - 1] === 0 && board[p.y][p.x - 2] === color) {
+                                potential += 1000; // 横の3+1も高く評価
+                            }
+                        }
+                    }
                     // 2連結も評価 (将来の3連結の可能性)
-                    else if (groupSize === 2) potential += 50;
+                    else if (groupSize === 2) {
+                        potential += 100; // 以前より高く評価
+                    }
                 }
             }
         }
