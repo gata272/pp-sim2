@@ -29,63 +29,63 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 盤面の質を詳細に評価する (v6) - 多層連鎖タワー特化型
-     * AAA-B-A の上に BBB-C-B が乗るような、垂直方向の連鎖継承を最重視
+     * 盤面の質を詳細に評価する (v8) - 究極連鎖モデル & デッドライン・ガード
+     * 提示された大連鎖盤面をモデルにし、3列目の窒息を絶対回避する
      */
     function evaluateBoardQuality(board) {
         let score = 0;
         const heights = [];
         
-        // 1. 各列の高さの取得と窒息防止
+        // 1. デッドライン・ガード (3列目の窒息防止を最優先)
         for (let x = 0; x < WIDTH; x++) {
             let h = 0;
             while (h < HEIGHT && board[h][x] !== 0) h++;
             heights.push(h);
-            if (h > 11) score -= 10000;
-            if (h > 12) score -= 50000;
+            
+            if (x === 2) { // 3列目 (インデックス2)
+                if (h >= 10) score -= 1000000; // 10段を超えたら致命的なペナルティ
+                if (h >= 11) score -= 5000000; // 11段以上は実質禁止
+            } else {
+                if (h > 11) score -= 10000;
+                if (h > 12) score -= 50000;
+            }
         }
         
-        // 2. 多層連鎖タワー (Vertical Chain Inheritance) の評価
+        // 2. 究極連鎖モデル：垂直階層構造の評価
+        // 画像のように、色が層になって積み重なっている状態を評価
         for (let x = 0; x < WIDTH; x++) {
-            let columnColors = [];
-            for (let y = 0; y < heights[x]; y++) {
-                columnColors.push(board[y][x]);
-            }
-            
-            // 列内の色の並びを解析して、挟み込みの連鎖を検出
             let layers = 0;
-            let i = 0;
-            while (i < columnColors.length) {
-                let colorA = columnColors[i];
-                let countA = 0;
-                while (i < columnColors.length && columnColors[i] === colorA) {
-                    countA++;
-                    i++;
-                }
-                
-                // AAA (3連結) を発見
-                if (countA >= 3) {
-                    // その上に別色 B があるか
-                    if (i < columnColors.length) {
-                        let colorB = columnColors[i];
-                        i++;
-                        // さらにその上に A があるか (挟み込み成立)
-                        if (i < columnColors.length && columnColors[i] === colorA) {
-                            layers++;
-                            score += 10000 * layers; // 層が重なるほど高得点
-                            i++;
-                            
-                            // 次の層のチェック: BBB-C-B ...
-                            // すでに i は colorA の次を指している
-                        }
-                    }
+            let lastColor = -1;
+            let currentCombo = 0;
+            
+            for (let y = 0; y < heights[x]; y++) {
+                let color = board[y][x];
+                if (color === lastColor) {
+                    currentCombo++;
                 } else {
-                    i++;
+                    if (currentCombo >= 3) layers++; // 3つ以上の塊が層になっている
+                    lastColor = color;
+                    currentCombo = 1;
+                }
+            }
+            if (currentCombo >= 3) layers++;
+            
+            // 層が重なっている列にボーナス
+            score += layers * 20000;
+            
+            // 垂直方向の「挟み込み」チェック (A-A-A-B-A)
+            for (let y = 0; y < heights[x] - 4; y++) {
+                if (board[y][x] !== 0 && 
+                    board[y][x] === board[y+1][x] && 
+                    board[y][x] === board[y+2][x] && 
+                    board[y+3][x] !== board[y][x] && 
+                    board[y+4][x] === board[y][x]) {
+                    score += 15000; // 垂直挟み込み（画像モデルの核心）
                 }
             }
         }
 
-        // 3. 連結ボーナス (3連結を「次の連鎖の土台」として評価)
+        // 3. 連結ボーナス (3連結を「発火待ち」として極めて高く評価)
         let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
         for (let y = 0; y < 12; y++) {
             for (let x = 0; x < WIDTH; x++) {
@@ -106,8 +106,8 @@ const PuyoAI = (function() {
                             }
                         });
                     }
-                    if (groupSize === 2) score += 200;
-                    if (groupSize === 3) score += 5000; // 3連結を強力に推奨
+                    if (groupSize === 2) score += 500;
+                    if (groupSize === 3) score += 10000; // 3連結を強力に推奨
                 }
             }
         }
@@ -129,7 +129,7 @@ const PuyoAI = (function() {
         
         // 連鎖数に応じた指数関数的な加点 (大連鎖への執着)
         if (maxChain > 0) {
-            score += Math.pow(maxChain, 4) * 2000; 
+            score += Math.pow(maxChain, 4) * 5000; 
         }
 
         return score;
