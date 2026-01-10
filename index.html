@@ -80,7 +80,6 @@
                     
                     <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
                 </div>
-                <p class="gray-text">puyo-sim_ver1.0</p>
 
             </div>
             
@@ -95,12 +94,12 @@
                 </div>
 
                 <div id="stage-code-info" class="info-box">
-                    <h2>ステージコード管理</h2>
+                    <h2>ステージコード</h2>
                     <div style="margin-bottom: 10px;">
                         <textarea id="stage-code-input" placeholder="ステージコードを入力" rows="3" style="width: 100%; box-sizing: border-box; resize: none;"></textarea>
                         <button onclick="loadStageCode()" style="width: 100%; padding: 8px; background-color: #f4a261; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 5px;">コードを読み込む</button>
                     </div>
-                    <button onclick="copyStageCode()" style="width: 100%; padding: 8px; background-color: #2a9d8f; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">現在のステージをコード化 (コピー)</button>
+                    <button onclick="copyStageCode()" style="width: 100%; padding: 8px; background-color: #2a9d8f; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">現在のステージ・ネクストをコード化 (コピー)</button>
                 </div>
                 <div id="edit-next-info" class="info-box"> 
                     <h2>ネクスト設定<br>(左が下にきます)</h2>
@@ -139,6 +138,7 @@
     <button class="mobile-btn" id="btn-rotate-cw">B</button>
     <button class="mobile-btn" id="btn-rotate-ccw">A</button>
 </div>
+<p class="small-text">puyo-sim_ver1.0 by gata</p>
 
     <script src="puyoAI.js"></script>
     <script src="puyoSim.js"></script>
@@ -155,7 +155,5 @@
         }
     </script>
 
-
-    <!-- index.html内の上書きスクリプトを削除しました。puyoSim.jsの修正が反映されるようになります。 -->
 </body>
 </html>
