@@ -29,52 +29,49 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 盤面の質を詳細に評価する (v3) - 大連鎖特化型
-     * 連鎖尾、折り返し、連結の質を重視
+     * 盤面の質を詳細に評価する (v4) - 垂直連鎖・階段構造特化型
+     * 消去後の落下による連鎖の継続性を最重視
      */
     function evaluateBoardQuality(board) {
         let score = 0;
         const heights = [];
         
-        // 1. 各列の高さと地形の評価
+        // 1. 各列の高さの取得と窒息防止
         for (let x = 0; x < WIDTH; x++) {
             let h = 0;
             while (h < HEIGHT && board[h][x] !== 0) h++;
             heights.push(h);
-            
-            // 高さペナルティ (窒息防止)
             if (h > 11) score -= 1000;
             if (h > 12) score -= 5000;
         }
         
-        // 地形評価: U字型（端が高く中央が低い）を好む
-        const idealU = [10, 8, 6, 6, 8, 10]; // 理想的な高さの比率
+        // 2. 垂直方向の色の重なり（階段構造）の評価
         for (let x = 0; x < WIDTH; x++) {
-            // 理想の形に近いほど加点
-            let diffFromIdeal = Math.abs(heights[x] - (idealU[x] * 0.5));
-            score += (5 - diffFromIdeal) * 10;
+            for (let y = 0; y < heights[x] - 1; y++) {
+                // 同じ色が縦に並んでいる（連結）
+                if (board[y][x] === board[y+1][x]) {
+                    score += 50;
+                }
+                // 異なる色が交互に積まれている（階段の準備）
+                else if (board[y][x] !== 0 && board[y+1][x] !== 0) {
+                    score += 20;
+                }
+            }
         }
 
-        // 2. 連鎖尾・段差の評価
-        for (let x = 0; x < WIDTH - 1; x++) {
-            let diff = heights[x] - heights[x+1];
-            // 階段状の段差（1〜2段）を高く評価
-            if (diff === 1 || diff === 2) score += 50; 
-            if (diff === -1 || diff === -2) score += 50;
-        }
-
-        // 3. 連結ボーナスの評価 (3連結を非常に重視)
+        // 3. 連結ボーナス（3連結を「連鎖の核」として評価）
         let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
+        let groups = [];
         for (let y = 0; y < 12; y++) {
             for (let x = 0; x < WIDTH; x++) {
                 if (board[y][x] !== 0 && !visited[y][x]) {
                     let color = board[y][x];
-                    let groupSize = 0;
+                    let group = [];
                     let stack = [{x, y}];
                     visited[y][x] = true;
                     while (stack.length > 0) {
                         let p = stack.pop();
-                        groupSize++;
+                        group.push(p);
                         [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
                             let nx = p.x + dx, ny = p.y + dy;
                             if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && 
@@ -84,19 +81,28 @@ const PuyoAI = (function() {
                             }
                         });
                     }
-                    if (groupSize === 2) score += 30;
-                    if (groupSize === 3) score += 300; // 3連結は連鎖の種として強力に評価
+                    if (group.length === 2) score += 40;
+                    if (group.length === 3) {
+                        score += 400;
+                        groups.push(group); // 3連結は後で落下シミュレーションに使用
+                    }
                 }
             }
         }
 
-        // 4. GTR（折り返し）の簡易パターンマッチング
-        // 左側GTRの核となる形をチェック
-        if (board[0][0] !== 0 && board[0][0] === board[0][1] && board[1][0] === board[0][0]) {
-            score += 500; // GTRの土台部分
-        }
+        // 4. 落下後連鎖予測 (Post-Drop Prediction)
+        // 3連結のグループが消えたと仮定して、その後の連鎖の伸びを評価
+        groups.forEach(group => {
+            let tempBoard = board.map(row => [...row]);
+            group.forEach(p => tempBoard[p.y][p.x] = 0);
+            applyGravity(tempBoard);
+            let res = simulatePureChain(tempBoard);
+            if (res.chains > 0) {
+                score += res.chains * 800; // 落下によって連鎖が誘発される配置を高く評価
+            }
+        });
 
-        // 5. 連鎖ポテンシャルの評価
+        // 5. 連鎖ポテンシャルの評価 (重みを最大化)
         let maxChain = 0;
         const allowed14 = is14thRowAllowed(board);
         for (let x = 0; x < WIDTH; x++) {
@@ -110,7 +116,7 @@ const PuyoAI = (function() {
                 if (res.chains > maxChain) maxChain = res.chains;
             }
         }
-        score += maxChain * 1000; // 連鎖ポテンシャルの重みを強化
+        score += maxChain * 2000; // 連鎖ポテンシャルを最優先
 
         return score;
     }
