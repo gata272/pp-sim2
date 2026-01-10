@@ -28,28 +28,83 @@ const PuyoAI = (function() {
         return has12 && has13;
     }
 
-    function evaluatePureChainPotential(board) {
-        let maxChain = 0;
-        const allowed14 = is14thRowAllowed(board);
-
+    /**
+     * 盤面の質を詳細に評価する (v2)
+     * 連鎖ポテンシャル、連結数、平滑度、高さを総合的に判断
+     */
+    function evaluateBoardQuality(board) {
+        let score = 0;
+        const heights = [];
+        
+        // 1. 各列の高さと平滑度の評価
         for (let x = 0; x < WIDTH; x++) {
-            for (let color of COLORS) {
-                let tempBoard = board.map(row => [...row]);
-                let y = 0;
-                while (y < 14 && tempBoard[y][x] !== 0) y++;
-                
-                // 14段目(index 13)に置こうとする場合、特殊条件をチェック
-                if (y === 13 && !allowed14) continue;
-                if (y >= 14) continue;
-                
-                tempBoard[y][x] = color;
-                let res = simulatePureChain(tempBoard);
-                if (res.chains > maxChain) {
-                    maxChain = res.chains;
+            let h = 0;
+            while (h < HEIGHT && board[h][x] !== 0) h++;
+            heights.push(h);
+            
+            // 高さペナルティ
+            if (h > 11) score -= 500;
+            if (h > 12) score -= 2000;
+            if (x === 2 && h > 10) score -= 300; // 軸列の高さ制限
+        }
+        
+        for (let x = 0; x < WIDTH - 1; x++) {
+            let diff = Math.abs(heights[x] - heights[x+1]);
+            if (diff === 0) score += 10;
+            else if (diff === 1) score += 5;
+            else score -= diff * 20;
+        }
+
+        // 2. 連結ボーナスの評価
+        let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
+        for (let y = 0; y < 12; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                if (board[y][x] !== 0 && !visited[y][x]) {
+                    let color = board[y][x];
+                    let groupSize = 0;
+                    let stack = [{x, y}];
+                    visited[y][x] = true;
+                    while (stack.length > 0) {
+                        let p = stack.pop();
+                        groupSize++;
+                        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+                            let nx = p.x + dx, ny = p.y + dy;
+                            if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && 
+                                board[ny][nx] === color && !visited[ny][nx]) {
+                                visited[ny][nx] = true;
+                                stack.push({x: nx, y: ny});
+                            }
+                        });
+                    }
+                    // 連結数に応じた加点 (4連結以上は消えるので評価外)
+                    if (groupSize === 2) score += 20;
+                    if (groupSize === 3) score += 100;
                 }
             }
         }
-        return maxChain;
+
+        // 3. 連鎖ポテンシャルの評価 (既存ロジックの統合)
+        let maxChain = 0;
+        const allowed14 = is14thRowAllowed(board);
+        for (let x = 0; x < WIDTH; x++) {
+            for (let color of COLORS) {
+                let tempBoard = board.map(row => [...row]);
+                let y = heights[x];
+                if (y === 13 && !allowed14) continue;
+                if (y >= 14) continue;
+                tempBoard[y][x] = color;
+                let res = simulatePureChain(tempBoard);
+                if (res.chains > maxChain) maxChain = res.chains;
+            }
+        }
+        score += maxChain * 500;
+
+        return score;
+    }
+
+    function evaluatePureChainPotential(board) {
+        // 互換性のために残すが、内部で新しい評価関数を使用
+        return evaluateBoardQuality(board);
     }
 
     /**
@@ -260,107 +315,58 @@ const PuyoAI = (function() {
         return true;
     }
 
-    function getBestMove(board, currentPuyo, nextPuyo1, nextPuyo2) {
-        let bestChainScore = -Infinity;
+    function getBestMove(board, axisColor, childColor, nextAxisColor, nextChildColor) {
+        let bestChainScore = -1;
         let bestMove = { x: 2, rotation: 0 };
         const allowed14 = is14thRowAllowed(board);
-        
-        // 枝刈り: 明らかに効率の悪い配置を事前に除外
-        let candidatePositions = [];
+
         for (let x = 0; x < WIDTH; x++) {
-            if (isReachable(board, x)) {
-                candidatePositions.push(x);
-            }
-        }
-
-        for (let x of candidatePositions) {
             for (let rot = 0; rot < 4; rot++) {
+                if (!isReachable(board, x)) continue;
 
-                let tempBoard1 = board.map(row => [...row]);
+                let tempBoard = board.map(row => [...row]);
                 
-                // 14段目への設置が含まれるかチェック (currentPuyo)
-                let willUse14_1 = false;
-                let h1 = 0; while(h1 < 14 && tempBoard1[h1][x] !== 0) h1++;
-                if (h1 === 13) willUse14_1 = true;
-                if (rot === 0 && h1 === 12) willUse14_1 = true;
-                if (willUse14_1 && !allowed14) continue;
+                // 14段目への設置が含まれるかチェック
+                let willUse14 = false;
+                let h = 0; while(h < 14 && tempBoard[h][x] !== 0) h++;
+                
+                // 軸ぷよが14段目(Y=13)に置かれる場合
+                if (h === 13) willUse14 = true;
+                
+                // 子ぷよが14段目(Y=13)に置かれる場合
+                if (rot === 0 && h === 12) willUse14 = true; // 子ぷよが上 (Y=13)
+                if (rot === 2 && h === 14) willUse14 = true; // 子ぷよが下 (Y=13) - 実際はh=14はありえない
+                
+                if (willUse14 && !allowed14) continue;
 
-                if (!placePuyo(tempBoard1, x, rot, currentPuyo.axisColor, currentPuyo.childColor)) continue;
+                if (!placePuyo(tempBoard, x, rot, axisColor, childColor)) continue;
 
-                let res1 = simulatePureChain(tempBoard1);
-                let score1 = calculateBoardScore(res1.finalBoard, res1.chains);
+                let res1 = simulatePureChain(tempBoard);
+                // 新しい評価関数を使用
+                let boardQuality = evaluateBoardQuality(res1.finalBoard);
+                let totalChainScore = (res1.chains * 2000) + boardQuality;
 
-                // NEXT1の配置をシミュレート (枝刈り: スコアが低い場合はスキップ)
-                let bestScore2 = -Infinity;
-                if (nextPuyo1 && score1 > -50000) { // 1手目のスコアが極端に低い場合はスキップ
-                    let candidatePositions2 = [];
-                    for (let nx1 = 0; nx1 < WIDTH; nx1++) {
-                        if (isReachable(res1.finalBoard, nx1)) {
-                            candidatePositions2.push(nx1);
-                        }
-                    }
-                    for (let nx1 of candidatePositions2) {
-                        for (let nrot1 = 0; nrot1 < 4; nrot1++) {
-
-                            let tempBoard2 = res1.finalBoard.map(row => [...row]);
-                            
-                            // 14段目への設置が含まれるかチェック (nextPuyo1)
-                            let willUse14_2 = false;
-                            let h2 = 0; while(h2 < 14 && tempBoard2[h2][nx1] !== 0) h2++;
-                            if (h2 === 13) willUse14_2 = true;
-                            if (nrot1 === 0 && h2 === 12) willUse14_2 = true;
-                            if (willUse14_2 && !allowed14) continue;
-
-                            if (!placePuyo(tempBoard2, nx1, nrot1, nextPuyo1.axisColor, nextPuyo1.childColor)) continue;
-
-                            let res2 = simulatePureChain(tempBoard2);
-                            let score2 = calculateBoardScore(res2.finalBoard, res2.chains);
-
-                            // NEXT2の配置をシミュレート (枝刈り: スコアが低い場合はスキップ)
-                            let bestScore3 = -Infinity;
-                            if (nextPuyo2 && score2 > -50000) { // 2手目のスコアが極端に低い場合はスキップ
-                                let candidatePositions3 = [];
-                                for (let nx2 = 0; nx2 < WIDTH; nx2++) {
-                                    if (isReachable(res2.finalBoard, nx2)) {
-                                        candidatePositions3.push(nx2);
-                                    }
-                                }
-                                for (let nx2 of candidatePositions3) {
-                                    for (let nrot2 = 0; nrot2 < 4; nrot2++) {
-
-                                        let tempBoard3 = res2.finalBoard.map(row => [...row]);
-                                        
-                                        // 14段目への設置が含まれるかチェック (nextPuyo2)
-                                        let willUse14_3 = false;
-                                        let h3 = 0; while(h3 < 14 && tempBoard3[h3][nx2] !== 0) h3++;
-                                        if (h3 === 13) willUse14_3 = true;
-                                        if (nrot2 === 0 && h3 === 12) willUse14_3 = true;
-                                        if (willUse14_3 && !allowed14) continue;
-
-                                        if (!placePuyo(tempBoard3, nx2, nrot2, nextPuyo2.axisColor, nextPuyo2.childColor)) continue;
-
-                                        let res3 = simulatePureChain(tempBoard3);
-                                        let score3 = calculateBoardScore(res3.finalBoard, res3.chains); // 3手目の評価
-
-                                        if (score3 > bestScore3) {
-                                            bestScore3 = score3;
-                                        }
-                                    }
-                                }
-                            }
-                            let totalScore2 = score2 + (bestScore3 === -Infinity ? 0 : bestScore3 * 0.7); // 3手目の評価を2手目に加算 (重み付けを強化)
-                            if (totalScore2 > bestScore2) {
-                                bestScore2 = totalScore2;
+                if (nextAxisColor && nextChildColor) {
+                    let nextBestScore = -1000000;
+                    for (let nx = 0; nx < WIDTH; nx++) {
+                        for (let nr = 0; nr < 4; nr++) {
+                            if (!isReachable(res1.finalBoard, nx)) continue;
+                            let nextBoard = res1.finalBoard.map(row => [...row]);
+                            if (placePuyo(nextBoard, nx, nr, nextAxisColor, nextChildColor)) {
+                                let res2 = simulatePureChain(nextBoard);
+                                let q = evaluateBoardQuality(res2.finalBoard);
+                                let s = (res2.chains * 2000) + q;
+                                if (s > nextBestScore) nextBestScore = s;
                             }
                         }
                     }
+                    totalChainScore += nextBestScore * 0.8;
                 }
-                let totalScore1 = score1 + (bestScore2 === -Infinity ? 0 : bestScore2 * 0.9); // 2手目の評価を1手目に加算 (重み付けを強化)
 
-                if (tempBoard1[11][2] !== 0) totalScore1 = -1000000; // 窒息点チェック
+                if (tempBoard[11][2] !== 0) totalChainScore = -1000000;
 
-                if (totalScore1 > bestChainScore) {
-                    bestChainScore = totalScore1;
+                if (totalChainScore > bestChainScore) {
+                    bestChainScore = totalChainScore;
                     bestMove = { x, rotation: rot };
                 }
             }
@@ -392,116 +398,6 @@ const PuyoAI = (function() {
         // 14段目(Y=13)のぷよは自動消去
         for (let i = 0; i < WIDTH; i++) board[13][i] = 0;
         return true;
-    }
-
-    function calculateBoardScore(board, chains) {
-        let score = 0;
-        // 小連鎖を抑制し、大連鎖を高く評価
-        if (chains === 0) {
-            score += chains * 0; // 0連鎖は評価しない
-        } else if (chains <= 2) {
-            score += chains * 100; // 1-2連鎖は低く評価
-        } else if (chains <= 5) {
-            score += chains * 500; // 3-5連鎖は中程度に評価
-        } else {
-            score += chains * 2000; // 6連鎖以上は非常に高く評価
-        }
-
-        score += evaluateBoardStability(board); // 盤面の安定性を評価
-        score += evaluateChainPotential(board); // 将来の連鎖の可能性を評価
-        return score;
-    }
-
-    function evaluateBoardStability(board) {
-        let stabilityScore = 0;
-        for (let x = 0; x < WIDTH; x++) {
-            let height = 0;
-            while (height < HEIGHT && board[height][x] !== 0) height++;
-            stabilityScore -= height * 10; // 高いほどマイナス
-
-            // 段差の評価
-            if (x > 0) {
-                let prevHeight = 0;
-                while (prevHeight < HEIGHT && board[prevHeight][x-1] !== 0) prevHeight++;
-                stabilityScore -= Math.abs(height - prevHeight) * 5; // 段差が大きいほどマイナス
-            }
-        }
-        // 窒息点に近いほどマイナス
-        if (board[11][2] !== 0) stabilityScore -= 5000; 
-        
-        // 発火点連動の評価
-        for (let y = 1; y < 11; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                if (board[y][x] !== 0 && board[y + 1][x] === 0 && y + 2 < HEIGHT - 1 && board[y + 2][x] !== 0) {
-                    if (board[y][x] === board[y + 2][x]) {
-                        stabilityScore += 300;
-                    } else {
-                        stabilityScore += 100;
-                    }
-                }
-            }
-        }
-        return stabilityScore;
-    }
-
-    function evaluateChainPotential(board) {
-        let potential = 0;
-        let visitedGroups = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
-
-        for (let y = 0; y < HEIGHT - 1; y++) { // 14段目は連鎖しないので除外
-            for (let x = 0; x < WIDTH; x++) {
-                if (board[y][x] !== 0 && !visitedGroups[y][x]) {
-                    let color = board[y][x];
-                    let group = [];
-                    let stack = [{x, y}];
-                    let currentVisited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
-                    currentVisited[y][x] = true;
-
-                    while (stack.length > 0) {
-                        let p = stack.pop();
-                        group.push(p);
-                        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
-                            let nx = p.x + dx, ny = p.y + dy;
-                            if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT - 1 && 
-                                board[ny][nx] === color && !currentVisited[ny][nx]) {
-                                currentVisited[ny][nx] = true;
-                                stack.push({x: nx, y: ny});
-                            }
-                        });
-                    }
-
-                    // グループ内のぷよをvisitedGroupsにマーク
-                    group.forEach(p => visitedGroups[p.y][p.x] = true);
-
-                    let groupSize = group.length;
-
-                    // 3連結を非常に高く評価 (4つで消えるため、3つで止まっている状態が重要)
-                    if (groupSize === 3) {
-                        potential += 1000; // 以前より高く評価
-
-                        // 「3+1」構造の評価
-                        for (let p of group) {
-                            // 縦の「3+1」 (3連結の上に1つ同じ色がある)
-                            if (p.y + 2 < HEIGHT - 1 && board[p.y + 1][p.x] === 0 && board[p.y + 2][p.x] === color) {
-                                potential += 1500; // 縦の3+1は特に高く評価
-                            }
-                            // 横の「3+1」 (3連結の横に1つ同じ色がある)
-                            if (p.x + 2 < WIDTH && board[p.y][p.x + 1] === 0 && board[p.y][p.x + 2] === color) {
-                                potential += 1000; // 横の3+1も高く評価
-                            }
-                            if (p.x - 2 >= 0 && board[p.y][p.x - 1] === 0 && board[p.y][p.x - 2] === color) {
-                                potential += 1000; // 横の3+1も高く評価
-                            }
-                        }
-                    }
-                    // 2連結も評価 (将来の3連結の可能性)
-                    else if (groupSize === 2) {
-                        potential += 100; // 以前より高く評価
-                    }
-                }
-            }
-        }
-        return potential;
     }
 
     return { getBestMove, findMaxChainPuyo };
