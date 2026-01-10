@@ -29,8 +29,8 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 盤面の質を詳細に評価する (v4) - 垂直連鎖・階段構造特化型
-     * 消去後の落下による連鎖の継続性を最重視
+     * 盤面の質を詳細に評価する (v5) - 即時発火・挟み込み特化型
+     * 「常にあと1つで最大連鎖」という発火待ち状態を最優先
      */
     function evaluateBoardQuality(board) {
         let score = 0;
@@ -41,37 +41,37 @@ const PuyoAI = (function() {
             let h = 0;
             while (h < HEIGHT && board[h][x] !== 0) h++;
             heights.push(h);
-            if (h > 11) score -= 1000;
-            if (h > 12) score -= 5000;
+            if (h > 11) score -= 5000;
+            if (h > 12) score -= 20000;
         }
         
-        // 2. 垂直方向の色の重なり（階段構造）の評価
+        // 2. 挟み込み構造 (Sandwich) の評価
+        // 3連結の上に別色を挟み、その上に4つ目を置く形を評価
         for (let x = 0; x < WIDTH; x++) {
-            for (let y = 0; y < heights[x] - 1; y++) {
-                // 同じ色が縦に並んでいる（連結）
-                if (board[y][x] === board[y+1][x]) {
-                    score += 50;
-                }
-                // 異なる色が交互に積まれている（階段の準備）
-                else if (board[y][x] !== 0 && board[y+1][x] !== 0) {
-                    score += 20;
+            for (let y = 0; y < heights[x] - 3; y++) {
+                // AAA (3連結) + B (別色) + A (4つ目) の形をチェック
+                if (board[y][x] !== 0 && 
+                    board[y][x] === board[y+1][x] && 
+                    board[y][x] === board[y+2][x] && 
+                    board[y+3][x] !== board[y][x] && 
+                    board[y+4] && board[y+4][x] === board[y][x]) {
+                    score += 5000; // 理想的な挟み込み構造
                 }
             }
         }
 
-        // 3. 連結ボーナス（3連結を「連鎖の核」として評価）
+        // 3. 連結ボーナス (3連結を「発火待ち」として極めて高く評価)
         let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
-        let groups = [];
         for (let y = 0; y < 12; y++) {
             for (let x = 0; x < WIDTH; x++) {
                 if (board[y][x] !== 0 && !visited[y][x]) {
                     let color = board[y][x];
-                    let group = [];
+                    let groupSize = 0;
                     let stack = [{x, y}];
                     visited[y][x] = true;
                     while (stack.length > 0) {
                         let p = stack.pop();
-                        group.push(p);
+                        groupSize++;
                         [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
                             let nx = p.x + dx, ny = p.y + dy;
                             if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && 
@@ -81,28 +81,14 @@ const PuyoAI = (function() {
                             }
                         });
                     }
-                    if (group.length === 2) score += 40;
-                    if (group.length === 3) {
-                        score += 400;
-                        groups.push(group); // 3連結は後で落下シミュレーションに使用
-                    }
+                    if (groupSize === 2) score += 100;
+                    if (groupSize === 3) score += 2000; // 3連結を強力に推奨
                 }
             }
         }
 
-        // 4. 落下後連鎖予測 (Post-Drop Prediction)
-        // 3連結のグループが消えたと仮定して、その後の連鎖の伸びを評価
-        groups.forEach(group => {
-            let tempBoard = board.map(row => [...row]);
-            group.forEach(p => tempBoard[p.y][p.x] = 0);
-            applyGravity(tempBoard);
-            let res = simulatePureChain(tempBoard);
-            if (res.chains > 0) {
-                score += res.chains * 800; // 落下によって連鎖が誘発される配置を高く評価
-            }
-        });
-
-        // 5. 連鎖ポテンシャルの評価 (重みを最大化)
+        // 4. 連鎖ポテンシャルの評価 (究極の優先順位)
+        // 「今、1つ置いたら何連鎖するか」を全マスでチェック
         let maxChain = 0;
         const allowed14 = is14thRowAllowed(board);
         for (let x = 0; x < WIDTH; x++) {
@@ -116,7 +102,11 @@ const PuyoAI = (function() {
                 if (res.chains > maxChain) maxChain = res.chains;
             }
         }
-        score += maxChain * 2000; // 連鎖ポテンシャルを最優先
+        
+        // 連鎖数に応じた指数関数的な加点
+        if (maxChain > 0) {
+            score += Math.pow(maxChain, 3) * 1000; 
+        }
 
         return score;
     }
