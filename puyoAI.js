@@ -29,8 +29,8 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 盤面の質を詳細に評価する (v9) - プロレベル連鎖理論統合モデル
-     * 階段積み、挟み込み、折り返し、連鎖尾の理論を統合し、3列目の窒息を絶対回避する
+     * 盤面の質を詳細に評価する (v10) - 柔軟土台・立体継承モデル
+     * 縦・横・L字の柔軟な土台と、クッション落下による隣接列との合体（立体継承）を最優先する
      */
     function evaluateBoardQuality(board) {
         let score = 0;
@@ -43,52 +43,27 @@ const PuyoAI = (function() {
             heights.push(h);
             
             if (x === 2) { // 3列目 (インデックス2)
-                if (h >= 10) score -= 2000000; // ペナルティをさらに強化
-                if (h >= 11) score -= 10000000;
+                if (h >= 10) score -= 5000000; // ペナルティをさらに強化
+                if (h >= 11) score -= 20000000;
             } else {
-                if (h > 11) score -= 20000;
-                if (h > 12) score -= 100000;
+                if (h > 11) score -= 50000;
+                if (h > 12) score -= 200000;
             }
         }
         
-        // 2. 連鎖構造の抽象的評価 (階段・挟み込み・折り返し)
-        for (let x = 0; x < WIDTH; x++) {
-            // 垂直方向の評価
-            let lastColor = -1;
-            let currentCombo = 0;
-            for (let y = 0; y < heights[x]; y++) {
-                let color = board[y][x];
-                if (color === lastColor) {
-                    currentCombo++;
-                } else {
-                    if (currentCombo >= 3) score += 15000; // 土台の塊
-                    lastColor = color;
-                    currentCombo = 1;
-                }
-            }
-            if (currentCombo >= 3) score += 15000;
-
-            // 隣接列との段差評価 (階段積みの基礎)
-            if (x < WIDTH - 1) {
-                let diff = Math.abs(heights[x] - heights[x+1]);
-                if (diff === 1) score += 5000; // 理想的な段差
-                if (diff === 0) score += 2000; // 平坦も悪くない
-                if (diff >= 3) score -= 5000;  // 高低差がありすぎると連鎖が途切れる
-            }
-        }
-
-        // 3. 連結の質と「連鎖の種」の評価
+        // 2. 柔軟な土台（3連結）の評価
         let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
+        let groups = [];
         for (let y = 0; y < 12; y++) {
             for (let x = 0; x < WIDTH; x++) {
                 if (board[y][x] !== 0 && !visited[y][x]) {
                     let color = board[y][x];
-                    let groupSize = 0;
+                    let groupCells = [];
                     let stack = [{x, y}];
                     visited[y][x] = true;
                     while (stack.length > 0) {
                         let p = stack.pop();
-                        groupSize++;
+                        groupCells.push(p);
                         [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
                             let nx = p.x + dx, ny = p.y + dy;
                             if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && 
@@ -98,16 +73,34 @@ const PuyoAI = (function() {
                             }
                         });
                     }
-                    // 3連結（発火待ち）を最高評価
-                    if (groupSize === 3) {
-                        score += 15000;
-                        // その3連結が「露出」しているか（上にぷよが乗っていないか）
-                        let isExposed = true;
-                        // 簡易チェック: 3連結のいずれかのマスの上が空なら露出とみなす
-                        // (実際にはもっと厳密なチェックが必要だが、パフォーマンスのため簡易化)
-                        score += 5000; 
+                    groups.push({color, cells: groupCells});
+                    
+                    // 3連結（土台の塊）を高く評価（縦・横・L字問わず）
+                    if (groupCells.length === 3) {
+                        score += 20000;
                     }
-                    if (groupSize === 2) score += 1000;
+                    if (groupCells.length === 2) score += 2000;
+                }
+            }
+        }
+
+        // 3. 立体継承 (L字型合流) の評価
+        // クッション（挟み込みの1つ）が落下した際に、隣の列の3連結と合体するかをチェック
+        for (let x = 0; x < WIDTH; x++) {
+            for (let y = 1; y < heights[x] - 1; y++) {
+                let color = board[y][x];
+                // 挟み込み構造の検出: 下に別色、さらにその下に同色があるか
+                if (y >= 2 && board[y-1][x] !== 0 && board[y-1][x] !== color && board[y-2][x] === color) {
+                    // この color がクッション（落下後に合流する候補）
+                    // 隣の列 (x-1, x+1) に同色の3連結があるか確認
+                    [x-1, x+1].forEach(nx => {
+                        if (nx >= 0 && nx < WIDTH) {
+                            let neighborGroup = groups.find(g => g.color === color && g.cells.some(c => c.x === nx));
+                            if (neighborGroup && neighborGroup.cells.length >= 3) {
+                                score += 100000; // 立体継承ボーナス（超高得点）
+                            }
+                        }
+                    });
                 }
             }
         }
@@ -127,9 +120,9 @@ const PuyoAI = (function() {
             }
         }
         
-        // 連鎖数に応じた指数関数的な加点 (10連鎖以上の価値を爆発的に高める)
+        // 連鎖数に応じた指数関数的な加点 (大連鎖への執着)
         if (maxChain > 0) {
-            score += Math.pow(maxChain, 5) * 2000; 
+            score += Math.pow(maxChain, 5) * 3000; 
         }
 
         return score;
