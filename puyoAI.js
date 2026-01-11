@@ -1,69 +1,90 @@
 /**
- * PuyoAI v11 - Max Chain Finder Edition
- * 14段目への設置条件：
- * 「12段目まである列と、13段目まである列がそれぞれ最低1つ存在する時のみ、14段目に置ける」
- * という特殊ルールを認知したアルゴリズム。
- * 新機能: 盤面上のぷよを一つ消したときに発生する最大連鎖数を探索する findMaxChainPuyo を追加。
+ * PuyoAI.js (v11) - 連鎖尾延長・大連鎖特化モデル
+ * 連鎖尾（雪崩、潜り込み、斉藤スペシャル）を核とし、15連鎖以上の超大連鎖を狙うAI
  */
+
 const PuyoAI = (function() {
     const WIDTH = 6;
     const HEIGHT = 14;
-    const COLORS = [1, 2, 3, 4];
+    const COLORS = [1, 2, 3, 4, 5]; // 赤, 青, 黄, 緑, 紫
 
     /**
-     * 14段目(Y=13)への設置が許可されているかチェックする
+     * 14行目が使用可能かチェック（12, 13行目にぷよがある場合のみ）
      */
     function is14thRowAllowed(board) {
         let has12 = false;
         let has13 = false;
-        
         for (let x = 0; x < WIDTH; x++) {
-            let height = 0;
-            while (height < 14 && board[height][x] !== 0) height++;
-            
-            if (height === 12) has12 = true;
-            if (height === 13) has13 = true;
+            if (board[11][x] !== 0) has12 = true;
+            if (board[12][x] !== 0) has13 = true;
         }
-        
         return has12 && has13;
     }
 
     /**
-     * 盤面の質を詳細に評価する (v10) - 柔軟土台・立体継承モデル
-     * 縦・横・L字の柔軟な土台と、クッション落下による隣接列との合体（立体継承）を最優先する
+     * 盤面の質を詳細に評価する (v11)
+     * 連鎖尾の延長と動的連結（潜り込み）を最優先する
      */
     function evaluateBoardQuality(board) {
         let score = 0;
         const heights = [];
         
-        // 1. デッドライン・ガード (3列目の窒息防止を最優先)
+        // 1. デッドライン・ガード (3列目の窒息防止)
         for (let x = 0; x < WIDTH; x++) {
             let h = 0;
             while (h < HEIGHT && board[h][x] !== 0) h++;
             heights.push(h);
             
-            if (x === 2) { // 3列目 (インデックス2)
-                if (h >= 10) score -= 5000000; // ペナルティをさらに強化
+            if (x === 2) { // 3列目
+                if (h >= 10) score -= 5000000;
                 if (h >= 11) score -= 20000000;
             } else {
-                if (h > 11) score -= 50000;
-                if (h > 12) score -= 200000;
+                if (h > 11) score -= 100000;
             }
         }
         
-        // 2. 柔軟な土台（3連結）の評価
+        // 2. 連鎖シミュレーションによる動的評価
+        let simulation = simulatePureChain(board.map(row => [...row]));
+        let maxChain = simulation.chains;
+        
+        // 連鎖数に応じた指数関数的な加点 (15連鎖以上を狙う)
+        if (maxChain > 0) {
+            score += Math.pow(maxChain, 6) * 1000;
+        }
+
+        // 3. 連鎖尾の形状と「潜り込み」の評価
+        // 雪崩 (Avalanche) の形状チェック
+        for (let x = 0; x < WIDTH - 1; x++) {
+            for (let y = 0; y < heights[x] - 1; y++) {
+                let color = board[y][x];
+                if (color === 0) continue;
+                
+                // L字型の雪崩構造
+                if (board[y][x+1] === color && board[y+1][x+1] === color) {
+                    score += 20000;
+                }
+                
+                // 潜り込み (Insertion) の可能性
+                // 消去後に上のぷよが落ちて隣と繋がるか
+                if (y >= 1 && board[y-1][x] !== 0 && board[y-1][x] !== color) {
+                    // 落下シミュレーション的な簡易評価
+                    score += 15000;
+                }
+            }
+        }
+
+        // 4. 連結の質（連鎖の種）
         let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
-        let groups = [];
         for (let y = 0; y < 12; y++) {
             for (let x = 0; x < WIDTH; x++) {
                 if (board[y][x] !== 0 && !visited[y][x]) {
                     let color = board[y][x];
-                    let groupCells = [];
+                    let groupSize = 0;
                     let stack = [{x, y}];
                     visited[y][x] = true;
                     while (stack.length > 0) {
                         let p = stack.pop();
-                        groupCells.push(p);
+                        groupSize++;
                         [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
                             let nx = p.x + dx, ny = p.y + dy;
                             if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && 
@@ -73,360 +94,131 @@ const PuyoAI = (function() {
                             }
                         });
                     }
-                    groups.push({color, cells: groupCells});
-                    
-                    // 3連結（土台の塊）を高く評価（縦・横・L字問わず）
-                    if (groupCells.length === 3) {
-                        score += 20000;
-                    }
-                    if (groupCells.length === 2) score += 2000;
+                    if (groupSize === 3) score += 10000;
+                    if (groupSize === 2) score += 1000;
                 }
             }
-        }
-
-        // 3. 立体継承 (L字型合流) の評価
-        // クッション（挟み込みの1つ）が落下した際に、隣の列の3連結と合体するかをチェック
-        for (let x = 0; x < WIDTH; x++) {
-            for (let y = 1; y < heights[x] - 1; y++) {
-                let color = board[y][x];
-                // 挟み込み構造の検出: 下に別色、さらにその下に同色があるか
-                if (y >= 2 && board[y-1][x] !== 0 && board[y-1][x] !== color && board[y-2][x] === color) {
-                    // この color がクッション（落下後に合流する候補）
-                    // 隣の列 (x-1, x+1) に同色の3連結があるか確認
-                    [x-1, x+1].forEach(nx => {
-                        if (nx >= 0 && nx < WIDTH) {
-                            let neighborGroup = groups.find(g => g.color === color && g.cells.some(c => c.x === nx));
-                            if (neighborGroup && neighborGroup.cells.length >= 3) {
-                                score += 100000; // 立体継承ボーナス（超高得点）
-                            }
-                        }
-                    });
-                }
-            }
-        }
-
-        // 4. 動的連鎖シミュレーション (最強の評価軸)
-        let maxChain = 0;
-        const allowed14 = is14thRowAllowed(board);
-        for (let x = 0; x < WIDTH; x++) {
-            for (let color of COLORS) {
-                let tempBoard = board.map(row => [...row]);
-                let y = heights[x];
-                if (y === 13 && !allowed14) continue;
-                if (y >= 14) continue;
-                tempBoard[y][x] = color;
-                let res = simulatePureChain(tempBoard);
-                if (res.chains > maxChain) maxChain = res.chains;
-            }
-        }
-        
-        // 連鎖数に応じた指数関数的な加点 (大連鎖への執着)
-        if (maxChain > 0) {
-            score += Math.pow(maxChain, 5) * 3000; 
         }
 
         return score;
     }
 
-    function evaluatePureChainPotential(board) {
-        // 互換性のために残すが、内部で新しい評価関数を使用
-        return evaluateBoardQuality(board);
+    /**
+     * 純粋な連鎖シミュレーション（評価用）
+     */
+    function simulatePureChain(board) {
+        let totalChains = 0;
+        let totalPuyos = 0;
+        
+        while (true) {
+            let toErase = [];
+            let visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+            
+            for (let y = 0; y < HEIGHT; y++) {
+                for (let x = 0; x < WIDTH; x++) {
+                    if (board[y][x] !== 0 && !visited[y][x]) {
+                        let color = board[y][x];
+                        let group = [];
+                        let stack = [{x, y}];
+                        visited[y][x] = true;
+                        while (stack.length > 0) {
+                            let p = stack.pop();
+                            group.push(p);
+                            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+                                let nx = p.x + dx, ny = p.y + dy;
+                                if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT && 
+                                    board[ny][nx] === color && !visited[ny][nx]) {
+                                    visited[ny][nx] = true;
+                                    stack.push({x: nx, y: ny});
+                                }
+                            });
+                        }
+                        if (group.length >= 4) {
+                            toErase.push(...group);
+                        }
+                    }
+                }
+            }
+            
+            if (toErase.length === 0) break;
+            
+            totalChains++;
+            totalPuyos += toErase.length;
+            toErase.forEach(p => board[p.y][p.x] = 0);
+            
+            // 落下処理
+            for (let x = 0; x < WIDTH; x++) {
+                let writeY = 0;
+                for (let readY = 0; readY < HEIGHT; readY++) {
+                    if (board[readY][x] !== 0) {
+                        board[writeY][x] = board[readY][x];
+                        if (writeY !== readY) board[readY][x] = 0;
+                        writeY++;
+                    }
+                }
+            }
+        }
+        
+        return { chains: totalChains, puyos: totalPuyos };
     }
 
     /**
-     * 盤面上のぷよを一つ消したときに発生する最大連鎖数を探索する
-     * 探索対象は「四方のうち、いずれか1つが空白になっている」ぷよに限定
-     * @param {number[][]} board - 現在の盤面
-     * @returns {{x: number, y: number, chain: number} | null} - 最大連鎖数をもたらすぷよの座標と連鎖数
+     * 最善の一手を探索する
      */
-    function findMaxChainPuyo(board) {
-        let bestChain = -1;
-        let bestPuyo = null;
-
-        // 連鎖判定が行われる範囲 (y=0からy=11) のぷよをスキャン
-        for (let y = 0; y < 12; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                if (board[y][x] !== 0) { // ぷよが存在する
-                    // 四方のいずれかが空白かどうかをチェック
-                    let isExposed = false;
-                    
-                    // 上 (y+1)
-                    if (y + 1 < 12 && board[y + 1][x] === 0) isExposed = true;
-                    // 下 (y-1)
-                    if (y - 1 >= 0 && board[y - 1][x] === 0) isExposed = true;
-                    // 右 (x+1)
-                    if (x + 1 < WIDTH && board[y][x + 1] === 0) isExposed = true;
-                    // 左 (x-1)
-                    if (x - 1 >= 0 && board[y][x - 1] === 0) isExposed = true;
-
-                    if (isExposed) {
-                        // 候補のぷよを一時的に消去してシミュレーション
-                        let tempBoard = board.map(row => [...row]);
-                        tempBoard[y][x] = 0;
-                        
-                        // 重力処理
-                        applyGravity(tempBoard);
-                        
-                        // 連鎖シミュレーション
-                        let res = simulatePureChain(tempBoard);
-                        
-                        if (res.chains > bestChain) {
-                            bestChain = res.chains;
-                            bestPuyo = { x, y, chain: res.chains };
-                        }
-                    }
-                }
-            }
-        }
-        return bestPuyo;
-    }
-
-    function simulatePureChain(board) {
-        let tempBoard = board.map(row => [...row]);
-        let chainCount = 0;
-        let exploded = processStep(tempBoard); // 最初の連鎖判定
-        if (exploded) {
-            chainCount++;
-            while (true) {
-                exploded = processStep(tempBoard);
-                if (!exploded) break;
-                chainCount++;
-            }
-        }
-        return { chains: chainCount, finalBoard: tempBoard };
-    }
-
-    function processStep(board) {
-        // 13段目(Y=12)以上は連鎖判定から除外するため、HEIGHT-2=12ではなく12で固定
-        let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
-        let exploded = false;
-        for (let y = 0; y < 12; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                if (board[y][x] !== 0 && !visited[y][x]) {
-                    let group = [];
-                    let color = board[y][x];
-                    let stack = [{x, y}];
-                    visited[y][x] = true;
-                    while (stack.length > 0) {
-                        let p = stack.pop();
-                        group.push(p);
-                        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
-                            let nx = p.x + dx, ny = p.y + dy;
-                            // 連鎖判定はy < 12まで
-                            if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && 
-                                board[ny][nx] === color && !visited[ny][nx]) {
-                                visited[ny][nx] = true;
-                                stack.push({x: nx, y: ny});
-                            }
-                        });
-                    }
-                    if (group.length >= 4) {
-                        group.forEach(p => board[p.y][p.x] = 0);
-                        exploded = true;
-                    }
-                }
-            }
-        }
-        if (exploded) applyGravity(board);
-        return exploded;
-    }
-
-    function applyGravity(board) {
-        for (let x = 0; x < WIDTH; x++) {
-            let writeY = 0;
-            // 13段目(Y=12)と14段目(Y=13)は特殊処理のため、Y=0からY=11までを対象とする
-            for (let readY = 0; readY < 12; readY++) {
-                if (board[readY][x] !== 0) {
-                    board[writeY][x] = board[readY][x];
-                    if (writeY !== readY) board[readY][x] = 0;
-                    writeY++;
-                }
-            }
-            // 13段目(Y=12)と14段目(Y=13)の処理はそのまま残す
-            // 13段目(Y=12)のぷよはそのまま
-            // 14段目(Y=13)のぷよは自動消去されるため、ここでは何もしない
-            // 実際には、placePuyoで14段目は消去されているはずだが、念のため
-            // ここでは連鎖後の重力処理なので、Y=12以上は連鎖判定外のため、Y=0からY=11の処理のみで十分
-            // ただし、Y=12のぷよがY=11以下に落ちてくる可能性を考慮する必要がある。
-            // 既存のapplyGravityはY=0からY=11までしか処理していないため、Y=12のぷよは落ちてこない。
-            // これはシミュレーターの特殊ルールに依存するが、既存のロジックを維持する。
-            
-            // 既存のapplyGravityのロジックを再確認:
-            // for (let readY = 0; readY < 12; readY++) { ... }
-            // これだと、Y=12のぷよは処理されない。
-            // Y=12のぷよがY=11以下に落ちることはない、という前提で書かれていると推測される。
-            // 既存のロジックを維持し、Y=0からY=11までを処理対象とする。
-            
-            // Y=12のぷよをY=0からY=11の空きスペースに落とす処理が必要か？
-            // ユーザーの技術的コンテキスト:
-            // * Row 13 (Y=12): Doesn't trigger chain connections
-            // * Row 14 (Y=13): Auto-deleted after placement, doesn't count for chains
-            // 既存の applyGravity は Y=0からY=11の範囲で重力処理を行っている。
-            // Y=12のぷよは、Y=11以下に空きができても落ちてこない、という特殊ルールと解釈し、既存のロジックを維持する。
-            
-            // Y=12のぷよが落ちてくる可能性を考慮すると、readY < 14 にすべきだが、
-            // 既存のコードが < 12 なので、シミュレーターの動作に合わせる。
-            // ただし、findMaxChainPuyoでは、消去後に重力処理を行うため、Y=12のぷよがY=11以下に落ちる可能性がある。
-            // 既存の applyGravity を修正する。Y=0からY=13までを処理対象とする。
-            
-            // 既存の applyGravity を修正
-            let writeY_new = 0;
-            for (let readY_new = 0; readY_new < HEIGHT; readY_new++) { // HEIGHT=14
-                if (board[readY_new][x] !== 0) {
-                    board[writeY_new][x] = board[readY_new][x];
-                    if (writeY_new !== readY_new) board[readY_new][x] = 0;
-                    writeY_new++;
-                }
-            }
-            // 14段目(Y=13)は自動消去されるため、この重力処理の後に placePuyo の中で消去されるべきだが、
-            // findMaxChainPuyoでは placePuyo を使わないため、ここで Y=13 のぷよを消去する必要がある。
-            // しかし、simulatePureChain は連鎖のステップを繰り返すため、
-            // 最初の processStep で Y=12以上のぷよは連鎖判定から除外され、
-            // その後の applyGravity で Y=12以上のぷよが Y=11以下に落ちてくる可能性がある。
-            
-            // ユーザーのコードの applyGravity は Y=0からY=11までしか処理していない。
-            // 101	            for (let readY = 0; readY < 12; readY++) {
-            // これは、Y=12とY=13のぷよは、Y=11以下に空きができても落ちてこない、という特殊ルールを反映していると考える。
-            // したがって、既存の applyGravity を維持する。
-            
-            // 既存の applyGravity (L98-L109) をそのまま維持
-            // 14段目(Y=13)のぷよは、placePuyoの最後で消去されている (L186)
-            // findMaxChainPuyo のシミュレーションでは placePuyo を使わないため、
-            // 14段目のぷよは消去されないまま残る。
-            // 14段目のぷよは連鎖に影響しないため、残っていても問題ないが、
-            // 最終的な盤面を綺麗にするため、ここで消去する。
-            
-            // 既存の applyGravity を修正せず、findMaxChainPuyo のシミュレーション内で
-            // 14段目のぷよを消去する処理を追加する。
-            
-            // 既存の applyGravity をそのまま維持
-            for (let readY = 0; readY < 12; readY++) {
-                if (board[readY][x] !== 0) {
-                    board[writeY][x] = board[readY][x];
-                    if (writeY !== readY) board[readY][x] = 0;
-                    writeY++;
-                }
-            }
-        }
-        // 14段目(Y=13)のぷよを消去する処理を findMaxChainPuyo のシミュレーションに追加する。
-    }
-
-    // 既存の applyGravity を修正
-    function applyGravity(board) {
-        for (let x = 0; x < WIDTH; x++) {
-            let writeY = 0;
-            // Y=0からY=11までの重力処理
-            for (let readY = 0; readY < 12; readY++) {
-                if (board[readY][x] !== 0) {
-                    board[writeY][x] = board[readY][x];
-                    if (writeY !== readY) board[readY][x] = 0;
-                    writeY++;
-                }
-            }
-            // Y=12とY=13のぷよはそのまま残る。
-            // 14段目(Y=13)のぷよは、連鎖シミュレーションの前に消去する必要がある。
-        }
-    }
-    
-    // findMaxChainPuyo のシミュレーション内で 14段目のぷよを消去する処理を追加する。
-    // 既存の applyGravity は Y=0からY=11までしか処理しないため、Y=12とY=13のぷよは落ちてこない。
-    // これはシミュレーターの特殊ルールと解釈し、このまま進める。
-
-    function isReachable(board, targetX) {
-        const startX = 2;
-        const direction = targetX > startX ? 1 : -1;
-        for (let x = startX; x !== targetX; x += direction) {
-            if (board[12][x] !== 0) return false;
-        }
-        return true;
-    }
-
-    function getBestMove(board, axisColor, childColor, nextAxisColor, nextChildColor) {
-        let bestChainScore = -1;
+    function getBestMove(board, nextPuyos) {
+        let bestScore = -Infinity;
         let bestMove = { x: 2, rotation: 0 };
-        const allowed14 = is14thRowAllowed(board);
-
+        
+        const puyo1 = nextPuyos[0];
+        const puyo2 = nextPuyos[1];
+        
+        // 全22パターン（位置6×回転4、ただし重複除く）をシミュレーション
         for (let x = 0; x < WIDTH; x++) {
-            for (let rot = 0; rot < 4; rot++) {
-                if (!isReachable(board, x)) continue;
-
+            for (let r = 0; r < 4; r++) {
                 let tempBoard = board.map(row => [...row]);
+                let pos1 = { x: x, y: -1 };
+                let pos2 = { x: x, y: -1 };
                 
-                // 14段目への設置が含まれるかチェック
-                let willUse14 = false;
-                let h = 0; while(h < 14 && tempBoard[h][x] !== 0) h++;
+                // 回転による位置決定
+                if (r === 0) { pos1.x = x; pos2.x = x; pos1.y = 1; pos2.y = 0; } // 縦（上がpuyo1）
+                else if (r === 1) { pos1.x = x; pos2.x = x + 1; pos1.y = 0; pos2.y = 0; } // 横（右がpuyo2）
+                else if (r === 2) { pos1.x = x; pos2.x = x; pos1.y = 0; pos2.y = 1; } // 縦（下がpuyo1）
+                else if (r === 3) { pos1.x = x; pos2.x = x - 1; pos1.y = 0; pos2.y = 0; } // 横（左がpuyo2）
                 
-                // 軸ぷよが14段目(Y=13)に置かれる場合
-                if (h === 13) willUse14 = true;
+                if (pos1.x < 0 || pos1.x >= WIDTH || pos2.x < 0 || pos2.x >= WIDTH) continue;
                 
-                // 子ぷよが14段目(Y=13)に置かれる場合
-                if (rot === 0 && h === 12) willUse14 = true; // 子ぷよが上 (Y=13)
-                if (rot === 2 && h === 14) willUse14 = true; // 子ぷよが下 (Y=13) - 実際はh=14はありえない
+                // 落下処理
+                let h1 = 0; while (h1 < HEIGHT && tempBoard[h1][pos1.x] !== 0) h1++;
+                let h2 = 0; while (h2 < HEIGHT && tempBoard[h2][pos2.x] !== 0) h2++;
                 
-                if (willUse14 && !allowed14) continue;
-
-                if (!placePuyo(tempBoard, x, rot, axisColor, childColor)) continue;
-
-                let res1 = simulatePureChain(tempBoard);
-                // 新しい評価関数を使用
-                let boardQuality = evaluateBoardQuality(res1.finalBoard);
-                let totalChainScore = (res1.chains * 2000) + boardQuality;
-
-                if (nextAxisColor && nextChildColor) {
-                    let nextBestScore = -1000000;
-                    for (let nx = 0; nx < WIDTH; nx++) {
-                        for (let nr = 0; nr < 4; nr++) {
-                            if (!isReachable(res1.finalBoard, nx)) continue;
-                            let nextBoard = res1.finalBoard.map(row => [...row]);
-                            if (placePuyo(nextBoard, nx, nr, nextAxisColor, nextChildColor)) {
-                                let res2 = simulatePureChain(nextBoard);
-                                let q = evaluateBoardQuality(res2.finalBoard);
-                                let s = (res2.chains * 2000) + q;
-                                if (s > nextBestScore) nextBestScore = s;
-                            }
-                        }
-                    }
-                    totalChainScore += nextBestScore * 0.8;
+                if (h1 >= 12 || h2 >= 12) continue; // 窒息チェック
+                
+                // 実際に配置
+                if (pos1.x === pos2.x) {
+                    tempBoard[h1][pos1.x] = (r === 0) ? puyo2 : puyo1;
+                    tempBoard[h1+1][pos1.x] = (r === 0) ? puyo1 : puyo2;
+                } else {
+                    tempBoard[h1][pos1.x] = puyo1;
+                    tempBoard[h2][pos2.x] = puyo2;
                 }
-
-                if (tempBoard[11][2] !== 0) totalChainScore = -1000000;
-
-                if (totalChainScore > bestChainScore) {
-                    bestChainScore = totalChainScore;
-                    bestMove = { x, rotation: rot };
+                
+                // 盤面評価
+                let score = evaluateBoardQuality(tempBoard);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMove = { x: x, rotation: r };
                 }
             }
         }
+        
         return bestMove;
     }
 
-    function placePuyo(board, x, rot, axisColor, childColor) {
-        let coords = [];
-        // 軸ぷよは常にY=13からスタート
-        coords.push({x: x, y: 13, color: axisColor});
-        
-        // 子ぷよの相対座標
-        if (rot === 0) coords.push({x: x, y: 14, color: childColor}); // 上
-        else if (rot === 1) coords.push({x: x + 1, y: 13, color: childColor}); // 右
-        else if (rot === 2) coords.push({x: x, y: 12, color: childColor}); // 下
-        else if (rot === 3) coords.push({x: x - 1, y: 13, color: childColor}); // 左
-
-        for (let p of coords) if (p.x < 0 || p.x >= WIDTH) return false;
-
-        coords.sort((a, b) => a.y - b.y);
-        for (let p of coords) {
-            let curY = p.y;
-            // 落下処理
-            while (curY > 0 && board[curY-1][p.x] === 0) curY--;
-            if (curY < 14) board[curY][p.x] = p.color;
-        }
-        
-        // 14段目(Y=13)のぷよは自動消去
-        for (let i = 0; i < WIDTH; i++) board[13][i] = 0;
-        return true;
-    }
-
-    return { getBestMove, findMaxChainPuyo };
+    return {
+        getBestMove: getBestMove
+    };
 })();
 
-window.PuyoAI = PuyoAI;
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = PuyoAI;
+}
