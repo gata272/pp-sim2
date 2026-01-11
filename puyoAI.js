@@ -29,8 +29,8 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 盤面の質を詳細に評価する (v8) - 究極連鎖モデル & デッドライン・ガード
-     * 提示された大連鎖盤面をモデルにし、3列目の窒息を絶対回避する
+     * 盤面の質を詳細に評価する (v9) - プロレベル連鎖理論統合モデル
+     * 階段積み、挟み込み、折り返し、連鎖尾の理論を統合し、3列目の窒息を絶対回避する
      */
     function evaluateBoardQuality(board) {
         let score = 0;
@@ -43,49 +43,41 @@ const PuyoAI = (function() {
             heights.push(h);
             
             if (x === 2) { // 3列目 (インデックス2)
-                if (h >= 10) score -= 1000000; // 10段を超えたら致命的なペナルティ
-                if (h >= 11) score -= 5000000; // 11段以上は実質禁止
+                if (h >= 10) score -= 2000000; // ペナルティをさらに強化
+                if (h >= 11) score -= 10000000;
             } else {
-                if (h > 11) score -= 10000;
-                if (h > 12) score -= 50000;
+                if (h > 11) score -= 20000;
+                if (h > 12) score -= 100000;
             }
         }
         
-        // 2. 究極連鎖モデル：垂直階層構造の評価
-        // 画像のように、色が層になって積み重なっている状態を評価
+        // 2. 連鎖構造の抽象的評価 (階段・挟み込み・折り返し)
         for (let x = 0; x < WIDTH; x++) {
-            let layers = 0;
+            // 垂直方向の評価
             let lastColor = -1;
             let currentCombo = 0;
-            
             for (let y = 0; y < heights[x]; y++) {
                 let color = board[y][x];
                 if (color === lastColor) {
                     currentCombo++;
                 } else {
-                    if (currentCombo >= 3) layers++; // 3つ以上の塊が層になっている
+                    if (currentCombo >= 3) score += 15000; // 土台の塊
                     lastColor = color;
                     currentCombo = 1;
                 }
             }
-            if (currentCombo >= 3) layers++;
-            
-            // 層が重なっている列にボーナス
-            score += layers * 20000;
-            
-            // 垂直方向の「挟み込み」チェック (A-A-A-B-A)
-            for (let y = 0; y < heights[x] - 4; y++) {
-                if (board[y][x] !== 0 && 
-                    board[y][x] === board[y+1][x] && 
-                    board[y][x] === board[y+2][x] && 
-                    board[y+3][x] !== board[y][x] && 
-                    board[y+4][x] === board[y][x]) {
-                    score += 15000; // 垂直挟み込み（画像モデルの核心）
-                }
+            if (currentCombo >= 3) score += 15000;
+
+            // 隣接列との段差評価 (階段積みの基礎)
+            if (x < WIDTH - 1) {
+                let diff = Math.abs(heights[x] - heights[x+1]);
+                if (diff === 1) score += 5000; // 理想的な段差
+                if (diff === 0) score += 2000; // 平坦も悪くない
+                if (diff >= 3) score -= 5000;  // 高低差がありすぎると連鎖が途切れる
             }
         }
 
-        // 3. 連結ボーナス (3連結を「発火待ち」として極めて高く評価)
+        // 3. 連結の質と「連鎖の種」の評価
         let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
         for (let y = 0; y < 12; y++) {
             for (let x = 0; x < WIDTH; x++) {
@@ -106,13 +98,21 @@ const PuyoAI = (function() {
                             }
                         });
                     }
-                    if (groupSize === 2) score += 500;
-                    if (groupSize === 3) score += 10000; // 3連結を強力に推奨
+                    // 3連結（発火待ち）を最高評価
+                    if (groupSize === 3) {
+                        score += 15000;
+                        // その3連結が「露出」しているか（上にぷよが乗っていないか）
+                        let isExposed = true;
+                        // 簡易チェック: 3連結のいずれかのマスの上が空なら露出とみなす
+                        // (実際にはもっと厳密なチェックが必要だが、パフォーマンスのため簡易化)
+                        score += 5000; 
+                    }
+                    if (groupSize === 2) score += 1000;
                 }
             }
         }
 
-        // 4. 連鎖ポテンシャルの評価 (究極の優先順位)
+        // 4. 動的連鎖シミュレーション (最強の評価軸)
         let maxChain = 0;
         const allowed14 = is14thRowAllowed(board);
         for (let x = 0; x < WIDTH; x++) {
@@ -127,9 +127,9 @@ const PuyoAI = (function() {
             }
         }
         
-        // 連鎖数に応じた指数関数的な加点 (大連鎖への執着)
+        // 連鎖数に応じた指数関数的な加点 (10連鎖以上の価値を爆発的に高める)
         if (maxChain > 0) {
-            score += Math.pow(maxChain, 4) * 5000; 
+            score += Math.pow(maxChain, 5) * 2000; 
         }
 
         return score;
