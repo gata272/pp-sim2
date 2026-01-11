@@ -1,6 +1,6 @@
 /**
- * PuyoAI.js (v13) - 3手先・潜在連鎖最大化モデル
- * 3手後の盤面において「次に1つ置いた時に発生する最大連鎖数」を最大化する
+ * PuyoAI.js (v14) - 粘り強い大連鎖構築モデル
+ * 大連鎖が組めない時は、将来のために3連結（連鎖の種）を増やす
  */
 
 const PuyoAI = (function() {
@@ -9,13 +9,13 @@ const PuyoAI = (function() {
     const COLORS = [1, 2, 3, 4]; // 赤, 青, 黄, 緑
 
     /**
-     * 盤面の潜在的な最大連鎖数を評価
+     * 盤面の潜在的な最大連鎖数と連結数をハイブリッド評価
      */
-    function evaluatePotential(board) {
+    function evaluateHybrid(board) {
         // 1. 3列目の窒息チェック（最優先）
         let h3 = 0;
         while (h3 < HEIGHT && board[h3][2] !== 0) h3++;
-        if (h3 >= 11) return -10000000;
+        if (h3 >= 11) return -20000000;
 
         let maxChain = 0;
         
@@ -36,12 +36,15 @@ const PuyoAI = (function() {
         }
 
         // 潜在連鎖数を指数関数的に評価
-        let score = Math.pow(maxChain, 6) * 1000;
+        let potentialScore = Math.pow(maxChain, 6) * 1000;
 
-        // 連結ボーナス（連鎖の種を維持するため）
-        score += countConnections(board);
+        // 連結ボーナス（大連鎖が無理な時のための「種」の評価）
+        let connectionScore = countConnections(board);
 
-        return score;
+        // 合計スコア
+        // 大連鎖が組める時は potentialScore が支配的になり、
+        // 組めない時は connectionScore（3連結の数）が優先される
+        return potentialScore + connectionScore;
     }
 
     function countConnections(board) {
@@ -66,8 +69,10 @@ const PuyoAI = (function() {
                             }
                         });
                     }
-                    if (groupSize === 3) score += 5000;
-                    if (groupSize === 2) score += 500;
+                    // 3連結を非常に高く評価（大連鎖が組めない時のフォールバック）
+                    if (groupSize === 3) score += 15000;
+                    if (groupSize === 2) score += 1000;
+                    if (groupSize >= 4) score -= 5000; // 勝手に消えてしまうのはマイナス（発火待ちを維持したい）
                 }
             }
         }
@@ -143,8 +148,8 @@ const PuyoAI = (function() {
                                 let board3 = applyMove(board2, nextPuyos[4], nextPuyos[5], x3, r3);
                                 if (!board3) continue;
 
-                                // 3手後の「潜在的な最大連鎖数」を評価
-                                let score = evaluatePotential(board3);
+                                // 3手後のハイブリッド評価
+                                let score = evaluateHybrid(board3);
                                 if (score > currentMaxScore) currentMaxScore = score;
                             }
                         }
