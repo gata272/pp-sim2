@@ -1,155 +1,232 @@
 /**
- * PuyoAI v16 - Big Chain Only (No LR Bias)
- * ・左右バイアスなし
- * ・1連鎖即死
- * ・無理発火禁止
- * ・縦積み物理排除
+ * PuyoAI.js v17
+ * 大連鎖構築特化・左右バイアスなし版
+ * ・連鎖の「形」を評価
+ * ・即消し・左詰め・平坦を排除
  */
 
-const PuyoAI = (() => {
-
+const PuyoAI = (function () {
   const WIDTH = 6;
   const HEIGHT = 14;
-  const COLORS = [1,2,3,4];
+  const COLORS = [1, 2, 3, 4];
 
-  const clone = b => b.map(r => [...r]);
+  /* =======================
+     評価関数メイン
+  ======================= */
+  function evaluateBoard(board) {
+    let score = 0;
 
-  function columnHeights(board) {
-    return Array.from({length:WIDTH},(_,x)=>{
-      let y=0; while(y<HEIGHT && board[y][x]) y++;
-      return y;
-    });
+    // 即死チェック（3列目）
+    let h3 = 0;
+    while (h3 < HEIGHT && board[h3][2] !== 0) h3++;
+    if (h3 >= 11) return -50_000_000;
+
+    // 即消し（連鎖発生）を強く拒否
+    const chains = simulatePureChain(clone(board));
+    if (chains === 1) return -10_000_000;
+    if (chains >= 2) return -30_000_000;
+
+    // 構造評価
+    score += countPairs(board) * 800;
+    score += verticalPotential(board);
+    score += stepScore(getHeights(board));
+
+    return score;
   }
 
-  /* ================= 連鎖 ================= */
-
-  function applyGravity(board) {
-    for (let x=0;x<WIDTH;x++) {
-      let w=0;
-      for (let y=0;y<12;y++) {
-        if (board[y][x]) {
-          board[w][x]=board[y][x];
-          if (w!==y) board[y][x]=0;
-          w++;
-        }
+  /* =======================
+     構造評価①：2連結
+  ======================= */
+  function countPairs(board) {
+    let pairs = 0;
+    for (let y = 0; y < 12; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        const c = board[y][x];
+        if (!c) continue;
+        if (x + 1 < WIDTH && board[y][x + 1] === c) pairs++;
+        if (y + 1 < 12 && board[y + 1][x] === c) pairs++;
       }
     }
+    return pairs;
   }
 
+  /* =======================
+     構造評価②：縦伸び
+  ======================= */
+  function verticalPotential(board) {
+    let s = 0;
+    for (let x = 0; x < WIDTH; x++) {
+      let last = 0;
+      let cnt = 0;
+      for (let y = 0; y < 12; y++) {
+        if (board[y][x] === last && last !== 0) {
+          cnt++;
+        } else {
+          last = board[y][x];
+          cnt = last ? 1 : 0;
+        }
+        if (cnt === 2) s += 500;
+        if (cnt === 3) s += 1200;
+      }
+    }
+    return s;
+  }
+
+  /* =======================
+     構造評価③：段差
+  ======================= */
+  function stepScore(heights) {
+    let s = 0;
+    for (let i = 0; i < WIDTH - 1; i++) {
+      const d = Math.abs(heights[i] - heights[i + 1]);
+      if (d === 1 || d === 2) s += 1500;
+      if (d >= 4) s -= 3000;
+    }
+    return s;
+  }
+
+  function getHeights(board) {
+    let h = Array(WIDTH).fill(0);
+    for (let x = 0; x < WIDTH; x++) {
+      let y = 0;
+      while (y < HEIGHT && board[y][x] !== 0) y++;
+      h[x] = y;
+    }
+    return h;
+  }
+
+  /* =======================
+     連鎖シミュレーター
+  ======================= */
   function simulatePureChain(board) {
-    let chains=0;
-    while(true){
-      let erase=false;
-      let vis=Array.from({length:12},()=>Array(WIDTH).fill(false));
-      for(let y=0;y<12;y++)for(let x=0;x<WIDTH;x++){
-        if(!board[y][x]||vis[y][x])continue;
-        let c=board[y][x],st=[[x,y]],grp=[];
-        vis[y][x]=true;
-        while(st.length){
-          let[p,q]=st.pop(); grp.push([p,q]);
-          for(let[dX,dY] of [[1,0],[-1,0],[0,1],[0,-1]]){
-            let nx=p+dX, ny=q+dY;
-            if(nx>=0&&nx<WIDTH&&ny>=0&&ny<12&&!vis[ny][nx]&&board[ny][nx]===c){
-              vis[ny][nx]=true; st.push([nx,ny]);
+    let chains = 0;
+    while (true) {
+      let erase = [];
+      let visited = Array.from({ length: HEIGHT }, () =>
+        Array(WIDTH).fill(false)
+      );
+
+      for (let y = 0; y < HEIGHT; y++) {
+        for (let x = 0; x < WIDTH; x++) {
+          if (!board[y][x] || visited[y][x]) continue;
+          let color = board[y][x];
+          let stack = [{ x, y }];
+          let group = [];
+          visited[y][x] = true;
+
+          while (stack.length) {
+            const p = stack.pop();
+            group.push(p);
+            for (const [dx, dy] of [
+              [1, 0],
+              [-1, 0],
+              [0, 1],
+              [0, -1],
+            ]) {
+              const nx = p.x + dx;
+              const ny = p.y + dy;
+              if (
+                nx >= 0 &&
+                nx < WIDTH &&
+                ny >= 0 &&
+                ny < HEIGHT &&
+                !visited[ny][nx] &&
+                board[ny][nx] === color
+              ) {
+                visited[ny][nx] = true;
+                stack.push({ x: nx, y: ny });
+              }
             }
           }
-        }
-        if(grp.length>=4){
-          erase=true;
-          grp.forEach(([x,y])=>board[y][x]=0);
+
+          if (group.length >= 4) erase.push(...group);
         }
       }
-      if(!erase) break;
-      applyGravity(board);
+
+      if (erase.length === 0) break;
       chains++;
+      erase.forEach(p => (board[p.y][p.x] = 0));
+
+      for (let x = 0; x < WIDTH; x++) {
+        let w = 0;
+        for (let r = 0; r < HEIGHT; r++) {
+          if (board[r][x] !== 0) {
+            board[w][x] = board[r][x];
+            if (w !== r) board[r][x] = 0;
+            w++;
+          }
+        }
+      }
     }
     return chains;
   }
 
-  /* ================= 評価 ================= */
+  /* =======================
+     探索（3手）
+  ======================= */
+  function getBestMove(board, next) {
+    let best = -Infinity;
+    let move = { x: 2, rotation: 0 };
 
-  function evaluate(board) {
-    let score=0;
+    for (let x1 = 0; x1 < WIDTH; x1++) {
+      for (let r1 = 0; r1 < 4; r1++) {
+        const b1 = applyMove(board, next[0], next[1], x1, r1);
+        if (!b1) continue;
 
-    // 即消し完全禁止
-    let tmp=clone(board);
-    let c=simulatePureChain(tmp);
-    if(c>=1) return -10_000_000;
+        let localBest = -Infinity;
 
-    // 縦積み物理排除
-    let heights=columnHeights(board);
-    for(let h of heights){
-      if(h>=11) return -5_000_000;
-      if(h>=9) score-=200_000;
-    }
+        for (let x2 = 0; x2 < WIDTH; x2++) {
+          for (let r2 = 0; r2 < 4; r2++) {
+            const b2 = applyMove(b1, next[2], next[3], x2, r2);
+            if (!b2) continue;
 
-    // 3連結抑制
-    let vis=Array.from({length:12},()=>Array(WIDTH).fill(false));
-    for(let y=0;y<12;y++)for(let x=0;x<WIDTH;x++){
-      if(board[y][x]&&!vis[y][x]){
-        let c=board[y][x],st=[[x,y]],cnt=0;
-        vis[y][x]=true;
-        while(st.length){
-          let[p,q]=st.pop(); cnt++;
-          for(let[dX,dY] of [[1,0],[-1,0],[0,1],[0,-1]]){
-            let nx=p+dX, ny=q+dY;
-            if(nx>=0&&nx<WIDTH&&ny>=0&&ny<12&&!vis[ny][nx]&&board[ny][nx]===c){
-              vis[ny][nx]=true; st.push([nx,ny]);
+            for (let x3 = 0; x3 < WIDTH; x3++) {
+              for (let r3 = 0; r3 < 4; r3++) {
+                const b3 = applyMove(b2, next[4], next[5], x3, r3);
+                if (!b3) continue;
+                const s = evaluateBoard(b3);
+                if (s > localBest) localBest = s;
+              }
             }
           }
         }
-        if(cnt===3) score-=3000;
+
+        if (localBest > best) {
+          best = localBest;
+          move = { x: x1, rotation: r1 };
+        }
       }
     }
-
-    // 消えない未来連鎖のみ評価
-    let maxFuture=0;
-    for(let x=0;x<WIDTH;x++){
-      for(let c of COLORS){
-        let b=clone(board);
-        let y=0; while(y<12&&b[y][x]) y++;
-        if(y>=12) continue;
-        b[y][x]=c;
-        let f=simulatePureChain(b);
-        if(f===0) continue;
-        maxFuture=Math.max(maxFuture,f);
-      }
-    }
-
-    score+=Math.pow(maxFuture,6)*8000;
-    return score;
+    return move;
   }
 
-  /* ================= 探索 ================= */
+  /* =======================
+     ぷよ配置
+  ======================= */
+  function applyMove(board, p1, p2, x, r) {
+    const b = clone(board);
 
-  function place(board,p1,p2,x,r){
-    let b=clone(board);
-    let cs=[];
-    if(r===0)cs=[[x,p2],[x,p1]];
-    if(r===2)cs=[[x,p1],[x,p2]];
-    if(r===1)cs=[[x,p1],[x+1,p2]];
-    if(r===3)cs=[[x,p1],[x-1,p2]];
-    for(let[cx]of cs)if(cx<0||cx>=WIDTH)return null;
-    for(let[cx,col]of cs){
-      let y=0; while(y<12&&b[y][cx])y++;
-      if(y>=12)return null;
-      b[y][cx]=col;
-    }
+    let dx = [0, 1, 0, -1][r];
+    let dy = [1, 0, -1, 0][r];
+
+    let x1 = x;
+    let x2 = x + dx;
+    if (x2 < 0 || x2 >= WIDTH) return null;
+
+    let h1 = getHeights(b)[x1];
+    let h2 = getHeights(b)[x2];
+    if (h1 >= 12 || h2 >= 12) return null;
+
+    b[h1][x1] = p1;
+    b[h2][x2] = p2;
     return b;
   }
 
-  function getBestMove(board,next){
-    let best={s:-Infinity,x:2,r:0};
-    for(let x=0;x<WIDTH;x++)for(let r=0;r<4;r++){
-      let b=place(board,next[0],next[1],x,r);
-      if(!b)continue;
-      let s=evaluate(b);
-      if(s>best.s)best={s,x,r};
-    }
-    return {x:best.x,rotation:best.r};
+  function clone(board) {
+    return board.map(r => [...r]);
   }
 
-  return {getBestMove};
+  return { getBestMove };
 })();
 
-if(typeof module!=="undefined")module.exports=PuyoAI;
+if (typeof module !== "undefined") module.exports = PuyoAI;
