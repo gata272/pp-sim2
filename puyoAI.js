@@ -1,171 +1,195 @@
 /**
- * PuyoAI.js (v15)
- * 大連鎖特化・非即消し・発火色固定モデル
+ * PuyoAI v15 - Big Chain Oriented AI
+ * 目的：15連鎖以上を最優先で狙う
+ * 方針：
+ *  - 即消しは致命的ペナルティ
+ *  - 平坦化禁止（凹凸は正義）
+ *  - 折り返し・段差・鍵を高評価
+ *  - 計算量制限なし（重い）
  */
 
 const PuyoAI = (() => {
-    const WIDTH = 6;
-    const HEIGHT = 14;
-    const COLORS = [1, 2, 3, 4];
 
-    let FIRE_COLOR = null;
+  const WIDTH = 6;
+  const HEIGHT = 14;
+  const COLORS = [1, 2, 3, 4];
 
-    /* =============================
-       メイン評価関数
-    ============================= */
-    function evaluateBoard(board) {
-        let score = 0;
+  /* ================= 基本ユーティリティ ================= */
 
-        // 窒息チェック（3列目）
-        let h3 = 0;
-        while (h3 < HEIGHT && board[h3][2] !== 0) h3++;
-        if (h3 >= 11) return -1e9;
+  function clone(board) {
+    return board.map(r => [...r]);
+  }
 
-        const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+  function columnHeights(board) {
+    return Array.from({ length: WIDTH }, (_, x) => {
+      let y = 0;
+      while (y < HEIGHT && board[y][x] !== 0) y++;
+      return y;
+    });
+  }
 
-        for (let y = 0; y < HEIGHT; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                if (board[y][x] === 0 || visited[y][x]) continue;
+  function variance(arr) {
+    const avg = arr.reduce((a,b)=>a+b,0) / arr.length;
+    return arr.reduce((s,v)=>s+(v-avg)**2,0);
+  }
 
-                const color = board[y][x];
-                const stack = [{ x, y }];
-                const group = [];
-                visited[y][x] = true;
+  /* ================= 連鎖シミュレーション ================= */
 
-                while (stack.length) {
-                    const p = stack.pop();
-                    group.push(p);
-                    [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy]) => {
-                        const nx = p.x + dx, ny = p.y + dy;
-                        if (
-                            nx >= 0 && nx < WIDTH &&
-                            ny >= 0 && ny < HEIGHT &&
-                            !visited[ny][nx] &&
-                            board[ny][nx] === color
-                        ) {
-                            visited[ny][nx] = true;
-                            stack.push({ x: nx, y: ny });
-                        }
-                    });
-                }
+  function simulatePureChain(board) {
+    let chains = 0;
+    while (true) {
+      let erased = false;
+      let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
 
-                /* ===== 評価 ===== */
-
-                // 即消し完全否定
-                if (group.length >= 4) {
-                    score -= 1_000_000;
-                    if (color === FIRE_COLOR) score -= 500_000;
-                    continue;
-                }
-
-                // 3連結（最重要）
-                if (group.length === 3) {
-                    let avgY = group.reduce((s,p)=>s+p.y,0)/3;
-                    score += 80_000;
-
-                    // 中段ボーナス
-                    if (avgY >= 4 && avgY <= 7) score += 50_000;
-
-                    // 発火色なら慎重
-                    if (color === FIRE_COLOR) score -= 30_000;
-                }
-
-                // 2連結（種）
-                if (group.length === 2) {
-                    score += 8_000;
-                }
-            }
-        }
-
-        // 折り返し・段差ボーナス
-        score += evaluateShape(board);
-
-        return score;
-    }
-
-    /* =============================
-       段差・折り返し評価
-    ============================= */
-    function evaluateShape(board) {
-        let bonus = 0;
-        let heights = [];
-
+      for (let y = 0; y < 12; y++) {
         for (let x = 0; x < WIDTH; x++) {
-            let h = 0;
-            while (h < HEIGHT && board[h][x] !== 0) h++;
-            heights.push(h);
-        }
+          if (board[y][x] === 0 || visited[y][x]) continue;
 
-        for (let i = 0; i < WIDTH - 1; i++) {
-            let d = heights[i] - heights[i+1];
-            if (Math.abs(d) === 1 || Math.abs(d) === 2) bonus += 5_000;
-            if (Math.abs(d) >= 4) bonus += 2_000;
-        }
+          let color = board[y][x];
+          let stack = [{x,y}];
+          let group = [];
+          visited[y][x] = true;
 
-        return bonus;
-    }
-
-    /* =============================
-       最善手探索（3手先）
-    ============================= */
-    function getBestMove(board, next) {
-        if (!FIRE_COLOR) FIRE_COLOR = mostFrequentColor(board);
-
-        let best = { score: -Infinity, x: 2, r: 0 };
-
-        for (let x = 0; x < WIDTH; x++) {
-            for (let r = 0; r < 4; r++) {
-                let b1 = applyMove(board, next[0], next[1], x, r);
-                if (!b1) continue;
-
-                let s1 = evaluateBoard(b1);
-                if (s1 > best.score) {
-                    best = { score: s1, x, r };
-                }
+          while (stack.length) {
+            let p = stack.pop();
+            group.push(p);
+            for (let [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+              let nx = p.x + dx, ny = p.y + dy;
+              if (
+                nx>=0 && nx<WIDTH &&
+                ny>=0 && ny<12 &&
+                !visited[ny][nx] &&
+                board[ny][nx] === color
+              ) {
+                visited[ny][nx] = true;
+                stack.push({x:nx,y:ny});
+              }
             }
+          }
+
+          if (group.length >= 4) {
+            erased = true;
+            group.forEach(p => board[p.y][p.x] = 0);
+          }
         }
-        return { x: best.x, rotation: best.r };
+      }
+
+      if (!erased) break;
+
+      applyGravity(board);
+      chains++;
+    }
+    return chains;
+  }
+
+  function applyGravity(board) {
+    for (let x = 0; x < WIDTH; x++) {
+      let write = 0;
+      for (let y = 0; y < 12; y++) {
+        if (board[y][x] !== 0) {
+          board[write][x] = board[y][x];
+          if (write !== y) board[y][x] = 0;
+          write++;
+        }
+      }
+    }
+  }
+
+  /* ================= 折り返し検出 ================= */
+
+  function hasLShape(board, x, y) {
+    const c = board[y][x];
+    if (!c) return false;
+    return (
+      (board[y][x+1] === c && board[y+1]?.[x] === c) ||
+      (board[y][x-1] === c && board[y+1]?.[x] === c)
+    );
+  }
+
+  /* ================= 評価関数（最重要） ================= */
+
+  function evaluate(board) {
+    let score = 0;
+
+    // 1. 即消しチェック（致命的）
+    let temp = clone(board);
+    let chains = simulatePureChain(temp);
+    if (chains > 0) return -1_000_000;
+
+    // 2. 高低差評価（平坦禁止）
+    let heights = columnHeights(board);
+    score += variance(heights) * 3000;
+
+    // 3. 縦積みペナルティ
+    heights.forEach(h => {
+      if (h >= 10) score -= 50_000;
+    });
+
+    // 4. 折り返し加点
+    for (let y = 0; y < 12; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        if (hasLShape(board, x, y)) score += 80_000;
+      }
     }
 
-    /* =============================
-       発火色決定
-    ============================= */
-    function mostFrequentColor(board) {
-        let count = {};
-        COLORS.forEach(c => count[c] = 0);
-        board.forEach(row => row.forEach(c => c && count[c]++));
-        return COLORS.reduce((a,b)=>count[a]>count[b]?a:b);
+    // 5. 潜在連鎖（仮発火）
+    let maxFuture = 0;
+    for (let x = 0; x < WIDTH; x++) {
+      for (let c of COLORS) {
+        let b = clone(board);
+        let y = 0;
+        while (y < 12 && b[y][x] !== 0) y++;
+        if (y >= 12) continue;
+        b[y][x] = c;
+        maxFuture = Math.max(maxFuture, simulatePureChain(b));
+      }
     }
 
-    /* =============================
-       ぷよ設置
-    ============================= */
-    function applyMove(board, p1, p2, x, r) {
-        let b = board.map(row => [...row]);
-        let pos = [];
+    score += Math.pow(maxFuture, 6) * 5000;
 
-        if (r === 0) pos = [{x, y:0}, {x, y:1}];
-        if (r === 1) pos = [{x, y:0}, {x:x+1, y:0}];
-        if (r === 2) pos = [{x, y:1}, {x, y:0}];
-        if (r === 3) pos = [{x, y:0}, {x:x-1, y:0}];
+    return score;
+  }
 
-        if (pos.some(p => p.x < 0 || p.x >= WIDTH)) return null;
+  /* ================= 探索 ================= */
 
-        let h = pos.map(p => {
-            let y = 0;
-            while (y < HEIGHT && b[y][p.x] !== 0) y++;
-            return y;
-        });
+  function place(board, p1, p2, x, rot) {
+    let b = clone(board);
+    let coords = [];
 
-        if (Math.max(...h) >= 12) return null;
+    if (rot === 0) coords = [[x,1,p2],[x,0,p1]];
+    if (rot === 2) coords = [[x,0,p1],[x,1,p2]];
+    if (rot === 1) coords = [[x,0,p1],[x+1,0,p2]];
+    if (rot === 3) coords = [[x,0,p1],[x-1,0,p2]];
 
-        b[h[0]][pos[0].x] = p1;
-        b[h[1]][pos[1].x] = p2;
+    for (let [cx] of coords)
+      if (cx < 0 || cx >= WIDTH) return null;
 
-        return b;
+    coords.sort((a,b)=>a[1]-b[1]);
+
+    for (let [cx,_,col] of coords) {
+      let y = 0;
+      while (y < 12 && b[y][cx] !== 0) y++;
+      if (y >= 12) return null;
+      b[y][cx] = col;
     }
+    return b;
+  }
 
-    return { getBestMove };
+  function getBestMove(board, next) {
+    let best = { score: -Infinity, x: 2, rot: 0 };
+
+    for (let x = 0; x < WIDTH; x++) {
+      for (let r = 0; r < 4; r++) {
+        let b = place(board, next[0], next[1], x, r);
+        if (!b) continue;
+        let s = evaluate(b);
+        if (s > best.score) best = { score: s, x, rot: r };
+      }
+    }
+    return { x: best.x, rotation: best.rot };
+  }
+
+  return { getBestMove };
 })();
 
-if (typeof module !== 'undefined') module.exports = PuyoAI;
+if (typeof module !== "undefined") module.exports = PuyoAI;
