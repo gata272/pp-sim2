@@ -1,7 +1,7 @@
 /**
- * PuyoAI_optimal.js
- * - テンプレート検出（GTR/階段/サンド）＋拡張評価＋深ビームサーチ
- * - getBestMove(board, nextPuyos, options) -> { x, rotation, expectedChains, score, info }
+ * PuyoAI_safe.js
+ * - オーバーフロー回避のための列高さペナルティ＋モンテカルロで将来リスク評価
+ * - getBestMove(board, nextPuyos, options)
  */
 
 const PuyoAI = (function() {
@@ -9,72 +9,62 @@ const PuyoAI = (function() {
     const HEIGHT = 14;
     const COLORS = [1, 2, 3, 4];
 
-    // ----------------------------
-    // simulatePureChain: 連鎖シミュレータ（4個以上消去、落下処理含む）
-    // board の y=0 が「下」(落ちていく方向)という前提で動きます（元コード準拠）
-    // ----------------------------
+    // ---------- 基本シミュレータ ----------
     function simulatePureChain(board) {
         let totalChains = 0;
         while (true) {
-            let toEraseMap = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+            let toErase = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
             let visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
-            let anyErase = false;
+            let any = false;
             for (let y = 0; y < HEIGHT; y++) {
                 for (let x = 0; x < WIDTH; x++) {
                     if (board[y][x] !== 0 && !visited[y][x]) {
                         let color = board[y][x];
-                        let stack = [{x, y}];
-                        let group = [];
+                        let stack = [{x,y}];
                         visited[y][x] = true;
+                        let group = [];
                         while (stack.length > 0) {
                             let p = stack.pop();
                             group.push(p);
-                            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
-                                let nx = p.x + dx, ny = p.y + dy;
-                                if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT &&
-                                    !visited[ny][nx] && board[ny][nx] === color) {
+                            [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx,dy])=>{
+                                let nx = p.x+dx, ny = p.y+dy;
+                                if (nx>=0 && nx<WIDTH && ny>=0 && ny<HEIGHT && !visited[ny][nx] && board[ny][nx] === color) {
                                     visited[ny][nx] = true;
-                                    stack.push({x: nx, y: ny});
+                                    stack.push({x:nx,y:ny});
                                 }
                             });
                         }
                         if (group.length >= 4) {
-                            anyErase = true;
-                            group.forEach(p => toEraseMap[p.y][p.x] = true);
+                            any = true;
+                            group.forEach(p => toErase[p.y][p.x] = true);
                         }
                     }
                 }
             }
-            if (!anyErase) break;
+            if (!any) break;
             totalChains++;
-            // 消去
-            for (let y = 0; y < HEIGHT; y++) {
-                for (let x = 0; x < WIDTH; x++) {
-                    if (toEraseMap[y][x]) board[y][x] = 0;
-                }
-            }
-            // 落下（下が小さい index のため、下から積む）
-            for (let x = 0; x < WIDTH; x++) {
+            // erase
+            for (let y=0; y<HEIGHT; y++) for (let x=0; x<WIDTH; x++) if (toErase[y][x]) board[y][x] = 0;
+            // gravity
+            for (let x=0; x<WIDTH; x++) {
                 let writeY = 0;
-                for (let readY = 0; readY < HEIGHT; readY++) {
+                for (let readY=0; readY<HEIGHT; readY++) {
                     if (board[readY][x] !== 0) {
                         board[writeY][x] = board[readY][x];
                         if (writeY !== readY) board[readY][x] = 0;
                         writeY++;
                     }
                 }
-                for (; writeY < HEIGHT; writeY++) board[writeY][x] = 0;
+                for (; writeY<HEIGHT; writeY++) board[writeY][x] = 0;
             }
         }
         return { chains: totalChains };
     }
 
-    // ----------------------------
-    // ヘルパー（列高さ、穴、分散）
-    // ----------------------------
+    // ---------- ヘルパー ----------
     function getColumnHeights(board) {
         let heights = Array(WIDTH).fill(0);
-        for (let x = 0; x < WIDTH; x++) {
+        for (let x=0; x<WIDTH; x++) {
             let h = 0;
             while (h < HEIGHT && board[h][x] !== 0) h++;
             heights[x] = h;
@@ -83,129 +73,70 @@ const PuyoAI = (function() {
     }
     function countHoles(board) {
         let holes = 0;
-        for (let x = 0; x < WIDTH; x++) {
-            let seenBlock = false;
-            for (let y = 0; y < HEIGHT; y++) {
-                if (board[y][x] !== 0) seenBlock = true;
-                else if (seenBlock) holes++;
+        for (let x=0; x<WIDTH; x++) {
+            let seen = false;
+            for (let y=0; y<HEIGHT; y++) {
+                if (board[y][x] !== 0) seen = true;
+                else if (seen) holes++;
             }
         }
         return holes;
     }
     function heightVariance(heights) {
         let mean = heights.reduce((a,b)=>a+b,0)/heights.length;
-        return heights.reduce((s,h)=>s + (h-mean)*(h-mean),0)/heights.length;
+        return heights.reduce((s,h)=>s+(h-mean)*(h-mean),0)/heights.length;
     }
 
-    // ----------------------------
-    // テンプレート群（簡単な GTR / stairs / sandwich のマスク）
-    // - 各テンプレートは小さなグリッド (w,h) と、0=無視, 1=ブロック, -1=空欄 を持つ
-    // - マッチ条件: テンプレートの 1 の場所に「任意の色(非0)」、-1 の場所に「0（空）」が必要
-    // ----------------------------
-    function buildTemplates() {
-        // シンプルな例を複数用意（小さいテンプレ）
-        // 注意: テンプレはローカルに簡易的に検出するためのもの。必要なら拡張してください。
-        // 例: stairs (3段) — 横3×高さ3 のうち斜めに積まれている形
-        let templates = [];
+    // ---------- applyMove（縦/横の配置ロジック） ----------
+    function applyMove(board, p1, p2, x, r) {
+        let temp = board.map(row => [...row]);
+        let pos1x = x, pos2x = x;
+        if (r === 0) { pos1x = x; pos2x = x; }        // 縦: p1 上 / p2 下 (扱いは下参照)
+        else if (r === 1) { pos1x = x; pos2x = x + 1; } // 横: p1 左, p2 右
+        else if (r === 2) { pos1x = x; pos2x = x; } // 縦反転: p1 下 / p2 上
+        else if (r === 3) { pos1x = x; pos2x = x - 1; } // 横反転: p1 右, p2 左
+        else return null;
+        if (pos1x < 0 || pos1x >= WIDTH || pos2x < 0 || pos2x >= WIDTH) return null;
 
-        // Stairs (右上に階段)
-        templates.push({
-            name: 'stairs3_right',
-            w: 3, h: 3,
-            mask: [
-                [0,0,1],
-                [0,1,0],
-                [1,0,0]
-            ],
-            weight: 8000
-        });
-        // Stairs (左上に階段)
-        templates.push({
-            name: 'stairs3_left',
-            w: 3, h: 3,
-            mask: [
-                [1,0,0],
-                [0,1,0],
-                [0,0,1]
-            ],
-            weight: 8000
-        });
+        let h1 = 0; while (h1 < HEIGHT && temp[h1][pos1x] !== 0) h1++;
+        let h2 = 0; while (h2 < HEIGHT && temp[h2][pos2x] !== 0) h2++;
 
-        // Sandwich (簡易): 中央に別色（空間）を残し、両側トップが同色を作れる余地がある形
-        // マスク: 左と右はブロック、中央は空
-        templates.push({
-            name: 'sandwich3',
-            w: 3, h: 2,
-            mask: [
-                [1,0,1],
-                [1,0,1]
-            ],
-            weight: 6000
-        });
-
-        // GTR-like small hook: 平坦 + トリガー候補（簡易）
-        templates.push({
-            name: 'gtr_hook',
-            w: 4, h: 3,
-            mask: [
-                [0,0,0,0],
-                [1,1,1,1],
-                [1,0,1,0]
-            ],
-            weight: 9000
-        });
-
-        return templates;
-    }
-
-    function matchTemplateAt(board, template, baseX, baseY) {
-        for (let ty = 0; ty < template.h; ty++) {
-            for (let tx = 0; tx < template.w; tx++) {
-                let m = template.mask[ty][tx];
-                if (m === 0) continue;
-                let bx = baseX + tx;
-                let by = baseY + (template.h - 1 - ty); // テンプレの上行を高い y に合わせる
-                if (bx < 0 || bx >= WIDTH || by < 0 || by >= HEIGHT) return false;
-                if (m === 1 && board[by][bx] === 0) return false;    // ブロック欲しいのに空
-                if (m === -1 && board[by][bx] !== 0) return false;   // 空欲しいのに埋まっている
+        // 同列縦置き
+        if (pos1x === pos2x) {
+            // 縦置きはその列の最下段に2つ入るスペースが必要
+            if (h1 + 1 >= HEIGHT) return null;
+            if (r === 0) {
+                // r=0 を「上が p1, 下が p2」と判断していた元コードの混乱を避けるため、
+                // ここではインターフェースに合わせて安定的に配置:
+                // place lower at h1 (p2), upper at h1+1 (p1)
+                temp[h1][pos1x] = p2;
+                temp[h1+1][pos1x] = p1;
+            } else if (r === 2) {
+                temp[h1][pos1x] = p1;
+                temp[h1+1][pos1x] = p2;
+            } else {
+                return null;
             }
+        } else {
+            // 横置き: 各列の現在の高さに落とす
+            if (h1 >= HEIGHT || h2 >= HEIGHT) return null;
+            temp[h1][pos1x] = p1;
+            temp[h2][pos2x] = p2;
         }
-        return true;
+        return temp;
     }
 
-    function detectTemplateScores(board, templates) {
-        let total = 0;
-        let counts = {};
-        for (let t of templates) counts[t.name] = 0;
-        for (let t of templates) {
-            for (let baseX = -2; baseX <= WIDTH; baseX++) {
-                for (let baseY = 0; baseY < HEIGHT; baseY++) {
-                    if (matchTemplateAt(board, t, baseX, baseY)) {
-                        counts[t.name]++;
-                        total += t.weight;
-                    }
-                }
-            }
-        }
-        return { total, counts };
-    }
-
-    // ----------------------------
-    // 改良版連結評価（3連・2連・1連の価値を考慮）
-    // ----------------------------
+    // ---------- countConnections（種） ----------
     function countConnectionsEnhanced(board) {
         let score = 0;
         let visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
-        for (let y = 0; y < HEIGHT; y++) {
-            for (let x = 0; x < WIDTH; x++) {
+        for (let y=0; y<HEIGHT; y++) {
+            for (let x=0; x<WIDTH; x++) {
                 if (board[y][x] !== 0 && !visited[y][x]) {
-                    let color = board[y][x];
-                    let stack = [{x,y}];
+                    let stack = [{x,y}], color = board[y][x], size=0;
                     visited[y][x] = true;
-                    let groupSize = 0;
-                    while (stack.length > 0) {
-                        let p = stack.pop();
-                        groupSize++;
+                    while (stack.length) {
+                        let p = stack.pop(); size++;
                         [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx,dy])=>{
                             let nx = p.x+dx, ny = p.y+dy;
                             if (nx>=0 && nx<WIDTH && ny>=0 && ny<HEIGHT && !visited[ny][nx] && board[ny][nx] === color) {
@@ -214,210 +145,180 @@ const PuyoAI = (function() {
                             }
                         });
                     }
-                    if (groupSize === 3) score += 18000;
-                    else if (groupSize === 2) score += 1200;
-                    else if (groupSize === 1) score += 200;
-                    if (groupSize >= 4) score -= 4000;
+                    if (size === 3) score += 18000;
+                    else if (size === 2) score += 1200;
+                    else if (size === 1) score += 200;
+                    if (size >= 4) score -= 4000;
                 }
             }
         }
         return score;
     }
 
-    // ----------------------------
-    // 評価関数（総合）
-    // - 潜在連鎖（各列に各色1個を仮置きして simulate）＋テンプレスコア＋連結スコア＋穴・分散ペナルティ
-    // ----------------------------
-    function evaluateBoard(board, templates) {
-        // 即死判定（3列目が11段以上）
+    // ---------- 軽量評価（途中探索用） ----------
+    function quickScore(board) {
+        // テンプレ検出は残さず、分散・holes・maxHeight を主に評価する軽量版
+        let heights = getColumnHeights(board);
+        let holes = countHoles(board);
+        let varh = heightVariance(heights);
+        let maxH = Math.max(...heights);
+        // maxH に対する急峻なペナルティで単一列集中を嫌う
+        let maxPen = Math.pow(Math.max(0, maxH - 8), 3) * 5000;
+        let holePen = holes * 2500;
+        let varPen = varh * 1200;
+        let conn = countConnectionsEnhanced(board) * 0.1; // 軽く参照
+        return - (maxPen + holePen + varPen) + conn;
+    }
+
+    // ---------- 簡易モンテカルロ: ランダムな未来を試し、その過程でのオーバーフロー確率を返す ----------
+    function simulateRandomFutureOverflowRate(board, trials = 60, futurePairs = 3) {
+        // policy: greedy by quickScore (minimizes max height & holes)
+        let overflowCount = 0;
+        for (let t = 0; t < trials; t++) {
+            let b = board.map(row => [...row]);
+            let overflowed = false;
+            for (let step = 0; step < futurePairs; step++) {
+                // random next pair
+                let p1 = COLORS[Math.floor(Math.random() * COLORS.length)];
+                let p2 = COLORS[Math.floor(Math.random() * COLORS.length)];
+                // choose best placement by quickScore (try all placements)
+                let best = null;
+                for (let x = 0; x < WIDTH; x++) {
+                    for (let r = 0; r < 4; r++) {
+                        let nb = applyMove(b, p1, p2, x, r);
+                        if (!nb) continue;
+                        let s = quickScore(nb);
+                        if (!best || s > best.score) best = { board: nb, score: s };
+                    }
+                }
+                if (!best) { overflowed = true; break; }
+                b = best.board;
+                // immediate overflow check (column >= 12)
+                let heights = getColumnHeights(b);
+                if (Math.max(...heights) >= 12) { overflowed = true; break; }
+            }
+            if (overflowed) overflowCount++;
+        }
+        return overflowCount / trials;
+    }
+
+    // ---------- 総合評価（最終候補のより詳細な評価）
+    //   overflowPenaltyWeight を大きくしてオーバーフローしやすい盤面を強力に弾く
+    // ----------
+    function evaluateBoardWithMC(board, options = {}) {
+        const mcTrials = options.mcTrials || 60;
+        const futurePairs = options.futurePairs || 3;
+        // immediate fatal: 3列目 overflow (元コードルール反映)
         let h3 = 0;
         while (h3 < HEIGHT && board[h3][2] !== 0) h3++;
         if (h3 >= 11) return { score: -2e7, details: { reason: 'col3_over' } };
 
+        // base metrics
         let heights = getColumnHeights(board);
         let holes = countHoles(board);
         let varh = heightVariance(heights);
+        let maxH = Math.max(...heights);
 
-        // 潜在連鎖（各列に各色を1個置いて試す）
+        // potential chain check (簡易: 各列各色1つで試す)
         let maxChain = 0;
-        for (let x = 0; x < WIDTH; x++) {
+        for (let x=0; x<WIDTH; x++) {
             let h = heights[x];
-            if (h >= HEIGHT - 1) continue; // 余裕のない列はスキップ
+            if (h >= HEIGHT - 1) continue;
             for (let color of COLORS) {
-                let temp = board.map(row => [...row]);
-                temp[h][x] = color;
-                let res = simulatePureChain(temp);
+                let tmp = board.map(row=>[...row]); tmp[h][x] = color;
+                let res = simulatePureChain(tmp);
                 if (res.chains > maxChain) maxChain = res.chains;
             }
         }
-        let potentialScore = Math.pow(Math.max(0, maxChain), 6) * 1300;
+        let potentialScore = Math.pow(Math.max(0, maxChain), 6) * 1400;
 
-        // テンプレマッチ
-        let templateResult = detectTemplateScores(board, templates);
+        // connections (種)
+        let conn = countConnectionsEnhanced(board);
 
-        // 連結（種）評価
-        let connectionScore = countConnectionsEnhanced(board);
+        // 強力な列高さペナルティ（単列集中対策）
+        let colPenalty = 0;
+        for (let h of heights) {
+            if (h > 8) colPenalty += Math.pow(h - 8, 3) * 4500; // 9,10,11が急増
+        }
 
-        // 高さ・穴ペナルティ
-        let heightPenalty = varh * -1400;
-        let holePenalty = -3000 * holes;
+        // holes / variance penalties
+        let holePen = holes * 3000;
+        let varPen = varh * 1500;
 
-        let total = potentialScore + templateResult.total + connectionScore + heightPenalty + holePenalty;
+        // MC オーバーフローレート
+        let overflowRate = simulateRandomFutureOverflowRate(board, mcTrials, futurePairs);
+        // オーバーフローの重み（非常に大きくして、オーバーフロー率がある候補は容易に弾く）
+        let overflowPenalty = overflowRate * 1e7;
+
+        let total = potentialScore + conn - colPenalty - holePen - varPen - overflowPenalty;
 
         return {
             score: total,
             details: {
-                maxChain,
-                potentialScore,
-                templateScore: templateResult.total,
-                templateCounts: templateResult.counts,
-                connectionScore,
-                heightPenalty,
-                holePenalty,
-                heights,
-                holes,
-                varh
+                maxChain, potentialScore, conn, colPenalty, holePen, varPen, overflowRate, heights, holes, varh
             }
         };
     }
 
-    // ----------------------------
-    // applyMove: 実際に置く（p1, p2 の順序は nextPuyos の通り）
-    // 回転 r の定義：
-    //  r=0: 縦（p1上/p2下） -> 同列 h を見つけ, p2 @ h, p1 @ h+1
-    //  r=2: 縦（p1下/p2上） -> p1 @ h, p2 @ h+1
-    //  r=1: 横（p1 が 左, p2 が 右） -> p1 @ col x, p2 @ col x+1
-    //  r=3: 横（p1 が 右, p2 が 左） -> p1 @ col x, p2 @ col x-1
-    // ----------------------------
-    function applyMove(board, p1, p2, x, r) {
-        let temp = board.map(row => [...row]);
-        let pos1x = x, pos2x = x;
-        if (r === 0) {
-            pos1x = x; pos2x = x;
-        } else if (r === 1) {
-            pos1x = x; pos2x = x + 1;
-        } else if (r === 2) {
-            pos1x = x; pos2x = x;
-        } else if (r === 3) {
-            pos1x = x; pos2x = x - 1;
-        } else {
-            return null;
-        }
-        if (pos1x < 0 || pos1x >= WIDTH || pos2x < 0 || pos2x >= WIDTH) return null;
-
-        // 各列の高さ
-        let h1 = 0; while (h1 < HEIGHT && temp[h1][pos1x] !== 0) h1++;
-        let h2 = 0; while (h2 < HEIGHT && temp[h2][pos2x] !== 0) h2++;
-
-        // 同列の縦置き
-        if (pos1x === pos2x) {
-            // 縦置きの空きチェック（h+1が存在するか）
-            if (h1 + 1 >= HEIGHT) return null;
-            if (r === 0) {
-                // p1上, p2下
-                temp[h1][pos1x] = p2;
-                temp[h1 + 1][pos1x] = p1;
-            } else if (r === 2) {
-                // p1下, p2上
-                temp[h1][pos1x] = p1;
-                temp[h1 + 1][pos1x] = p2;
-            } else {
-                // r other not valid here
-                return null;
-            }
-        } else {
-            // 横置き: place at respective column heights
-            if (h1 >= HEIGHT || h2 >= HEIGHT) return null;
-            // For horizontal, ensure we simulate physics: both pieces drop to their column heights
-            temp[h1][pos1x] = p1;
-            temp[h2][pos2x] = p2;
-        }
-        return temp;
-    }
-
-    // ----------------------------
-    // ビームサーチで最良手を探索
-    // options: { depth: int, beamWidth: int }
-    // 戻り値: { x, rotation, expectedChains, score, info }
-    // info は詳細（最終盤面の評価やテンプレカウント等）
-    // ----------------------------
+    // ---------- getBestMove : ビームサーチ + 最終精査（MC評価） ----------
+    // options: { depth, beamWidth, mcTrials, futurePairs }
     function getBestMove(board, nextPuyos, options = {}) {
-        const templates = buildTemplates();
-        const maxDepth = options.depth || Math.floor(nextPuyos.length / 2);
-        const beamWidth = options.beamWidth || 200;
+        const depth = options.depth || Math.min(Math.floor(nextPuyos.length / 2), 3);
+        const beamWidth = options.beamWidth || 180;
+        const templates = []; // 今回テンプレマッチは省略して MC リスク回避を優先（テンプレは追加可）
 
-        // 初期ノード
-        let beam = [{
-            board: board.map(row => [...row]),
-            seq: [],
-            score: 0
-        }];
+        // 初期ビーム
+        let beam = [{ board: board.map(row=>[...row]), seq: [], score: 0 }];
 
-        for (let step = 0; step < maxDepth; step++) {
-            let p1 = nextPuyos[step * 2];
-            let p2 = nextPuyos[step * 2 + 1];
+        // 展開（浅めの評価で枝を絞る）
+        for (let step=0; step<depth; step++) {
+            let p1 = nextPuyos[step*2];
+            let p2 = nextPuyos[step*2 + 1];
             let candidates = [];
             for (let node of beam) {
-                for (let x = 0; x < WIDTH; x++) {
-                    for (let r = 0; r < 4; r++) {
-                        let nb = applyMove(node.board, p1, p2, x, r);
-                        if (!nb) continue;
-                        // 中間評価（軽量）— テンプレ含めた総合評価
-                        let evalRes = evaluateBoard(nb, templates);
-                        candidates.push({
-                            board: nb,
-                            seq: node.seq.concat([{ x, r, p1, p2 }]),
-                            score: evalRes.score,
-                            details: evalRes.details
-                        });
-                    }
+                for (let x=0; x<WIDTH; x++) for (let r=0; r<4; r++) {
+                    let nb = applyMove(node.board, p1, p2, x, r);
+                    if (!nb) continue;
+                    // 途中評価は quickScore を使用して単列化を避ける方向へ誘導
+                    let s = quickScore(nb);
+                    candidates.push({ board: nb, seq: node.seq.concat([{x,r,p1,p2}]), score: s });
                 }
             }
             if (candidates.length === 0) break;
-            // 上位 beamWidth を選ぶ
             candidates.sort((a,b)=>b.score - a.score);
             beam = candidates.slice(0, beamWidth);
         }
 
-        // beam の中の各最終盤面について、本当の期待連鎖値を simulate しておく（精査）
+        // beam 中の候補を MC で精査（オーバーフロー率を含む）
         let best = null;
         for (let node of beam) {
-            // 深い simulate：何連鎖起きるかを確認
+            // 精密評価（MC）
+            let evalRes = evaluateBoardWithMC(node.board, { mcTrials: options.mcTrials || 60, futurePairs: options.futurePairs || 3 });
+            // さらに実際の連鎖数を計測して強く重視
             let simulated = simulatePureChain(node.board.map(row=>[...row]));
-            // 最終評価（score に連鎖の具体値を足し込むことで「実際に連鎖がある盤面」を評価）
-            // ここは重み付けで調整可能
-            let finalScore = node.score + simulated.chains * 60000; // 連鎖が実際に多ければ大きく上がる
+            let finalScore = evalRes.score + simulated.chains * 70000; // 実連鎖は非常に重要
             if (!best || finalScore > best.finalScore) {
-                best = {
-                    finalScore,
-                    node,
-                    simulated
-                };
+                best = { finalScore, node, evalRes, simulated };
             }
         }
-        if (!best) {
-            return { x: 2, rotation: 0, expectedChains: 0, score: -Infinity, info: null };
-        }
 
-        // 最適と判定したシーケンスの1手目を返す（ユーザーの要望：最適な場所を示す）
+        if (!best) return { x: 2, rotation: 0, expectedChains: 0, score: -Infinity, info: null };
+
         let first = best.node.seq[0] || { x: 2, r: 0 };
-        // 詳細情報の返却
         return {
             x: first.x,
             rotation: first.r,
             expectedChains: best.simulated.chains,
             score: best.finalScore,
             info: {
-                sequence: best.node.seq,
-                finalBoard: best.node.board,
-                evalDetails: best.node.details,
-                simulatedChains: best.simulated.chains,
-                templateCounts: best.node.details ? best.node.details.templateCounts : null
+                seq: best.node.seq,
+                evalDetails: best.evalRes ? best.evalRes.details : null,
+                finalHeights: getColumnHeights(best.node.board),
+                simulatedChains: best.simulated.chains
             }
         };
     }
 
-    // エクスポート
     return { getBestMove };
 })();
 
