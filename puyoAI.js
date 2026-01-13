@@ -1,11 +1,12 @@
 /**
- * PuyoAI ProBuilder v1.1 - Safety Grand Master Edition
+ * PuyoAI ProBuilder v3.2 - Physics & Safety Edition
  * 15連鎖以上の大連鎖構築 & 3列目窒息絶対回避
+ * 12段目の壁による設置制限（物理仕様）を完全反映
  */
 
 const PuyoAI = (() => {
   const WIDTH = 6;
-  const HEIGHT = 14;
+  const HEIGHT = 14; // 13段目(幽霊ぷよ)を含む
   const COLORS = [1, 2, 3, 4];
   const BEAM_WIDTH = 24;
 
@@ -16,7 +17,7 @@ const PuyoAI = (() => {
 
     // ① 窒息・高さ管理（最優先）
     const heightScore = heightManagement(board);
-    if (heightScore <= -1e14) return heightScore; // 窒息確定なら即座に返す
+    if (heightScore <= -1e14) return heightScore; 
     score += heightScore;
 
     // ② 連鎖シミュレーション
@@ -32,7 +33,7 @@ const PuyoAI = (() => {
     // ③ 連鎖ポテンシャル
     score += countPotentialConnections(board);
 
-    // ④ 地形評価
+    // ④ 地形評価（U字構築の促進）
     score += terrainEvaluation(board);
 
     // ⑤ 色の分散
@@ -48,18 +49,26 @@ const PuyoAI = (() => {
     const h = columnHeights(board);
     
     // 【最優先】3列目(X=2)の窒息絶対回避
-    // Y=11が埋まることは、どんな大連鎖よりも避けるべき事象
-    if (h[2] >= 12) return -1e15; // 完全にゲームオーバー
-    if (h[2] >= 11) s -= 1e12;    // 窒息寸前（極めて危険）
-    if (h[2] >= 10) s -= 1e9;     // 警告レベル
+    // Y=11(12段目)が埋まることは敗北
+    if (h[2] >= 12) return -1e15; // 3列目(X=2)の12段目(Y=11)が埋まったらゲームオーバー
+    if (h[2] >= 11) s -= 1e12;    // 3列目(X=2)の11段目(Y=10)が埋まったら極めて危険
     
-    // 他の列の高さ管理
+    // 【物理仕様】12段目の壁による設置制限の評価
+    // 3列目(X=2)の高さが他の列の設置可能性を左右する
     for (let x = 0; x < WIDTH; x++) {
-      if (h[x] >= 12) s -= 1e10; // 3列目以外でも窒息は避ける
-      if (h[x] >= 11) s -= 1e8;
+      if (x === 2) continue;
+      // 12段目(Y=11)が埋まっている列があると、その外側へは投げ込めない
+      if (h[x] >= 12) s -= 1e10; // 他の列でも12段目(Y=11)が埋まるのは危険
+
+      // 3列目(X=2)の12段目(Y=11)が埋まっている場合、他の列の12段目(Y=11)より上に置くことはできない
+      // このロジックはcanPlacePuyoで処理されるため、ここでは評価スコアとして考慮
+      if (h[2] >= 12) {
+        // 3列目(X=2)が12段目(Y=11)まで埋まっている場合、他の列の12段目(Y=11)より上にぷよを置くことはできない
+        // これはcanPlacePuyoで既にチェックされているが、評価関数でもペナルティを与える
+        if (h[x] >= 12) s -= 1e10; // 3列目が埋まっている状態で他の列も埋まっているとさらに危険
+      }
     }
     
-    // 全体の高さに対するペナルティ
     const maxHeight = Math.max(...h);
     s -= maxHeight * 100000;
     
@@ -68,10 +77,10 @@ const PuyoAI = (() => {
 
   function countPotentialConnections(board) {
     let s = 0;
-    const visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
+    const visited = Array.from({ length: 13 }, () => Array(WIDTH).fill(false));
     let groups = { 2: 0, 3: 0 };
 
-    for (let y = 0; y < 12; y++) {
+    for (let y = 0; y < 12; y++) { // 13段目は連鎖にカウントしない（幽霊）
       for (let x = 0; x < WIDTH; x++) {
         if (!visited[y][x] && board[y][x]) {
           let group = [];
@@ -96,8 +105,9 @@ const PuyoAI = (() => {
       if (d === 0) s -= 30000;
       if (Math.abs(d) >= 3) s -= 100000;
     }
+    // U字構築：端を高く、3列目を低く
     s += (h[0] + h[5]) * 20000;
-    s -= h[2] * 30000;
+    s -= h[2] * 50000; 
     return s;
   }
 
@@ -144,6 +154,9 @@ const PuyoAI = (() => {
       for (let leaf of leaves) {
         for (let x = 0; x < WIDTH; x++) {
           for (let r = 0; r < 4; r++) {
+            // 物理的な設置制限をチェック
+            if (!canPlacePuyo(leaf.board, x, r)) continue;
+
             const nextBoard = applyMove(leaf.board, p1, p2, x, r);
             if (!nextBoard) continue;
 
@@ -167,7 +180,48 @@ const PuyoAI = (() => {
     return leaves.length > 0 ? leaves[0].firstMove : { x: 2, rotation: 0 };
   }
 
-  /* ================= 基本処理 ================= */
+  /* ================= 物理仕様・基本処理 ================= */
+
+  /**
+   * ぷよぷよの物理仕様：12段目の壁による設置制限をチェック
+   * 3列目(X=2)から遠い列にぷよを置くには、それより近い列が壁になっていてはいけない
+   */
+  function canPlacePuyo(board, x, r) {
+    const h = columnHeights(board);
+    let puyoPositions = [];
+    // ぷよの配置後の最終的なY座標を計算
+    if (r === 0) puyoPositions = [{x: x, y: h[x]}, {x: x, y: h[x] + 1}];
+    else if (r === 1) puyoPositions = [{x: x, y: h[x]}, {x: x + 1, y: h[x + 1]}];
+    else if (r === 2) puyoPositions = [{x: x, y: h[x] + 1}, {x: x, y: h[x]}];
+    else if (r === 3) puyoPositions = [{x: x, y: h[x]}, {x: x - 1, y: h[x - 1]}];
+
+    for (let puyo of puyoPositions) {
+      const tx = puyo.x;
+      const ty = puyo.y;
+
+      if (tx < 0 || tx >= WIDTH) return false; // 盤面外
+      if (ty >= HEIGHT) return false; // 14段目(Y=13)に置こうとしている
+
+      // 12段目(Y=11)より上に置こうとする場合のチェック
+      if (ty >= 12) {
+        // 3列目(X=2)からターゲット列(tx)までの経路チェック
+        const step = tx > 2 ? 1 : -1;
+        let pathBlocked = false;
+        if (tx !== 2) {
+          for (let curr = 2; curr !== tx; curr += step) {
+            // 経路上の列が12段目(Y=11)未満だと、その先へは投げ込めない
+            // 経路上の列が12段目(Y=11)まで埋まっていると、その先へは投げ込めない
+            if (h[curr] >= 12) {
+              pathBlocked = true;
+              break;
+            }
+          }
+        }
+        if (pathBlocked) return false;
+      }
+    }
+    return true;
+  }
 
   function applyMove(board, p1, p2, x, r) {
     const b = board.map(row => [...row]);
@@ -177,13 +231,11 @@ const PuyoAI = (() => {
     else if (r === 2) pos = [[x, 1, p1], [x, 0, p2]];
     else if (r === 3) pos = [[x, 0, p1], [x - 1, 0, p2]];
 
-    for (let [px] of pos) if (px < 0 || px >= WIDTH) return null;
-    
     const sortedPos = [...pos].sort((a, b) => a[1] - b[1]);
     for (let [px, _, c] of sortedPos) {
       let y = 0;
-      while (y < 14 && b[y][px]) y++;
-      if (y >= 14) return null;
+      while (y < HEIGHT && b[y][px]) y++;
+      if (y >= HEIGHT) return null;
       b[y][px] = c;
     }
     return b;
@@ -194,8 +246,8 @@ const PuyoAI = (() => {
     const b = board.map(row => [...row]);
     while (true) {
       const del = [];
-      const vis = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
-      for (let y = 0; y < 12; y++) {
+      const vis = Array.from({ length: 13 }, () => Array(WIDTH).fill(false));
+      for (let y = 0; y < 12; y++) { // 13段目は消えない
         for (let x = 0; x < WIDTH; x++) {
           if (b[y][x] && !vis[y][x]) {
             const g = [];
@@ -234,7 +286,7 @@ const PuyoAI = (() => {
       g.push(p);
       [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
         const nx = p.x + dx, ny = p.y + dy;
-        if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && !v[ny][nx] && b[ny][nx] === c) {
+        if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 13 && !v[ny][nx] && b[ny][nx] === c) {
           v[ny][nx] = true;
           st.push({ x: nx, y: ny });
         }
@@ -245,7 +297,7 @@ const PuyoAI = (() => {
   function columnHeights(b) {
     return [...Array(WIDTH)].map((_, x) => {
       let y = 0;
-      while (y < 14 && b[y][x]) y++;
+      while (y < HEIGHT && b[y][x]) y++;
       return y;
     });
   }
