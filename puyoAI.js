@@ -1,14 +1,14 @@
 /**
- * PuyoAI ProBuilder v2
- * 3手先読み（ツモ・ネクスト1・ネクスト2）対応
- * ビームサーチ & 高度評価関数実装
+ * PuyoAI ProBuilder v3 - Grand Master Edition
+ * 15連鎖以上の大連鎖構築に特化したアルゴリズム
+ * 「消去抑制・連鎖ポテンシャル最大化・定型構築」
  */
 
 const PuyoAI = (() => {
   const WIDTH = 6;
   const HEIGHT = 14;
   const COLORS = [1, 2, 3, 4];
-  const BEAM_WIDTH = 16; // ビームサーチの幅
+  const BEAM_WIDTH = 24; // 探索精度をさらに向上
 
   /* ================= 評価関数 ================= */
 
@@ -17,157 +17,160 @@ const PuyoAI = (() => {
 
     // ① 連鎖シミュレーション
     const sim = simulateChain(board);
-    if (sim.chains === 1) return -1e8; // 即消しは厳禁
-    if (sim.chains >= 2) {
-      score += sim.chains * 500000; // 連鎖数ボーナス
+    
+    // 【重要】大連鎖特化：10連鎖未満の「今すぐ消える連鎖」は極めて低く評価する
+    // これにより、AIは「今すぐ消す」よりも「種を育てる」ことを優先する
+    if (sim.chains > 0) {
+      if (sim.chains < 10) {
+        score -= 2000000; // 小連鎖はペナルティ（暴発防止）
+      } else {
+        score += sim.chains * 1000000; // 10連鎖以上なら超高評価
+      }
     }
 
-    // ② 連結ボーナス（連鎖の種）
-    score += connectionPotential(board);
+    // ② 連鎖ポテンシャル（将来の連鎖の可能性）
+    // 盤面にある「3連結」や「2連結」の数を、将来の連鎖数として評価
+    score += countPotentialConnections(board);
 
-    // ③ 段差・平坦さ評価
-    score += surfacePotential(board);
+    // ③ 地形評価（大連鎖のための土台作り）
+    score += terrainEvaluation(board);
 
-    // ④ 高さ評価（中央を低く、窒息防止）
-    score += heightEvaluation(board);
+    // ④ 色の分散（多色をバランスよく配置）
+    score += colorDiversity(board);
 
-    // ⑤ 無駄ぷよペナルティ
-    score += wastePenalty(board);
+    // ⑤ 窒息・高さ管理
+    score += heightManagement(board);
 
     return score;
   }
 
   /* ================= 評価詳細 ================= */
 
-  // 連結ボーナス：2連結、3連結を高く評価
-  function connectionPotential(board) {
+  // 将来の連鎖の種を数える
+  function countPotentialConnections(board) {
     let s = 0;
     const visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
+    let groups = { 2: 0, 3: 0 };
+
     for (let y = 0; y < 12; y++) {
       for (let x = 0; x < WIDTH; x++) {
         if (!visited[y][x] && board[y][x]) {
           let group = [];
           dfs(board, x, y, visited, group);
-          if (group.length === 2) s += 20000;
-          if (group.length === 3) s += 150000;
-          if (group.length >= 4) s -= 200000; // 発火していない4連結以上は形が悪い
+          if (group.length === 2) groups[2]++;
+          if (group.length === 3) groups[3]++;
+          if (group.length >= 4) s -= 500000; // 発火していない4連結は「ゴミ」または「暴発の元」
         }
       }
     }
+    
+    // 3連結は非常に価値が高い（あと1つで連鎖になるため）
+    s += groups[3] * 800000;
+    // 2連結も価値がある
+    s += groups[2] * 100000;
+    
     return s;
   }
 
-  // 段差評価：理想的な段差（1-2段）を評価
-  function surfacePotential(board) {
+  // 地形評価：大連鎖に適した「階段」や「GTR」を促す
+  function terrainEvaluation(board) {
     let s = 0;
     const h = columnHeights(board);
+    
     for (let i = 0; i < WIDTH - 1; i++) {
-      const d = Math.abs(h[i] - h[i + 1]);
-      if (d === 1) s += 40000;
-      if (d === 2) s += 20000;
-      if (d === 0) s -= 10000; // 平坦すぎると連鎖が組みにくい
-      if (d >= 3) s -= 50000; // 急激な段差はマイナス
+      const d = h[i] - h[i + 1];
+      // 理想的な段差：左が高い（階段積み）または適度な凹凸
+      if (d === 1 || d === 2) s += 50000;
+      if (d === 0) s -= 30000; // 平坦は連鎖が繋がりにくい
+      if (Math.abs(d) >= 3) s -= 100000; // 高低差がありすぎると分断される
     }
-    return s;
-  }
 
-  // 高さ評価：3列目（発火点）を空け、全体的に低く保つ
-  function heightEvaluation(board) {
-    let s = 0;
-    const h = columnHeights(board);
-    
-    // 3列目（インデックス2）の窒息チェック
-    if (h[2] >= 10) s -= 1e7;
-    
-    // 全体の高さペナルティ
-    const totalHeight = h.reduce((a, b) => a + b, 0);
-    s -= totalHeight * 5000;
-
-    // 中央（2,3列目）を少し低くするボーナス
-    s -= (h[2] + h[3]) * 2000;
+    // 端（1列目、6列目）を高く使い、中央を低く保つ（U字構築の促進）
+    s += (h[0] + h[5]) * 20000;
+    s -= h[2] * 30000; // 3列目は常に低く（窒息防止）
 
     return s;
   }
 
-  // 無駄ぷよペナルティ：孤立したぷよを減点
-  function wastePenalty(board) {
-    let s = 0;
+  // 色の分散：同じ色が固まりすぎないようにし、連鎖の多色化を促す
+  function colorDiversity(board) {
+    const counts = {};
+    let total = 0;
     for (let y = 0; y < 12; y++) {
       for (let x = 0; x < WIDTH; x++) {
         if (board[y][x]) {
-          let neighbors = 0;
-          [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
-            const nx = x + dx, ny = y + dy;
-            if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && board[ny][nx]) {
-              neighbors++;
-            }
-          });
-          if (neighbors === 0) s -= 30000;
+          counts[board[y][x]] = (counts[board[y][x]] || 0) + 1;
+          total++;
         }
       }
     }
+    if (total === 0) return 0;
+    
+    let variance = 0;
+    const avg = total / COLORS.length;
+    COLORS.forEach(c => {
+      const count = counts[c] || 0;
+      variance += Math.abs(count - avg);
+    });
+    
+    return -variance * 10000; // 色が偏りすぎると連鎖が組みにくい
+  }
+
+  function heightManagement(board) {
+    let s = 0;
+    const h = columnHeights(board);
+    if (h[2] >= 10) s -= 5000000; // 3列目限界
+    
+    const maxHeight = Math.max(...h);
+    if (maxHeight >= 11) s -= 2000000; // 全体限界
+    
     return s;
   }
 
   /* ================= 探索（ビームサーチ） ================= */
 
-  /**
-   * @param {Array} board 現在の盤面
-   * @param {Array} current 現在のツモ [color1, color2]
-   * @param {Array} next1 ネクスト1 [color1, color2]
-   * @param {Array} next2 ネクスト2 [color1, color2]
-   */
   function getBestMove(board, current, next1, next2) {
-    // 3手分のツモ情報を配列にまとめる
     const tsumos = [
       [current.axisColor, current.childColor],
       [next1.axisColor, next1.childColor],
       [next2.axisColor, next2.childColor]
     ];
     
-    // ビームサーチの初期状態
     let leaves = [{
       board: board,
       firstMove: null,
       totalScore: 0
     }];
 
-    // 3手先まで探索
     for (let depth = 0; depth < tsumos.length; depth++) {
       let nextLeaves = [];
       const [p1, p2] = tsumos[depth];
 
       for (let leaf of leaves) {
-        // 全ての可能な配置を試行
         for (let x = 0; x < WIDTH; x++) {
           for (let r = 0; r < 4; r++) {
             const nextBoard = applyMove(leaf.board, p1, p2, x, r);
             if (!nextBoard) continue;
 
-            const moveScore = evaluate(nextBoard);
+            // 深い階層ほど評価を重視する（将来の形を優先）
+            const moveScore = evaluate(nextBoard) * (depth + 1);
             const totalScore = leaf.totalScore + moveScore;
             
             const move = { x, rotation: r };
             nextLeaves.push({
               board: nextBoard,
-              firstMove: leaf.firstMove || move, // 1手目の動きを保持
+              firstMove: leaf.firstMove || move,
               totalScore: totalScore
             });
           }
         }
       }
 
-      // スコア順にソートして上位 BEAM_WIDTH 個を残す
       nextLeaves.sort((a, b) => b.totalScore - a.totalScore);
       leaves = nextLeaves.slice(0, BEAM_WIDTH);
     }
 
-    // 最もスコアの高い手筋の「1手目」を返す
-    if (leaves.length > 0) {
-      return leaves[0].firstMove;
-    } else {
-      return { x: 2, rotation: 0 }; // フォールバック
-    }
+    return leaves.length > 0 ? leaves[0].firstMove : { x: 2, rotation: 0 };
   }
 
   /* ================= 基本処理 ================= */
@@ -175,7 +178,6 @@ const PuyoAI = (() => {
   function applyMove(board, p1, p2, x, r) {
     const b = board.map(row => [...row]);
     let pos = [];
-    // 0: 縦(p1下), 1: 横(p1左), 2: 縦(p1上), 3: 横(p1右)
     if (r === 0) pos = [[x, 0, p1], [x, 1, p2]];
     else if (r === 1) pos = [[x, 0, p1], [x + 1, 0, p2]];
     else if (r === 2) pos = [[x, 1, p1], [x, 0, p2]];
@@ -183,16 +185,13 @@ const PuyoAI = (() => {
 
     for (let [px] of pos) if (px < 0 || px >= WIDTH) return null;
     
-    // ぷよを落とす（簡易重力）
-    const sortedPos = pos.sort((a, b) => a[1] - b[1]); // 下にあるぷよから処理
+    const sortedPos = pos.sort((a, b) => a[1] - b[1]);
     for (let [px, _, c] of sortedPos) {
       let y = 0;
       while (y < 12 && b[y][px]) y++;
       if (y >= 12) return null;
       b[y][px] = c;
     }
-    
-    // 着地後の連鎖は評価関数内でシミュレートするため、ここでは落とすだけ
     return b;
   }
 
@@ -257,7 +256,6 @@ const PuyoAI = (() => {
     });
   }
 
-  // 最大連鎖数を見つける補助関数（UI用）
   function findMaxChainPuyo(board) {
     let maxChain = 0;
     let bestPos = null;
