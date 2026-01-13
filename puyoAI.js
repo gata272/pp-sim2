@@ -1,232 +1,201 @@
 /**
- * PuyoAI.js v17
- * 大連鎖構築特化・左右バイアスなし版
- * ・連鎖の「形」を評価
- * ・即消し・左詰め・平坦を排除
+ * PuyoAI ProBuilder v1
+ * 上位ぷよらー思考完全反映型
+ * 「消さず・縦3・段差・未完成」
  */
 
-const PuyoAI = (function () {
+const PuyoAI = (() => {
   const WIDTH = 6;
   const HEIGHT = 14;
-  const COLORS = [1, 2, 3, 4];
+  const COLORS = [1,2,3,4];
 
-  /* =======================
-     評価関数メイン
-  ======================= */
-  function evaluateBoard(board) {
+  /* ================= 評価関数 ================= */
+
+  function evaluate(board) {
     let score = 0;
 
-    // 即死チェック（3列目）
-    let h3 = 0;
-    while (h3 < HEIGHT && board[h3][2] !== 0) h3++;
-    if (h3 >= 11) return -50_000_000;
+    // ① 即消しチェック（最大ペナルティ）
+    const sim = simulateChain(board);
+    if (sim.chains === 1) return -1e9;
+    if (sim.chains >= 2) score += sim.chains * 200000;
 
-    // 即消し（連鎖発生）を強く拒否
-    const chains = simulatePureChain(clone(board));
-    if (chains === 1) return -10_000_000;
-    if (chains >= 2) return -30_000_000;
-
-    // 構造評価
-    score += countPairs(board) * 800;
+    // ② 縦3・縦2評価
     score += verticalPotential(board);
-    score += stepScore(getHeights(board));
+
+    // ③ 段差評価
+    score += stepPotential(board);
+
+    // ④ 高さ分散（偏り防止）
+    score += heightBalance(board);
+
+    // ⑤ 発火未完成ボーナス
+    score += unfinishedBonus(board);
+
+    // ⑥ 窒息防止
+    if (isChoked(board)) score -= 1e8;
 
     return score;
   }
 
-  /* =======================
-     構造評価①：2連結
-  ======================= */
-  function countPairs(board) {
-    let pairs = 0;
-    for (let y = 0; y < 12; y++) {
-      for (let x = 0; x < WIDTH; x++) {
-        const c = board[y][x];
-        if (!c) continue;
-        if (x + 1 < WIDTH && board[y][x + 1] === c) pairs++;
-        if (y + 1 < 12 && board[y + 1][x] === c) pairs++;
-      }
-    }
-    return pairs;
-  }
+  /* ================= 評価詳細 ================= */
 
-  /* =======================
-     構造評価②：縦伸び
-  ======================= */
   function verticalPotential(board) {
     let s = 0;
-    for (let x = 0; x < WIDTH; x++) {
-      let last = 0;
-      let cnt = 0;
-      for (let y = 0; y < 12; y++) {
-        if (board[y][x] === last && last !== 0) {
-          cnt++;
+    for (let x=0;x<WIDTH;x++) {
+      let streak = 1;
+      for (let y=1;y<12;y++) {
+        if (board[y][x] && board[y][x] === board[y-1][x]) {
+          streak++;
         } else {
-          last = board[y][x];
-          cnt = last ? 1 : 0;
+          if (streak === 3) s += 200000;
+          if (streak === 2) s += 20000;
+          if (streak >= 4) s -= 300000;
+          streak = 1;
         }
-        if (cnt === 2) s += 500;
-        if (cnt === 3) s += 1200;
       }
     }
     return s;
   }
 
-  /* =======================
-     構造評価③：段差
-  ======================= */
-  function stepScore(heights) {
+  function stepPotential(board) {
     let s = 0;
-    for (let i = 0; i < WIDTH - 1; i++) {
-      const d = Math.abs(heights[i] - heights[i + 1]);
-      if (d === 1 || d === 2) s += 1500;
-      if (d >= 4) s -= 3000;
+    const h = columnHeights(board);
+    for (let i=0;i<WIDTH-1;i++) {
+      const d = Math.abs(h[i]-h[i+1]);
+      if (d === 1 || d === 2) s += 30000;
+      if (d === 0) s -= 20000;
+      if (d >= 4) s -= 30000;
     }
     return s;
   }
 
-  function getHeights(board) {
-    let h = Array(WIDTH).fill(0);
-    for (let x = 0; x < WIDTH; x++) {
-      let y = 0;
-      while (y < HEIGHT && board[y][x] !== 0) y++;
-      h[x] = y;
-    }
-    return h;
+  function heightBalance(board) {
+    const h = columnHeights(board);
+    const avg = h.reduce((a,b)=>a+b,0)/WIDTH;
+    let v = 0;
+    h.forEach(x => v += Math.abs(x-avg));
+    return -v * 1000;
   }
 
-  /* =======================
-     連鎖シミュレーター
-  ======================= */
-  function simulatePureChain(board) {
-    let chains = 0;
-    while (true) {
-      let erase = [];
-      let visited = Array.from({ length: HEIGHT }, () =>
-        Array(WIDTH).fill(false)
-      );
-
-      for (let y = 0; y < HEIGHT; y++) {
-        for (let x = 0; x < WIDTH; x++) {
-          if (!board[y][x] || visited[y][x]) continue;
-          let color = board[y][x];
-          let stack = [{ x, y }];
-          let group = [];
-          visited[y][x] = true;
-
-          while (stack.length) {
-            const p = stack.pop();
-            group.push(p);
-            for (const [dx, dy] of [
-              [1, 0],
-              [-1, 0],
-              [0, 1],
-              [0, -1],
-            ]) {
-              const nx = p.x + dx;
-              const ny = p.y + dy;
-              if (
-                nx >= 0 &&
-                nx < WIDTH &&
-                ny >= 0 &&
-                ny < HEIGHT &&
-                !visited[ny][nx] &&
-                board[ny][nx] === color
-              ) {
-                visited[ny][nx] = true;
-                stack.push({ x: nx, y: ny });
-              }
-            }
-          }
-
-          if (group.length >= 4) erase.push(...group);
-        }
-      }
-
-      if (erase.length === 0) break;
-      chains++;
-      erase.forEach(p => (board[p.y][p.x] = 0));
-
-      for (let x = 0; x < WIDTH; x++) {
-        let w = 0;
-        for (let r = 0; r < HEIGHT; r++) {
-          if (board[r][x] !== 0) {
-            board[w][x] = board[r][x];
-            if (w !== r) board[r][x] = 0;
-            w++;
-          }
+  function unfinishedBonus(board) {
+    let s = 0;
+    const visited = Array.from({length:12},()=>Array(WIDTH).fill(false));
+    for (let y=0;y<12;y++) {
+      for (let x=0;x<WIDTH;x++) {
+        if (!visited[y][x] && board[y][x]) {
+          let g=[];
+          dfs(board,x,y,visited,g);
+          if (g.length === 3) s += 100000;
+          if (g.length === 4) s -= 500000;
         }
       }
     }
-    return chains;
+    return s;
   }
 
-  /* =======================
-     探索（3手）
-  ======================= */
+  function isChoked(board) {
+    let h=0;
+    while (h<HEIGHT && board[h][2]!==0) h++;
+    return h>=11;
+  }
+
+  /* ================= 探索 ================= */
+
   function getBestMove(board, next) {
     let best = -Infinity;
-    let move = { x: 2, rotation: 0 };
+    let bestMove = {x:2,rotation:0};
 
-    for (let x1 = 0; x1 < WIDTH; x1++) {
-      for (let r1 = 0; r1 < 4; r1++) {
-        const b1 = applyMove(board, next[0], next[1], x1, r1);
-        if (!b1) continue;
+    for (let x=0;x<WIDTH;x++) {
+      for (let r=0;r<4;r++) {
+        const b = applyMove(board,next[0],next[1],x,r);
+        if (!b) continue;
 
-        let localBest = -Infinity;
-
-        for (let x2 = 0; x2 < WIDTH; x2++) {
-          for (let r2 = 0; r2 < 4; r2++) {
-            const b2 = applyMove(b1, next[2], next[3], x2, r2);
-            if (!b2) continue;
-
-            for (let x3 = 0; x3 < WIDTH; x3++) {
-              for (let r3 = 0; r3 < 4; r3++) {
-                const b3 = applyMove(b2, next[4], next[5], x3, r3);
-                if (!b3) continue;
-                const s = evaluateBoard(b3);
-                if (s > localBest) localBest = s;
-              }
-            }
-          }
+        let worst = Infinity;
+        for (let c1 of COLORS) for (let c2 of COLORS) {
+          const b2 = applyMove(b,c1,c2,x,r);
+          if (!b2) continue;
+          worst = Math.min(worst,evaluate(b2));
         }
 
-        if (localBest > best) {
-          best = localBest;
-          move = { x: x1, rotation: r1 };
+        if (worst > best) {
+          best = worst;
+          bestMove = {x,rotation:r};
         }
       }
     }
-    return move;
+    return bestMove;
   }
 
-  /* =======================
-     ぷよ配置
-  ======================= */
-  function applyMove(board, p1, p2, x, r) {
-    const b = clone(board);
+  /* ================= 基本処理 ================= */
 
-    let dx = [0, 1, 0, -1][r];
-    let dy = [1, 0, -1, 0][r];
+  function applyMove(board,p1,p2,x,r) {
+    const b = board.map(r=>[...r]);
+    let pos = [];
+    if (r===0) pos=[[x,1,p1],[x,0,p2]];
+    if (r===1) pos=[[x,0,p1],[x+1,0,p2]];
+    if (r===2) pos=[[x,0,p2],[x,1,p1]];
+    if (r===3) pos=[[x,0,p1],[x-1,0,p2]];
 
-    let x1 = x;
-    let x2 = x + dx;
-    if (x2 < 0 || x2 >= WIDTH) return null;
-
-    let h1 = getHeights(b)[x1];
-    let h2 = getHeights(b)[x2];
-    if (h1 >= 12 || h2 >= 12) return null;
-
-    b[h1][x1] = p1;
-    b[h2][x2] = p2;
+    for (let [px] of pos) if (px<0||px>=WIDTH) return null;
+    for (let [px,_,c] of pos) {
+      let y=0; while (y<HEIGHT && b[y][px]) y++;
+      if (y>=12) return null;
+      b[y][px]=c;
+    }
     return b;
   }
 
-  function clone(board) {
-    return board.map(r => [...r]);
+  function simulateChain(board) {
+    let chains=0;
+    const b=board.map(r=>[...r]);
+    while (true) {
+      const del=[];
+      const vis=Array.from({length:12},()=>Array(WIDTH).fill(false));
+      for (let y=0;y<12;y++) for (let x=0;x<WIDTH;x++)
+        if (b[y][x]&&!vis[y][x]) {
+          const g=[];
+          dfs(b,x,y,vis,g);
+          if (g.length>=4) del.push(...g);
+        }
+      if (!del.length) break;
+      del.forEach(p=>b[p.y][p.x]=0);
+      gravity(b);
+      chains++;
+    }
+    return {chains};
+  }
+
+  function gravity(b) {
+    for (let x=0;x<WIDTH;x++) {
+      let w=0;
+      for (let y=0;y<HEIGHT;y++) if (b[y][x]) {
+        b[w][x]=b[y][x];
+        if (w!==y) b[y][x]=0;
+        w++;
+      }
+    }
+  }
+
+  function dfs(b,x,y,v,g) {
+    const c=b[y][x];
+    const st=[[x,y]];
+    v[y][x]=true;
+    while (st.length) {
+      const p=st.pop(); g.push(p);
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy])=>{
+        const nx=p.x+dx, ny=p.y+dy;
+        if(nx>=0&&nx<WIDTH&&ny>=0&&ny<12&&!v[ny][nx]&&b[ny][nx]===c){
+          v[ny][nx]=true; st.push({x:nx,y:ny});
+        }
+      });
+    }
+  }
+
+  function columnHeights(b) {
+    return [...Array(WIDTH)].map((_,x)=>{
+      let y=0; while (y<HEIGHT && b[y][x]) y++; return y;
+    });
   }
 
   return { getBestMove };
 })();
-
-if (typeof module !== "undefined") module.exports = PuyoAI;
