@@ -1,52 +1,71 @@
 /**
- * PuyoAI ProBuilder v3 - Grand Master Edition
- * 15連鎖以上の大連鎖構築に特化したアルゴリズム
- * 「消去抑制・連鎖ポテンシャル最大化・定型構築」
+ * PuyoAI ProBuilder v1.1 - Safety Grand Master Edition
+ * 15連鎖以上の大連鎖構築 & 3列目窒息絶対回避
  */
 
 const PuyoAI = (() => {
   const WIDTH = 6;
   const HEIGHT = 14;
   const COLORS = [1, 2, 3, 4];
-  const BEAM_WIDTH = 24; // 探索精度をさらに向上
+  const BEAM_WIDTH = 24;
 
   /* ================= 評価関数 ================= */
 
   function evaluate(board) {
     let score = 0;
 
-    // ① 連鎖シミュレーション
+    // ① 窒息・高さ管理（最優先）
+    const heightScore = heightManagement(board);
+    if (heightScore <= -1e14) return heightScore; // 窒息確定なら即座に返す
+    score += heightScore;
+
+    // ② 連鎖シミュレーション
     const sim = simulateChain(board);
-    
-    // 【重要】大連鎖特化：10連鎖未満の「今すぐ消える連鎖」は極めて低く評価する
-    // これにより、AIは「今すぐ消す」よりも「種を育てる」ことを優先する
     if (sim.chains > 0) {
       if (sim.chains < 10) {
-        score -= 2000000; // 小連鎖はペナルティ（暴発防止）
+        score -= 2000000; // 小連鎖ペナルティ
       } else {
-        score += sim.chains * 1000000; // 10連鎖以上なら超高評価
+        score += sim.chains * 1000000; // 大連鎖ボーナス
       }
     }
 
-    // ② 連鎖ポテンシャル（将来の連鎖の可能性）
-    // 盤面にある「3連結」や「2連結」の数を、将来の連鎖数として評価
+    // ③ 連鎖ポテンシャル
     score += countPotentialConnections(board);
 
-    // ③ 地形評価（大連鎖のための土台作り）
+    // ④ 地形評価
     score += terrainEvaluation(board);
 
-    // ④ 色の分散（多色をバランスよく配置）
+    // ⑤ 色の分散
     score += colorDiversity(board);
-
-    // ⑤ 窒息・高さ管理
-    score += heightManagement(board);
 
     return score;
   }
 
   /* ================= 評価詳細 ================= */
 
-  // 将来の連鎖の種を数える
+  function heightManagement(board) {
+    let s = 0;
+    const h = columnHeights(board);
+    
+    // 【最優先】3列目(X=2)の窒息絶対回避
+    // Y=11が埋まることは、どんな大連鎖よりも避けるべき事象
+    if (h[2] >= 12) return -1e15; // 完全にゲームオーバー
+    if (h[2] >= 11) s -= 1e12;    // 窒息寸前（極めて危険）
+    if (h[2] >= 10) s -= 1e9;     // 警告レベル
+    
+    // 他の列の高さ管理
+    for (let x = 0; x < WIDTH; x++) {
+      if (h[x] >= 12) s -= 1e10; // 3列目以外でも窒息は避ける
+      if (h[x] >= 11) s -= 1e8;
+    }
+    
+    // 全体の高さに対するペナルティ
+    const maxHeight = Math.max(...h);
+    s -= maxHeight * 100000;
+    
+    return s;
+  }
+
   function countPotentialConnections(board) {
     let s = 0;
     const visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
@@ -59,40 +78,29 @@ const PuyoAI = (() => {
           dfs(board, x, y, visited, group);
           if (group.length === 2) groups[2]++;
           if (group.length === 3) groups[3]++;
-          if (group.length >= 4) s -= 500000; // 発火していない4連結は「ゴミ」または「暴発の元」
+          if (group.length >= 4) s -= 500000;
         }
       }
     }
-    
-    // 3連結は非常に価値が高い（あと1つで連鎖になるため）
     s += groups[3] * 800000;
-    // 2連結も価値がある
     s += groups[2] * 100000;
-    
     return s;
   }
 
-  // 地形評価：大連鎖に適した「階段」や「GTR」を促す
   function terrainEvaluation(board) {
     let s = 0;
     const h = columnHeights(board);
-    
     for (let i = 0; i < WIDTH - 1; i++) {
       const d = h[i] - h[i + 1];
-      // 理想的な段差：左が高い（階段積み）または適度な凹凸
       if (d === 1 || d === 2) s += 50000;
-      if (d === 0) s -= 30000; // 平坦は連鎖が繋がりにくい
-      if (Math.abs(d) >= 3) s -= 100000; // 高低差がありすぎると分断される
+      if (d === 0) s -= 30000;
+      if (Math.abs(d) >= 3) s -= 100000;
     }
-
-    // 端（1列目、6列目）を高く使い、中央を低く保つ（U字構築の促進）
     s += (h[0] + h[5]) * 20000;
-    s -= h[2] * 30000; // 3列目は常に低く（窒息防止）
-
+    s -= h[2] * 30000;
     return s;
   }
 
-  // 色の分散：同じ色が固まりすぎないようにし、連鎖の多色化を促す
   function colorDiversity(board) {
     const counts = {};
     let total = 0;
@@ -105,26 +113,13 @@ const PuyoAI = (() => {
       }
     }
     if (total === 0) return 0;
-    
     let variance = 0;
     const avg = total / COLORS.length;
     COLORS.forEach(c => {
       const count = counts[c] || 0;
       variance += Math.abs(count - avg);
     });
-    
-    return -variance * 10000; // 色が偏りすぎると連鎖が組みにくい
-  }
-
-  function heightManagement(board) {
-    let s = 0;
-    const h = columnHeights(board);
-    if (h[2] >= 10) s -= 5000000; // 3列目限界
-    
-    const maxHeight = Math.max(...h);
-    if (maxHeight >= 11) s -= 2000000; // 全体限界
-    
-    return s;
+    return -variance * 10000;
   }
 
   /* ================= 探索（ビームサーチ） ================= */
@@ -152,7 +147,6 @@ const PuyoAI = (() => {
             const nextBoard = applyMove(leaf.board, p1, p2, x, r);
             if (!nextBoard) continue;
 
-            // 深い階層ほど評価を重視する（将来の形を優先）
             const moveScore = evaluate(nextBoard) * (depth + 1);
             const totalScore = leaf.totalScore + moveScore;
             
@@ -185,11 +179,11 @@ const PuyoAI = (() => {
 
     for (let [px] of pos) if (px < 0 || px >= WIDTH) return null;
     
-    const sortedPos = pos.sort((a, b) => a[1] - b[1]);
+    const sortedPos = [...pos].sort((a, b) => a[1] - b[1]);
     for (let [px, _, c] of sortedPos) {
       let y = 0;
-      while (y < 12 && b[y][px]) y++;
-      if (y >= 12) return null;
+      while (y < 14 && b[y][px]) y++;
+      if (y >= 14) return null;
       b[y][px] = c;
     }
     return b;
@@ -251,7 +245,7 @@ const PuyoAI = (() => {
   function columnHeights(b) {
     return [...Array(WIDTH)].map((_, x) => {
       let y = 0;
-      while (y < 12 && b[y][x]) y++;
+      while (y < 14 && b[y][x]) y++;
       return y;
     });
   }
