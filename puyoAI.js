@@ -1,128 +1,96 @@
 /**
- * PuyoAI ProBuilder v5.0 - GTR Master Edition
- * keepuyo.comのGTR定石を全面的に反映
- * 15連鎖以上の大連鎖構築 & 3列目窒息絶対回避
+ * PuyoAI GTR-Specialist v6.0
+ * keepuyo.comのGTR定石を絶対最優先 (過去の汎用学習をリセット)
  */
 
 const PuyoAI = (() => {
   const WIDTH = 6;
-  const HEIGHT = 14; 
-  const COLORS = [1, 2, 3, 4];
-  const BEAM_WIDTH = 128; 
+  const HEIGHT = 14;
+  const BEAM_WIDTH = 128;
   const MAX_CONTINUOUS_DISCARD = 4;
 
-  /* ================= 評価関数 ================= */
+  let currentDiscardCount = 0;
+  let moveHistory = []; // 初手からの履歴を追跡
+
+  /* ================= 1. GTR完全定型化（初手2手） ================= */
+  
+  function getFixedInitialMove(tsumos) {
+    const [p1, p2] = tsumos[0]; // 初手
+    const [p3, p4] = tsumos[1]; // 2手目
+    
+    // 色のパターン判定 (A, B, C)
+    const A = p1;
+    const B = (p2 !== A) ? p2 : null;
+    
+    // AAAB型
+    if (p1 === p2 && p3 === A && p4 !== A) return { x: 2, rotation: 0 }; // 3列目縦
+    if (p1 === p2 && p4 === A && p3 !== A) return { x: 2, rotation: 2 }; 
+    
+    // ABAB / AABB型
+    if (p1 !== p2 && p3 === p1 && p4 === p2) return { x: 0, rotation: 1 }; // 1-2列目横
+    
+    // ABAC型
+    if (p1 !== p2 && p3 === p1 && p4 !== p1 && p4 !== p2) return { x: 0, rotation: 0 }; // 1列目縦
+    
+    // AABC型
+    if (p1 === p2 && p3 !== p1 && p4 !== p1 && p3 !== p4) return { x: 0, rotation: 1 }; // 1-2列目横
+
+    return null; // 定型外は評価関数に任せる
+  }
+
+  /* ================= 2. GTR特化型評価関数 ================= */
 
   function evaluate(board, discardCount) {
     const h = columnHeights(board);
-    if (h[2] >= 12) return -Infinity;
+    if (h[2] >= 12) return -Infinity; // 3列目窒息は即終了
 
     let score = 0;
 
-    // ① 高さ管理（絶対安全）
-    if (h[2] >= 11) score -= 1e18;
-    if (h[2] >= 10) score -= 1e15;
-    for (let x = 0; x < WIDTH; x++) {
-      if (x !== 2 && h[x] >= 12) score -= 1e12;
+    // A. GTRの形 (keepuyo.com ステップ1-5)
+    // 1列目(0,0)-(0,2), 2列目(1,0)-(1,1), 3列目(2,0) の特定パターンを極めて高く評価
+    const gtrColor = board[0][0];
+    if (gtrColor) {
+      // 土台の底 (1,0), (2,0)
+      if (board[0][1] === gtrColor) score += 1e12;
+      if (board[1][0] === gtrColor) score += 1e12;
+      if (board[2][0] === gtrColor) score += 1e12;
+      
+      // 折り返し (0,1), (0,2), (1,1)
+      const turnColor = board[1][1];
+      if (turnColor && turnColor !== gtrColor) {
+        if (board[0][1] === turnColor) score += 1e11;
+        if (board[0][2] === turnColor) score += 1e11;
+        if (board[1][2] === turnColor) score += 1e11;
+      }
     }
 
-    // ② GTR定石評価（keepuyo.comベース）
-    score += evaluateGTRStructure(board);
+    // B. 3列目の「門」 (keepuyo.com ステップ3)
+    // 3列目が他の列より低い状態を維持
+    if (h[2] < h[1] && h[2] < h[3]) score += 1e10;
+    score -= h[2] * 1e9; // 3列目は低ければ低いほど良い
 
-    // ③ 連鎖シミュレーション
+    // C. 土台基礎 (Y字・L字)
+    for (let x = 3; x < WIDTH; x++) {
+      if (board[0][x] && board[0][x] === board[1][x]) score += 1e8; // 縦L字
+      if (x < WIDTH - 1 && board[0][x] && board[0][x] === board[0][x+1]) score += 1e8; // 横L字
+    }
+
+    // D. 連鎖評価 (10連鎖以上のみ加点)
     const sim = simulateChain(board);
-    if (sim.chains > 0) {
-      if (sim.chains < 10) score -= 1e7; 
-      else score += sim.chains * 5e6; 
+    if (sim.chains >= 10) {
+      score += sim.chains * 1e13; 
+    } else if (sim.chains > 0) {
+      score -= 1e10; // 小連鎖は暴発としてペナルティ
     }
 
-    // ④ 連鎖ポテンシャル & 連結
-    score += countPotentialConnections(board);
-
-    // ⑤ 地形評価（U字・S字構築）
-    score += terrainEvaluation(board);
-
-    // ⑥ ゴミ捨てペナルティ
-    if (discardCount > 0) score -= discardCount * 2e6;
+    // E. 物理制約
+    if (h[2] >= 11) score -= 1e15;
+    if (discardCount > 0) score -= discardCount * 1e8;
 
     return score;
   }
 
-  /* ================= GTR定石評価ロジック ================= */
-
-  function evaluateGTRStructure(board) {
-    let s = 0;
-    
-    // 1. GTRの核 (1列目, 2列目, 3列目の左下部分)
-    // 理想的なGTRの形: (0,0),(1,0),(2,0)が同色、(0,1)が別色、(0,2),(1,1),(1,2)が同色
-    const baseColor = board[0][0];
-    if (baseColor) {
-      if (board[0][1] === baseColor && board[0][2] === baseColor) s += 1e6; // 1列目のL字
-      if (board[1][0] === baseColor && board[2][0] === baseColor) s += 1e6; // 底面の横並び
-      
-      // 折り返し部分の評価
-      const turnColor = board[1][1];
-      if (turnColor && turnColor !== baseColor) {
-        if (board[0][1] === turnColor) s += 5e5;
-        if (board[1][2] === turnColor) s += 5e5;
-      }
-    }
-
-    // 2. 土台基礎 (Y字, L字)
-    // 4列目以降の連結を評価
-    for (let x = 3; x < WIDTH; x++) {
-      const c = board[0][x];
-      if (c) {
-        if (board[1][x] === c) s += 3e5; // 縦連結
-        if (x < WIDTH - 1 && board[0][x+1] === c) s += 3e5; // 横連結
-      }
-    }
-
-    // 3. 3列目の「門」の維持
-    const h = columnHeights(board);
-    if (h[2] < h[1] && h[2] < h[3]) s += 1e6; // 3列目が凹んでいる状態を高く評価
-
-    return s;
-  }
-
-  /* ================= 評価詳細 ================= */
-
-  function countPotentialConnections(board) {
-    let s = 0;
-    const visited = Array.from({ length: 14 }, () => Array(WIDTH).fill(false));
-    let groups = { 2: 0, 3: 0 };
-    for (let y = 0; y < 12; y++) { 
-      for (let x = 0; x < WIDTH; x++) {
-        if (!visited[y][x] && board[y][x]) {
-          let group = [];
-          dfs(board, x, y, visited, group);
-          if (group.length === 2) groups[2]++;
-          if (group.length === 3) groups[3]++;
-        }
-      }
-    }
-    s += groups[3] * 1e6;
-    s += groups[2] * 2e5;
-    return s;
-  }
-
-  function terrainEvaluation(board) {
-    let s = 0;
-    const h = columnHeights(board);
-    // 連鎖尾の段差 (右肩上がり)
-    for (let i = 3; i < WIDTH - 1; i++) {
-      if (h[i+1] >= h[i]) s += 2e5;
-    }
-    // 全体的な平坦度
-    for (let i = 0; i < WIDTH - 1; i++) {
-      if (Math.abs(h[i] - h[i+1]) > 2) s -= 5e5;
-    }
-    return s;
-  }
-
-  /* ================= 探索（GTR最適化ビームサーチ） ================= */
-
-  let currentDiscardCount = 0;
+  /* ================= 3. 探索エンジン ================= */
 
   function getBestMove(board, current, next1, next2) {
     const tsumos = [
@@ -130,7 +98,16 @@ const PuyoAI = (() => {
       [next1.axisColor, next1.childColor],
       [next2.axisColor, next2.childColor]
     ];
-    
+
+    // 初手付近なら定型手をチェック
+    if (moveHistory.length < 2) {
+      const fixedMove = getFixedInitialMove(tsumos);
+      if (fixedMove) {
+        moveHistory.push(fixedMove);
+        return fixedMove;
+      }
+    }
+
     let leaves = [{
       board: board,
       firstMove: null,
@@ -147,10 +124,10 @@ const PuyoAI = (() => {
           for (let r = 0; r < 4; r++) {
             if (!canPlacePuyo(leaf.board, x, r)) continue;
             const result = applyMoveWithDiscard(leaf.board, p1, p2, x, r, leaf.discardCount);
-            if (!result) continue; 
-            if (columnHeights(result.board)[2] >= 12) continue; 
+            if (!result) continue;
+            if (columnHeights(result.board)[2] >= 12) continue;
 
-            const moveScore = evaluate(result.board, result.discardCount) * (depth + 1);
+            const moveScore = evaluate(result.board, result.discardCount);
             const totalScore = leaf.totalScore + moveScore;
             const move = { x, rotation: r };
             nextLeaves.push({
@@ -171,12 +148,13 @@ const PuyoAI = (() => {
     if (bestLeaf) {
       if (bestLeaf.didDiscard) currentDiscardCount++;
       else currentDiscardCount = 0;
+      moveHistory.push(bestLeaf.firstMove);
       return bestLeaf.firstMove;
     }
     return { x: 0, rotation: 0 };
   }
 
-  /* ================= 物理仕様・基本処理 ================= */
+  /* ================= 4. 物理仕様・基本処理 ================= */
 
   function canPlacePuyo(board, x, r) {
     const h = columnHeights(board);
@@ -188,11 +166,11 @@ const PuyoAI = (() => {
 
     for (let puyo of puyoPositions) {
       const tx = puyo.x, ty = puyo.y;
-      if (tx < 0 || tx >= WIDTH || ty >= 14) return false; 
+      if (tx < 0 || tx >= WIDTH || ty >= 14) return false;
       if (ty >= 11) {
         const step = tx > 2 ? 1 : -1;
         if (tx !== 2) {
-          for (let curr = 2; curr !== tx; curr += step) if (h[curr] < 12) return false; 
+          for (let curr = 2; curr !== tx; curr += step) if (h[curr] < 12) return false;
         }
         if (ty >= 13 && tx !== 2) {
           const adjStep = tx > 2 ? -1 : 1;
@@ -221,7 +199,7 @@ const PuyoAI = (() => {
       else b[y][px] = c;
     }
     let nextDiscardCount = didDiscard ? discardCount + 1 : 0;
-    if (nextDiscardCount > MAX_CONTINUOUS_DISCARD) return null; 
+    if (nextDiscardCount > MAX_CONTINUOUS_DISCARD) return null;
     return { board: b, discardCount: nextDiscardCount, didDiscard: didDiscard };
   }
 
@@ -231,7 +209,7 @@ const PuyoAI = (() => {
     while (true) {
       const del = [];
       const vis = Array.from({ length: 14 }, () => Array(WIDTH).fill(false));
-      for (let y = 0; y < 12; y++) { 
+      for (let y = 0; y < 12; y++) {
         for (let x = 0; x < WIDTH; x++) {
           if (b[y][x] && !vis[y][x]) {
             const g = [];
@@ -286,26 +264,5 @@ const PuyoAI = (() => {
     });
   }
 
-  function findMaxChainPuyo(board) {
-    let maxChain = 0;
-    let bestPos = null;
-    for (let x = 0; x < WIDTH; x++) {
-      for (let y = 0; y < 12; y++) {
-        if (board[y][x] === 0) {
-          for (let c of COLORS) {
-            const b = board.map(r => [...r]);
-            b[y][x] = c;
-            const res = simulateChain(b);
-            if (res.chains > maxChain) {
-              maxChain = res.chains;
-              bestPos = { x, y, chain: res.chains };
-            }
-          }
-        }
-      }
-    }
-    return bestPos;
-  }
-
-  return { getBestMove, findMaxChainPuyo };
+  return { getBestMove };
 })();
