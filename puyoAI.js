@@ -1,17 +1,15 @@
 /**
- * puyoAI.js - GTR Master & Physics Strict Edition (v7.0)
+ * puyoAI.js - GTR Absolute Start & Physics Strict Edition (v7.1)
  * 
- * 特徴:
- * 1. 14段目(Y=13)設置の物理制約（手前Y=11足場条件）の厳密実装
- * 2. 14段目消滅仕様 & 連続ゴミ捨て4回制限
- * 3. keepuyo.com準拠のGTR絶対始動ロジック
- * 4. 3列目(X=2)窒息の絶対回避
- * 5. 15連鎖以上を狙う大連鎖・多重折り返し評価
+ * 修正点:
+ * 1. 初手・2手の定型化を強化し、GTR始動を絶対化
+ * 2. GTRの核が完成するまで他の構築を禁止する超強力なバイアス
+ * 3. 14段目(Y=13)設置の物理制約（手前Y=11足場条件）の厳密維持
  */
 
 const PuyoAI = (() => {
   const WIDTH = 6;
-  const HEIGHT = 14; // 13段目(Y=12), 14段目(Y=13)を含む
+  const HEIGHT = 14;
   const GHOST_Y = 13;
   const DEAD_X = 2;
   const DEAD_Y = 11;
@@ -27,20 +25,39 @@ const PuyoAI = (() => {
     const [p1, p2] = tsumos[0]; // 初手
     const [p3, p4] = tsumos[1]; // 2手目
     
+    // 色のパターン判定
     const A = p1;
-    const B = (p2 !== A) ? p2 : null;
+    const B = (p2 !== A) ? p2 : (p3 !== A ? p3 : p4);
     
-    // AAAB型: 1列目AA横、2列目A、3列目B
-    if (p1 === p2 && p3 === A && p4 !== A) return { x: 0, rotation: 1 }; 
+    // AAAB型 (初手AA, 2手目AB)
+    if (p1 === p2 && (p3 === A || p4 === A) && p3 !== p4) {
+      if (moveHistory.length === 0) return { x: 0, rotation: 1 }; // 1-2列目横置き(AA)
+      if (moveHistory.length === 1) {
+        // 2手目AB: 1列目にA, 2列目にBを置く (L字形成)
+        return (p3 === A) ? { x: 0, rotation: 1 } : { x: 0, rotation: 3 };
+      }
+    }
     
-    // ABAB / AABB型: 1-2列目横、1-2列目横
-    if (p1 !== p2 && p3 === p1 && p4 === p2) return { x: 0, rotation: 1 }; 
+    // ABAB型 (初手AB, 2手目AB)
+    if (p1 !== p2 && p1 === p3 && p2 === p4) {
+      if (moveHistory.length === 0) return { x: 0, rotation: 1 }; // 1-2列目横置き(AB)
+      if (moveHistory.length === 1) return { x: 0, rotation: 1 }; // 1-2列目横置き(AB) -> GTR底面完成
+    }
     
-    // ABAC型: 1-2列目横、1-2列目横
-    if (p1 !== p2 && p3 === p1 && p4 !== p1 && p4 !== p2) return { x: 0, rotation: 1 }; 
+    // ABAC型 (初手AB, 2手目AC)
+    if (p1 !== p2 && p1 === p3 && p4 !== p1 && p4 !== p2) {
+      if (moveHistory.length === 0) return { x: 0, rotation: 1 };
+      if (moveHistory.length === 1) return { x: 0, rotation: 1 };
+    }
     
-    // AABC型: 1-2列目横、1-2列目横
-    if (p1 === p2 && p3 !== p1 && p4 !== p1 && p3 !== p4) return { x: 0, rotation: 1 }; 
+    // AABC型 (初手AA, 2手目BC)
+    if (p1 === p2 && p3 !== p1 && p4 !== p1 && p3 !== p4) {
+      if (moveHistory.length === 0) return { x: 0, rotation: 1 };
+      if (moveHistory.length === 1) return { x: 0, rotation: 1 };
+    }
+
+    // 汎用的なGTR始動 (1-2列目横置きを優先)
+    if (moveHistory.length === 0) return { x: 0, rotation: 1 };
 
     return null;
   }
@@ -59,10 +76,8 @@ const PuyoAI = (() => {
       const tx = puyo.x, ty = puyo.y;
       if (tx < 0 || tx >= WIDTH || ty >= HEIGHT) return false;
       
-      // 3列目窒息チェック
       if (tx === DEAD_X && ty >= DEAD_Y) return false;
 
-      // 12段目(Y=11)の壁による進入不可チェック
       if (ty >= 11) {
         const step = tx > DEAD_X ? -1 : 1;
         if (tx !== DEAD_X) {
@@ -72,54 +87,57 @@ const PuyoAI = (() => {
         }
       }
 
-      // 14段目(Y=13)設置のための足場条件 (手前Y=11が必要)
       if (ty === GHOST_Y) {
-        if (h[tx] < GHOST_Y - 1) return false; // 自分の列のY=12が必要
+        if (h[tx] < GHOST_Y - 1) return false;
         const neighborX = (tx <= DEAD_X) ? tx + 1 : tx - 1;
         if (neighborX >= 0 && neighborX < WIDTH) {
-          if (h[neighborX] < 12) return false; // 手前の列のY=11が必要
+          if (h[neighborX] < 12) return false;
         }
       }
     }
     return true;
   }
 
-  /* ================= 3. 評価関数 (keepuyo.com 定石) ================= */
+  /* ================= 3. 評価関数 (GTR絶対優先) ================= */
 
   function evaluate(board, chain, discardCount) {
     const h = columnHeights(board);
-    if (h[DEAD_X] >= DEAD_Y) return -1e18;
+    if (h[DEAD_X] >= DEAD_Y) return -1e20;
 
     let score = 0;
 
-    // A. 連鎖評価 (10連鎖未満は抑制、15連鎖以上を極大評価)
-    if (chain > 0) {
-      if (chain < 10) score -= 1e12;
-      else score += Math.pow(chain, 6) * 1e6;
-    }
-
-    // B. GTR定石評価 (keepuyo.com)
+    // GTRの核となる色を特定 (1列目1段目)
     const gtrColor = board[0][0];
+    
+    // A. GTR完成度評価 (keepuyo.com)
     if (gtrColor) {
-      // 1列目L字, 2列目底, 3列目底
-      if (board[1][0] === gtrColor && board[1][1] === gtrColor) score += 1e10;
-      if (board[0][1] === gtrColor) score += 5e9;
-      if (board[0][2] === gtrColor) score += 5e9;
+      // 1列目L字: (0,0), (0,1), (1,1)
+      if (board[1][0] === gtrColor) score += 1e15;
+      if (board[1][1] === gtrColor) score += 1e15;
+      // 2列目底面: (1,0)
+      if (board[0][1] === gtrColor) score += 1e14;
+      // 3列目底面: (2,0)
+      if (board[0][2] === gtrColor) score += 1e14;
+    } else {
+      // GTRが始まっていない状態への巨大なペナルティ
+      score -= 1e18;
     }
     
-    // 3列目の「門」の維持 (凹型)
-    if (h[2] > 0 && h[2] < h[1] && h[2] < h[3]) score += 8e9;
+    // B. 3列目の「門」の維持
+    if (h[2] > 0 && h[2] < h[1] && h[2] < h[3]) score += 1e12;
+    score -= h[2] * 1e10; // 3列目は低いほど良い
 
-    // C. 土台基礎 (Y字型優先)
+    // C. 連鎖評価 (GTR完成後のみ重視)
+    if (chain >= 10) score += Math.pow(chain, 8);
+    else if (chain > 0) score -= 1e13; // 暴発ペナルティ
+
+    // D. 土台基礎・連鎖尾
     for (let x = 3; x < 5; x++) {
-      if (board[0][x] && board[0][x] === board[0][x+1]) score += 1e8;
+      if (board[0][x] && board[0][x] === board[0][x+1]) score += 1e9;
     }
+    if (h[5] >= h[4] && h[4] >= h[3]) score += 1e8;
 
-    // D. 連鎖尾 (右肩上がり)
-    if (h[5] >= h[4] && h[4] >= h[3]) score += 5e7;
-
-    // E. ゴミ捨てペナルティ
-    score -= discardCount * 1e9;
+    score -= discardCount * 1e11;
 
     return score;
   }
@@ -133,7 +151,7 @@ const PuyoAI = (() => {
       [next2.axisColor, next2.childColor]
     ];
 
-    // 初手定型チェック
+    // 初手・2手の定型化を強制
     if (moveHistory.length < 2) {
       const fixed = getFixedInitialMove(tsumos);
       if (fixed) {
@@ -177,7 +195,7 @@ const PuyoAI = (() => {
       moveHistory.push(best.firstMove);
       return best.firstMove;
     }
-    return { x: 2, rotation: 0 };
+    return { x: 0, rotation: 1 }; // デフォルトは1-2列目横置き
   }
 
   /* ================= 5. 基本処理 ================= */
