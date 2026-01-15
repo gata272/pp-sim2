@@ -1,15 +1,14 @@
 /**
- * PuyoAI ProBuilder v4.1 - Pattern & Rollout Hybrid Edition
+ * PuyoAI ProBuilder v5.0 - GTR Master Edition
+ * keepuyo.comのGTR定石を全面的に反映
  * 15連鎖以上の大連鎖構築 & 3列目窒息絶対回避
- * 提供コードの「パターン検出」と「ロールアウト」の概念を統合
  */
 
 const PuyoAI = (() => {
   const WIDTH = 6;
   const HEIGHT = 14; 
   const COLORS = [1, 2, 3, 4];
-  const BEAM_WIDTH = 64; // ロールアウトを導入するため、ビーム幅を調整
-  const ROLLOUT_COUNT = 5; // 各候補局面でのランダムプレイアウト数
+  const BEAM_WIDTH = 128; 
   const MAX_CONTINUOUS_DISCARD = 4;
 
   /* ================= 評価関数 ================= */
@@ -21,93 +20,69 @@ const PuyoAI = (() => {
     let score = 0;
 
     // ① 高さ管理（絶対安全）
-    if (h[2] >= 11) score -= 1e15;
-    if (h[2] >= 10) score -= 1e12;
+    if (h[2] >= 11) score -= 1e18;
+    if (h[2] >= 10) score -= 1e15;
     for (let x = 0; x < WIDTH; x++) {
-      if (x !== 2 && h[x] >= 12) score -= 1e10;
+      if (x !== 2 && h[x] >= 12) score -= 1e12;
     }
 
-    // ② 連鎖シミュレーション
+    // ② GTR定石評価（keepuyo.comベース）
+    score += evaluateGTRStructure(board);
+
+    // ③ 連鎖シミュレーション
     const sim = simulateChain(board);
     if (sim.chains > 0) {
-      if (sim.chains < 10) score -= 5000000; 
-      else score += sim.chains * 2000000; 
+      if (sim.chains < 10) score -= 1e7; 
+      else score += sim.chains * 5e6; 
     }
 
-    // ③ パターン検出（提供コードのロジックを統合）
-    score += patternScore(board) * 500000;
-
-    // ④ 連鎖ポテンシャル
+    // ④ 連鎖ポテンシャル & 連結
     score += countPotentialConnections(board);
 
-    // ⑤ 地形評価（U字構築）
+    // ⑤ 地形評価（U字・S字構築）
     score += terrainEvaluation(board);
 
-    // ⑥ 色の分散
-    score += colorDiversity(board);
-
-    // ⑦ ゴミ捨てペナルティ
-    if (discardCount > 0) score -= discardCount * 1000000;
+    // ⑥ ゴミ捨てペナルティ
+    if (discardCount > 0) score -= discardCount * 2e6;
 
     return score;
   }
 
-  /* ================= パターン検出（提供コードより） ================= */
+  /* ================= GTR定石評価ロジック ================= */
 
-  function patternScore(board) {
-    let score = 0;
-    // 横トリプル（L字や階段の基礎）
-    for (let y = 0; y < 12; y++) {
-      for (let x = 0; x <= WIDTH - 3; x++) {
-        const a = board[y][x], b = board[y][x+1], c = board[y][x+2];
-        if (a && a === b && b === c) {
-          if (y + 2 < 12) {
-            const up1 = board[y+1][x+1], up2 = board[y+2][x+1];
-            if (up1 && up2 && up2 === a && up1 !== a) score += 1;
-          }
-        }
+  function evaluateGTRStructure(board) {
+    let s = 0;
+    
+    // 1. GTRの核 (1列目, 2列目, 3列目の左下部分)
+    // 理想的なGTRの形: (0,0),(1,0),(2,0)が同色、(0,1)が別色、(0,2),(1,1),(1,2)が同色
+    const baseColor = board[0][0];
+    if (baseColor) {
+      if (board[0][1] === baseColor && board[0][2] === baseColor) s += 1e6; // 1列目のL字
+      if (board[1][0] === baseColor && board[2][0] === baseColor) s += 1e6; // 底面の横並び
+      
+      // 折り返し部分の評価
+      const turnColor = board[1][1];
+      if (turnColor && turnColor !== baseColor) {
+        if (board[0][1] === turnColor) s += 5e5;
+        if (board[1][2] === turnColor) s += 5e5;
       }
     }
-    // 縦トリプル
-    for (let x = 0; x < WIDTH; x++) {
-      for (let y = 0; y <= 12 - 3; y++) {
-        const a = board[y][x], b = board[y+1][x], c = board[y+2][x];
-        if (a && a === b && b === c) {
-          if (y + 4 < 12) {
-            const up1 = board[y+3][x], up2 = board[y+4][x];
-            if (up1 && up2 && up2 === a && up1 !== a) score += 1;
-          }
-        }
+
+    // 2. 土台基礎 (Y字, L字)
+    // 4列目以降の連結を評価
+    for (let x = 3; x < WIDTH; x++) {
+      const c = board[0][x];
+      if (c) {
+        if (board[1][x] === c) s += 3e5; // 縦連結
+        if (x < WIDTH - 1 && board[0][x+1] === c) s += 3e5; // 横連結
       }
     }
-    return score;
-  }
 
-  /* ================= ロールアウト（提供コードの概念） ================= */
+    // 3. 3列目の「門」の維持
+    const h = columnHeights(board);
+    if (h[2] < h[1] && h[2] < h[3]) s += 1e6; // 3列目が凹んでいる状態を高く評価
 
-  function rolloutMaxChain(startBoard) {
-    let b = startBoard.map(row => [...row]);
-    let maxChainSeen = 0;
-    // 簡易的なロールアウト（5手先までランダムに置いて最大連鎖を計測）
-    for (let turn = 0; turn < 5; turn++) {
-      const p1 = COLORS[Math.floor(Math.random() * 4)];
-      const p2 = COLORS[Math.floor(Math.random() * 4)];
-      const moves = [];
-      for (let x = 0; x < WIDTH; x++) {
-        for (let r = 0; r < 4; r++) {
-          if (canPlacePuyo(b, x, r)) moves.push({x, r});
-        }
-      }
-      if (moves.length === 0) break;
-      const move = moves[Math.floor(Math.random() * moves.length)];
-      const next = applyMoveWithDiscard(b, p1, p2, move.x, move.r, 0);
-      if (!next) break;
-      b = next.board;
-      const sim = simulateChain(b);
-      if (sim.chains > maxChainSeen) maxChainSeen = sim.chains;
-      if (columnHeights(b)[2] >= 12) break;
-    }
-    return maxChainSeen;
+    return s;
   }
 
   /* ================= 評価詳細 ================= */
@@ -126,47 +101,26 @@ const PuyoAI = (() => {
         }
       }
     }
-    s += groups[3] * 1000000;
-    s += groups[2] * 200000;
+    s += groups[3] * 1e6;
+    s += groups[2] * 2e5;
     return s;
   }
 
   function terrainEvaluation(board) {
     let s = 0;
     const h = columnHeights(board);
-    for (let i = 0; i < WIDTH - 1; i++) {
-      const d = h[i] - h[i + 1];
-      if (d === 1 || d === 2) s += 100000;
-      if (d === 0) s -= 50000;
-      if (Math.abs(d) >= 3) s -= 200000;
+    // 連鎖尾の段差 (右肩上がり)
+    for (let i = 3; i < WIDTH - 1; i++) {
+      if (h[i+1] >= h[i]) s += 2e5;
     }
-    s += (h[0] + h[5]) * 50000;
-    s -= h[2] * 100000; 
+    // 全体的な平坦度
+    for (let i = 0; i < WIDTH - 1; i++) {
+      if (Math.abs(h[i] - h[i+1]) > 2) s -= 5e5;
+    }
     return s;
   }
 
-  function colorDiversity(board) {
-    const counts = {};
-    let total = 0;
-    for (let y = 0; y < 12; y++) {
-      for (let x = 0; x < WIDTH; x++) {
-        if (board[y][x]) {
-          counts[board[y][x]] = (counts[board[y][x]] || 0) + 1;
-          total++;
-        }
-      }
-    }
-    if (total === 0) return 0;
-    let variance = 0;
-    const avg = total / COLORS.length;
-    COLORS.forEach(c => {
-      const count = counts[c] || 0;
-      variance += Math.abs(count - avg);
-    });
-    return -variance * 20000;
-  }
-
-  /* ================= 探索（ハイブリッド・ビームサーチ） ================= */
+  /* ================= 探索（GTR最適化ビームサーチ） ================= */
 
   let currentDiscardCount = 0;
 
@@ -196,17 +150,7 @@ const PuyoAI = (() => {
             if (!result) continue; 
             if (columnHeights(result.board)[2] >= 12) continue; 
 
-            let moveScore = evaluate(result.board, result.discardCount) * (depth + 1);
-            
-            // 最終深さでロールアウト評価を追加
-            if (depth === tsumos.length - 1) {
-              let rolloutMax = 0;
-              for (let i = 0; i < ROLLOUT_COUNT; i++) {
-                rolloutMax = Math.max(rolloutMax, rolloutMaxChain(result.board));
-              }
-              moveScore += rolloutMax * 1500000;
-            }
-
+            const moveScore = evaluate(result.board, result.discardCount) * (depth + 1);
             const totalScore = leaf.totalScore + moveScore;
             const move = { x, rotation: r };
             nextLeaves.push({
@@ -229,7 +173,6 @@ const PuyoAI = (() => {
       else currentDiscardCount = 0;
       return bestLeaf.firstMove;
     }
-    for (let x = 0; x < WIDTH; x++) if (x !== 2) return { x, rotation: 0 };
     return { x: 0, rotation: 0 };
   }
 
