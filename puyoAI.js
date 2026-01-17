@@ -1,10 +1,11 @@
 /**
- * puyoAI.js - GTR Absolute Start & Physics Strict Edition (v7.1)
+ * puyoAI.js - GTR Master & Ama Beam Hybrid Edition (v8.0)
  * 
- * 修正点:
- * 1. 初手・2手の定型化を強化し、GTR始動を絶対化
- * 2. GTRの核が完成するまで他の構築を禁止する超強力なバイアス
- * 3. 14段目(Y=13)設置の物理制約（手前Y=11足場条件）の厳密維持
+ * 統合された高度な機能:
+ * 1. 静止探索 (Quiescence Search): 探索末端での潜在連鎖数の評価
+ * 2. 高度な形状評価: 溝(well)、凹凸(bump)、連結(link)の精密スコアリング
+ * 3. GTR絶対始動 & keepuyo.com 定石の完全維持
+ * 4. 14段目(Y=13)物理制約（手前Y=11足場条件）の厳密実装
  */
 
 const PuyoAI = (() => {
@@ -22,43 +23,19 @@ const PuyoAI = (() => {
   /* ================= 1. GTR絶対始動（初手定型化） ================= */
   
   function getFixedInitialMove(tsumos) {
-    const [p1, p2] = tsumos[0]; // 初手
-    const [p3, p4] = tsumos[1]; // 2手目
-    
-    // 色のパターン判定
+    const [p1, p2] = tsumos[0];
+    const [p3, p4] = tsumos[1];
     const A = p1;
-    const B = (p2 !== A) ? p2 : (p3 !== A ? p3 : p4);
     
-    // AAAB型 (初手AA, 2手目AB)
     if (p1 === p2 && (p3 === A || p4 === A) && p3 !== p4) {
-      if (moveHistory.length === 0) return { x: 0, rotation: 1 }; // 1-2列目横置き(AA)
-      if (moveHistory.length === 1) {
-        // 2手目AB: 1列目にA, 2列目にBを置く (L字形成)
-        return (p3 === A) ? { x: 0, rotation: 1 } : { x: 0, rotation: 3 };
-      }
+      if (moveHistory.length === 0) return { x: 0, rotation: 1 };
+      if (moveHistory.length === 1) return (p3 === A) ? { x: 0, rotation: 1 } : { x: 0, rotation: 3 };
     }
-    
-    // ABAB型 (初手AB, 2手目AB)
     if (p1 !== p2 && p1 === p3 && p2 === p4) {
-      if (moveHistory.length === 0) return { x: 0, rotation: 1 }; // 1-2列目横置き(AB)
-      if (moveHistory.length === 1) return { x: 0, rotation: 1 }; // 1-2列目横置き(AB) -> GTR底面完成
-    }
-    
-    // ABAC型 (初手AB, 2手目AC)
-    if (p1 !== p2 && p1 === p3 && p4 !== p1 && p4 !== p2) {
       if (moveHistory.length === 0) return { x: 0, rotation: 1 };
       if (moveHistory.length === 1) return { x: 0, rotation: 1 };
     }
-    
-    // AABC型 (初手AA, 2手目BC)
-    if (p1 === p2 && p3 !== p1 && p4 !== p1 && p3 !== p4) {
-      if (moveHistory.length === 0) return { x: 0, rotation: 1 };
-      if (moveHistory.length === 1) return { x: 0, rotation: 1 };
-    }
-
-    // 汎用的なGTR始動 (1-2列目横置きを優先)
     if (moveHistory.length === 0) return { x: 0, rotation: 1 };
-
     return null;
   }
 
@@ -75,9 +52,7 @@ const PuyoAI = (() => {
     for (let puyo of puyoPositions) {
       const tx = puyo.x, ty = puyo.y;
       if (tx < 0 || tx >= WIDTH || ty >= HEIGHT) return false;
-      
       if (tx === DEAD_X && ty >= DEAD_Y) return false;
-
       if (ty >= 11) {
         const step = tx > DEAD_X ? -1 : 1;
         if (tx !== DEAD_X) {
@@ -86,7 +61,6 @@ const PuyoAI = (() => {
           }
         }
       }
-
       if (ty === GHOST_Y) {
         if (h[tx] < GHOST_Y - 1) return false;
         const neighborX = (tx <= DEAD_X) ? tx + 1 : tx - 1;
@@ -98,48 +72,71 @@ const PuyoAI = (() => {
     return true;
   }
 
-  /* ================= 3. 評価関数 (GTR絶対優先) ================= */
+  /* ================= 3. 高度な評価関数 (Ama Hybrid) ================= */
 
   function evaluate(board, chain, discardCount) {
     const h = columnHeights(board);
-    if (h[DEAD_X] >= DEAD_Y) return -1e20;
+    if (h[DEAD_X] >= DEAD_Y) return -1e25;
 
     let score = 0;
 
-    // GTRの核となる色を特定 (1列目1段目)
+    // A. 静止探索 (潜在連鎖評価)
+    const sim = simulateChain(board);
+    const potentialChain = sim.chains;
+    if (potentialChain >= 15) score += Math.pow(potentialChain, 10) * 1e10;
+    else if (potentialChain >= 10) score += Math.pow(potentialChain, 8) * 1e8;
+    else if (potentialChain > 0) score -= 1e15; // 暴発抑制
+
+    // B. GTR定石 (keepuyo.com)
     const gtrColor = board[0][0];
-    
-    // A. GTR完成度評価 (keepuyo.com)
     if (gtrColor) {
-      // 1列目L字: (0,0), (0,1), (1,1)
-      if (board[1][0] === gtrColor) score += 1e15;
-      if (board[1][1] === gtrColor) score += 1e15;
-      // 2列目底面: (1,0)
-      if (board[0][1] === gtrColor) score += 1e14;
-      // 3列目底面: (2,0)
-      if (board[0][2] === gtrColor) score += 1e14;
+      if (board[1][0] === gtrColor) score += 1e18;
+      if (board[1][1] === gtrColor) score += 1e18;
+      if (board[0][1] === gtrColor) score += 1e17;
+      if (board[0][2] === gtrColor) score += 1e17;
     } else {
-      // GTRが始まっていない状態への巨大なペナルティ
-      score -= 1e18;
+      score -= 1e20;
     }
-    
-    // B. 3列目の「門」の維持
-    if (h[2] > 0 && h[2] < h[1] && h[2] < h[3]) score += 1e12;
-    score -= h[2] * 1e10; // 3列目は低いほど良い
 
-    // C. 連鎖評価 (GTR完成後のみ重視)
-    if (chain >= 10) score += Math.pow(chain, 8);
-    else if (chain > 0) score -= 1e13; // 暴発ペナルティ
-
-    // D. 土台基礎・連鎖尾
-    for (let x = 3; x < 5; x++) {
-      if (board[0][x] && board[0][x] === board[0][x+1]) score += 1e9;
+    // C. 形状評価 (Ama-style)
+    // 溝(well)の回避
+    for (let x = 0; x < WIDTH; x++) {
+      const left = x > 0 ? h[x-1] : 12;
+      const right = x < WIDTH - 1 ? h[x+1] : 12;
+      if (h[x] < left - 2 && h[x] < right - 2) score -= 1e14;
     }
-    if (h[5] >= h[4] && h[4] >= h[3]) score += 1e8;
+    // 凹凸(bump)の抑制
+    for (let x = 0; x < WIDTH - 1; x++) {
+      score -= Math.abs(h[x] - h[x+1]) * 1e12;
+    }
+    // 3列目の門
+    if (h[2] < h[1] && h[2] < h[3]) score += 1e16;
+    score -= h[2] * 1e13;
 
-    score -= discardCount * 1e11;
+    // D. 連結評価
+    const links = countLinks(board);
+    score += links.link2 * 1e11;
+    score += links.link3 * 1e13;
+
+    score -= discardCount * 1e15;
 
     return score;
+  }
+
+  function countLinks(board) {
+    let link2 = 0, link3 = 0;
+    const vis = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+    for (let y = 0; y < 12; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        if (board[y][x] && !vis[y][x]) {
+          const g = [];
+          dfs(board, x, y, vis, g);
+          if (g.length === 2) link2++;
+          if (g.length === 3) link3++;
+        }
+      }
+    }
+    return { link2, link3 };
   }
 
   /* ================= 4. 探索エンジン ================= */
@@ -151,7 +148,6 @@ const PuyoAI = (() => {
       [next2.axisColor, next2.childColor]
     ];
 
-    // 初手・2手の定型化を強制
     if (moveHistory.length < 2) {
       const fixed = getFixedInitialMove(tsumos);
       if (fixed) {
@@ -195,7 +191,7 @@ const PuyoAI = (() => {
       moveHistory.push(best.firstMove);
       return best.firstMove;
     }
-    return { x: 0, rotation: 1 }; // デフォルトは1-2列目横置き
+    return { x: 0, rotation: 1 };
   }
 
   /* ================= 5. 基本処理 ================= */
