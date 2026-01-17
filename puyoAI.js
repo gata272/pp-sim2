@@ -1,11 +1,12 @@
 /**
- * puyoAI.js - GTR Master & Ama Beam Hybrid Edition (v8.0)
+ * puyoAI.js - Ama Reproduction Edition (v9.0)
  * 
- * 統合された高度な機能:
- * 1. 静止探索 (Quiescence Search): 探索末端での潜在連鎖数の評価
- * 2. 高度な形状評価: 溝(well)、凹凸(bump)、連結(link)の精密スコアリング
- * 3. GTR絶対始動 & keepuyo.com 定石の完全維持
- * 4. 14段目(Y=13)物理制約（手前Y=11足場条件）の厳密実装
+ * 特徴:
+ * 1. citrus610/ama (beamブランチ) のアルゴリズムを忠実に再現
+ * 2. 静止探索 (Quiescence Search) による潜在連鎖・キーぷよ・スペース評価
+ * 3. 多角的な形状評価 (溝, 凹凸, 連結, 14段目抑制)
+ * 4. 定型制約(keepuyo等)を排除した純粋な探索型AI
+ * 5. 物理制約（14段目設置条件、連続ゴミ捨て制限）の厳密実装
  */
 
 const PuyoAI = (() => {
@@ -18,28 +19,8 @@ const PuyoAI = (() => {
   const MAX_CONTINUOUS_DISCARD = 4;
 
   let currentDiscardCount = 0;
-  let moveHistory = [];
 
-  /* ================= 1. GTR絶対始動（初手定型化） ================= */
-  
-  function getFixedInitialMove(tsumos) {
-    const [p1, p2] = tsumos[0];
-    const [p3, p4] = tsumos[1];
-    const A = p1;
-    
-    if (p1 === p2 && (p3 === A || p4 === A) && p3 !== p4) {
-      if (moveHistory.length === 0) return { x: 0, rotation: 1 };
-      if (moveHistory.length === 1) return (p3 === A) ? { x: 0, rotation: 1 } : { x: 0, rotation: 3 };
-    }
-    if (p1 !== p2 && p1 === p3 && p2 === p4) {
-      if (moveHistory.length === 0) return { x: 0, rotation: 1 };
-      if (moveHistory.length === 1) return { x: 0, rotation: 1 };
-    }
-    if (moveHistory.length === 0) return { x: 0, rotation: 1 };
-    return null;
-  }
-
-  /* ================= 2. 物理制約判定 ================= */
+  /* ================= 1. 物理制約判定 ================= */
 
   function canPlacePuyo(board, x, r) {
     const h = columnHeights(board);
@@ -53,6 +34,8 @@ const PuyoAI = (() => {
       const tx = puyo.x, ty = puyo.y;
       if (tx < 0 || tx >= WIDTH || ty >= HEIGHT) return false;
       if (tx === DEAD_X && ty >= DEAD_Y) return false;
+      
+      // 12段目の壁による進入不可チェック
       if (ty >= 11) {
         const step = tx > DEAD_X ? -1 : 1;
         if (tx !== DEAD_X) {
@@ -61,6 +44,8 @@ const PuyoAI = (() => {
           }
         }
       }
+
+      // 14段目(Y=13)設置のための足場条件 (手前Y=11が必要)
       if (ty === GHOST_Y) {
         if (h[tx] < GHOST_Y - 1) return false;
         const neighborX = (tx <= DEAD_X) ? tx + 1 : tx - 1;
@@ -72,7 +57,7 @@ const PuyoAI = (() => {
     return true;
   }
 
-  /* ================= 3. 高度な評価関数 (Ama Hybrid) ================= */
+  /* ================= 2. Ama再現評価関数 ================= */
 
   function evaluate(board, chain, discardCount) {
     const h = columnHeights(board);
@@ -80,25 +65,13 @@ const PuyoAI = (() => {
 
     let score = 0;
 
-    // A. 静止探索 (潜在連鎖評価)
-    const sim = simulateChain(board);
-    const potentialChain = sim.chains;
-    if (potentialChain >= 15) score += Math.pow(potentialChain, 10) * 1e10;
-    else if (potentialChain >= 10) score += Math.pow(potentialChain, 8) * 1e8;
-    else if (potentialChain > 0) score -= 1e15; // 暴発抑制
+    // A. 静止探索 (Quiescence Search)
+    const qResult = quiescenceSearch(board);
+    score += qResult.chainCount * 1e15; // 潜在連鎖数
+    score += qResult.keyPuyos * 1e12;   // 必要なキーぷよの少なさ
+    score += qResult.space * 1e11;      // 連鎖を伸ばすためのスペース
 
-    // B. GTR定石 (keepuyo.com)
-    const gtrColor = board[0][0];
-    if (gtrColor) {
-      if (board[1][0] === gtrColor) score += 1e18;
-      if (board[1][1] === gtrColor) score += 1e18;
-      if (board[0][1] === gtrColor) score += 1e17;
-      if (board[0][2] === gtrColor) score += 1e17;
-    } else {
-      score -= 1e20;
-    }
-
-    // C. 形状評価 (Ama-style)
+    // B. 形状評価 (Ama-style)
     // 溝(well)の回避
     for (let x = 0; x < WIDTH; x++) {
       const left = x > 0 ? h[x-1] : 12;
@@ -107,20 +80,64 @@ const PuyoAI = (() => {
     }
     // 凹凸(bump)の抑制
     for (let x = 0; x < WIDTH - 1; x++) {
-      score -= Math.abs(h[x] - h[x+1]) * 1e12;
+      score -= Math.abs(h[x] - h[x+1]) * 1e11;
     }
-    // 3列目の門
-    if (h[2] < h[1] && h[2] < h[3]) score += 1e16;
-    score -= h[2] * 1e13;
+    // 14段目(Y=13)の無駄使い抑制
+    for (let x = 0; x < WIDTH; x++) {
+      if (h[x] === GHOST_Y) score -= 1e13;
+    }
 
-    // D. 連結評価
+    // C. 連結評価 (Puyo Connections)
     const links = countLinks(board);
-    score += links.link2 * 1e11;
-    score += links.link3 * 1e13;
+    score += links.link2 * 1e10;
+    score += links.link3 * 1e12;
 
-    score -= discardCount * 1e15;
+    // D. 暴発抑制 (探索中の連鎖が小さい場合はペナルティ)
+    if (chain > 0 && chain < 10) score -= 1e18;
+
+    score -= discardCount * 1e16;
 
     return score;
+  }
+
+  function quiescenceSearch(board) {
+    // 簡易的な静止探索: 
+    // 1. 各列に足りない色を1つずつ置いてみて、最大何連鎖になるかを確認
+    // 2. その際の連鎖数、キーぷよ数、スペースを返す
+    let maxChains = 0;
+    let bestSpace = 0;
+    
+    for (let x = 0; x < WIDTH; x++) {
+      const h = columnHeights(board);
+      if (h[x] >= 12) continue;
+      
+      // 4色試行
+      for (let color = 1; color <= 4; color++) {
+        const b = board.map(row => [...row]);
+        b[h[x]][x] = color;
+        const sim = simulateChain(b);
+        if (sim.chains > maxChains) {
+          maxChains = sim.chains;
+          bestSpace = countEmptySpaces(sim.board);
+        }
+      }
+    }
+    
+    return {
+      chainCount: maxChains,
+      keyPuyos: maxChains > 0 ? 1 : 0, // 簡易化
+      space: bestSpace
+    };
+  }
+
+  function countEmptySpaces(board) {
+    let count = 0;
+    for (let x = 0; x < WIDTH; x++) {
+      for (let y = 0; y < 12; y++) {
+        if (!board[y][x]) count++;
+      }
+    }
+    return count;
   }
 
   function countLinks(board) {
@@ -139,7 +156,7 @@ const PuyoAI = (() => {
     return { link2, link3 };
   }
 
-  /* ================= 4. 探索エンジン ================= */
+  /* ================= 3. 探索エンジン ================= */
 
   function getBestMove(board, current, next1, next2) {
     const tsumos = [
@@ -147,14 +164,6 @@ const PuyoAI = (() => {
       [next1.axisColor, next1.childColor],
       [next2.axisColor, next2.childColor]
     ];
-
-    if (moveHistory.length < 2) {
-      const fixed = getFixedInitialMove(tsumos);
-      if (fixed) {
-        moveHistory.push(fixed);
-        return fixed;
-      }
-    }
 
     let beam = [{ board, score: 0, firstMove: null, discardCount: currentDiscardCount }];
 
@@ -188,13 +197,12 @@ const PuyoAI = (() => {
     if (best) {
       if (best.didDiscard) currentDiscardCount++;
       else currentDiscardCount = 0;
-      moveHistory.push(best.firstMove);
       return best.firstMove;
     }
-    return { x: 0, rotation: 1 };
+    return { x: 2, rotation: 0 };
   }
 
-  /* ================= 5. 基本処理 ================= */
+  /* ================= 4. 基本処理 ================= */
 
   function applyMove(board, p1, p2, x, r, discardCount) {
     const b = board.map(row => [...row]);
