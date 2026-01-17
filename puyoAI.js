@@ -1,12 +1,11 @@
 /**
- * puyoAI.js - Ama Reproduction Edition (v9.0)
+ * puyoAI.js - Absolute Survival Edition (v9.1)
  * 
- * 特徴:
- * 1. citrus610/ama (beamブランチ) のアルゴリズムを忠実に再現
- * 2. 静止探索 (Quiescence Search) による潜在連鎖・キーぷよ・スペース評価
- * 3. 多角的な形状評価 (溝, 凹凸, 連結, 14段目抑制)
- * 4. 定型制約(keepuyo等)を排除した純粋な探索型AI
- * 5. 物理制約（14段目設置条件、連続ゴミ捨て制限）の厳密実装
+ * 強化ポイント:
+ * 1. 3列目(X=2)窒息の物理的・論理的絶対回避
+ * 2. 3列目が高くなった際の「超緊急回避モード」の早期発動
+ * 3. 14段目(Y=13)設置条件と12段目壁の物理シミュレーションの厳密化
+ * 4. 探索深さにおける生存優先度の極大化
  */
 
 const PuyoAI = (() => {
@@ -20,7 +19,7 @@ const PuyoAI = (() => {
 
   let currentDiscardCount = 0;
 
-  /* ================= 1. 物理制約判定 ================= */
+  /* ================= 1. 物理制約判定（強化版） ================= */
 
   function canPlacePuyo(board, x, r) {
     const h = columnHeights(board);
@@ -32,10 +31,14 @@ const PuyoAI = (() => {
 
     for (let puyo of puyoPositions) {
       const tx = puyo.x, ty = puyo.y;
+      
+      // 基本範囲外チェック
       if (tx < 0 || tx >= WIDTH || ty >= HEIGHT) return false;
+      
+      // 3列目(X=2)の12段目(Y=11)は絶対死守
       if (tx === DEAD_X && ty >= DEAD_Y) return false;
       
-      // 12段目の壁による進入不可チェック
+      // 12段目の壁による進入不可チェック（物理的な投げ込み制限）
       if (ty >= 11) {
         const step = tx > DEAD_X ? -1 : 1;
         if (tx !== DEAD_X) {
@@ -57,43 +60,50 @@ const PuyoAI = (() => {
     return true;
   }
 
-  /* ================= 2. Ama再現評価関数 ================= */
+  /* ================= 2. 絶対生存評価関数 ================= */
 
   function evaluate(board, chain, discardCount) {
     const h = columnHeights(board);
-    if (h[DEAD_X] >= DEAD_Y) return -1e25;
+    
+    // 3列目窒息は天文学的なマイナス（探索から即座に排除されるレベル）
+    if (h[DEAD_X] >= DEAD_Y) return -1e30;
 
     let score = 0;
 
-    // A. 静止探索 (Quiescence Search)
-    const qResult = quiescenceSearch(board);
-    score += qResult.chainCount * 1e15; // 潜在連鎖数
-    score += qResult.keyPuyos * 1e12;   // 必要なキーぷよの少なさ
-    score += qResult.space * 1e11;      // 連鎖を伸ばすためのスペース
+    // A. 生存優先ロジック (3列目の高さを極端に嫌う)
+    if (h[DEAD_X] >= 8) {
+      // 超緊急回避モード: 3列目を下げること以外を考えない
+      score -= Math.pow(h[DEAD_X], 10) * 1e20;
+      // 3列目以外の列を高くしてでも3列目を空ける
+      for (let x = 0; x < WIDTH; x++) {
+        if (x !== DEAD_X) score += h[x] * 1e15;
+      }
+    } else {
+      score -= h[DEAD_X] * 1e18; // 通常時も3列目は低く保つ
+    }
 
-    // B. 形状評価 (Ama-style)
-    // 溝(well)の回避
+    // B. 静止探索 (Ama-style 潜在連鎖評価)
+    const qResult = quiescenceSearch(board);
+    score += qResult.chainCount * 1e15;
+    score += qResult.space * 1e11;
+
+    // C. 形状評価
     for (let x = 0; x < WIDTH; x++) {
       const left = x > 0 ? h[x-1] : 12;
       const right = x < WIDTH - 1 ? h[x+1] : 12;
-      if (h[x] < left - 2 && h[x] < right - 2) score -= 1e14;
+      if (h[x] < left - 2 && h[x] < right - 2) score -= 1e14; // 溝回避
     }
-    // 凹凸(bump)の抑制
     for (let x = 0; x < WIDTH - 1; x++) {
-      score -= Math.abs(h[x] - h[x+1]) * 1e11;
-    }
-    // 14段目(Y=13)の無駄使い抑制
-    for (let x = 0; x < WIDTH; x++) {
-      if (h[x] === GHOST_Y) score -= 1e13;
+      score -= Math.abs(h[x] - h[x+1]) * 1e11; // 凹凸抑制
     }
 
-    // C. 連結評価 (Puyo Connections)
+    // D. 連結評価
     const links = countLinks(board);
     score += links.link2 * 1e10;
     score += links.link3 * 1e12;
 
-    // D. 暴発抑制 (探索中の連鎖が小さい場合はペナルティ)
-    if (chain > 0 && chain < 10) score -= 1e18;
+    // E. 暴発抑制
+    if (chain > 0 && chain < 10) score -= 1e22;
 
     score -= discardCount * 1e16;
 
@@ -101,17 +111,12 @@ const PuyoAI = (() => {
   }
 
   function quiescenceSearch(board) {
-    // 簡易的な静止探索: 
-    // 1. 各列に足りない色を1つずつ置いてみて、最大何連鎖になるかを確認
-    // 2. その際の連鎖数、キーぷよ数、スペースを返す
     let maxChains = 0;
     let bestSpace = 0;
+    const h = columnHeights(board);
     
     for (let x = 0; x < WIDTH; x++) {
-      const h = columnHeights(board);
       if (h[x] >= 12) continue;
-      
-      // 4色試行
       for (let color = 1; color <= 4; color++) {
         const b = board.map(row => [...row]);
         b[h[x]][x] = color;
@@ -122,12 +127,7 @@ const PuyoAI = (() => {
         }
       }
     }
-    
-    return {
-      chainCount: maxChains,
-      keyPuyos: maxChains > 0 ? 1 : 0, // 簡易化
-      space: bestSpace
-    };
+    return { chainCount: maxChains, space: bestSpace };
   }
 
   function countEmptySpaces(board) {
@@ -189,6 +189,12 @@ const PuyoAI = (() => {
           }
         }
       }
+      
+      if (nextBeam.length === 0) {
+        // 詰み状態の回避: どこにも置けない場合は、最もマシな手（通常はありえない）
+        return { x: 0, rotation: 0 };
+      }
+
       nextBeam.sort((a, b) => b.score - a.score);
       beam = nextBeam.slice(0, BEAM_WIDTH);
     }
@@ -199,7 +205,7 @@ const PuyoAI = (() => {
       else currentDiscardCount = 0;
       return best.firstMove;
     }
-    return { x: 2, rotation: 0 };
+    return { x: 0, rotation: 0 };
   }
 
   /* ================= 4. 基本処理 ================= */
