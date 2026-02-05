@@ -541,8 +541,23 @@ window.clearEditNext = function() {
     if (gameState !== 'editing') return;
     
     editingNextPuyos = [];
-    for (let i = 0; i < MAX_NEXT_PUYOS; i++) {
-        editingNextPuyos.push(getRandomPair());
+    // 最初のペアは無条件で生成
+    editingNextPuyos.push(getRandomPair());
+
+    // 2番目以降のペアは、直前のペアとの組み合わせで4色にならないように生成
+    for (let i = 1; i < MAX_NEXT_PUYOS; i++) {
+        let newPair;
+        let retries = 0;
+        const MAX_RETRIES = 100; // 無限ループ回避
+        do {
+            newPair = getRandomPair();
+            retries++;
+            if (retries > MAX_RETRIES) {
+                console.warn("clearEditNext: Max retries reached for next puyo generation.");
+                break;
+            }
+        } while (hasFourUniqueColors(editingNextPuyos[i-1], newPair));
+        editingNextPuyos.push(newPair);
     }
     renderEditNextPuyos(); 
     alert('ネクストぷよリストをランダムで再生成しました。');
@@ -679,19 +694,9 @@ function initializeGame() {
 function generateNewPuyo() {
     if (gameState !== 'playing') return;
 
+    // 通常のネクスト生成時は制限なし（元の仕様に戻す）
     while (nextPuyoColors.length < MAX_NEXT_PUYOS) {
-        let newPair;
-        let retries = 0;
-        const MAX_RETRIES = 100; // 無限ループ回避
-        do {
-            newPair = getRandomPair();
-            retries++;
-            if (retries > MAX_RETRIES) {
-                console.warn("generateNewPuyo: Max retries reached for next puyo generation.");
-                break;
-            }
-        } while (hasFourUniqueColors(nextPuyoColors[nextPuyoColors.length - 1], newPair));
-        nextPuyoColors.push(newPair);
+        nextPuyoColors.push(getRandomPair());
     }
 }
 
