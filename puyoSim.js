@@ -86,114 +86,7 @@ function checkMobileControlsVisibility() {
 }
 
 
-function initializeGame() {
-    createBoardDOM(); 
-    
-    for (let y = 0; y < HEIGHT; y++) {
-        board[y] = Array(WIDTH).fill(COLORS.EMPTY);
-    }
 
-    score = 0;
-    chainCount = 0;
-    gameState = 'playing';
-    
-    historyStack = []; 
-    redoStack = [];
-
-    nextPuyoColors = [];
-    nextPuyoColors.push([getRandomColor(), getRandomColor()]); // ネクスト1
-    nextPuyoColors.push([getRandomColor(), getRandomColor()]); // ネクスト2
-
-    for (let i = 2; i < MAX_NEXT_PUYOS; i++) {
-        let newPair;
-        let retries = 0;
-        const MAX_RETRIES_INIT = 100; 
-        do {
-            newPair = [getRandomColor(), getRandomColor()];
-            retries++;
-            if (retries > MAX_RETRIES_INIT) {
-                console.warn("initializeGame: Max retries reached for next puyo generation.");
-                break;
-            }
-        } while (isFourUniqueColorsInNextTwoPairsForInit(nextPuyoColors[i-1], newPair));
-        nextPuyoColors.push(newPair);
-    }
-    editingNextPuyos = JSON.parse(JSON.stringify(nextPuyoColors));
-    currentEditColor = COLORS.EMPTY; 
-
-    const modeToggleButton = document.querySelector('.mode-toggle-btn');
-    if (modeToggleButton) modeToggleButton.textContent = 'edit';
-    const infoPanel = document.getElementById('info-panel');
-    if (infoPanel) infoPanel.classList.remove('edit-mode-active');
-    
-    const autoDropButton = document.getElementById('auto-drop-toggle-button');
-    if (autoDropButton) {
-        if (autoDropEnabled) {
-            autoDropButton.textContent = '自動落下: ON';
-            autoDropButton.classList.remove('disabled');
-        } else {
-            autoDropButton.textContent = '自動落下: OFF';
-            autoDropButton.classList.add('disabled');
-        }
-    }
-
-    generateNewPuyo(); 
-    startPuyoDropLoop(); 
-    
-    updateUI();
-    
-    if (!document.initializedKeyHandler) {
-        document.addEventListener('keydown', handleInput);
-        
-        document.addEventListener('keydown', (event) => {
-            const key = event.key.toLowerCase();
-            if (key === 'u') { 
-                event.preventDefault();
-                undoMove();
-            } else if (key === 'y') { 
-                event.preventDefault();
-                redoMove();
-            } else if (key === 'r') { 
-                event.preventDefault();
-                resetGame();
-            } else if (key === 'e') { 
-                event.preventDefault();
-                toggleMode();
-            }
-        });
-
-        const btnLeft = document.getElementById('btn-left');
-        const btnRight = document.getElementById('btn-right');
-        const btnRotateCW = document.getElementById('btn-rotate-cw'); 
-        const btnRotateCCW = document.getElementById('btn-rotate-ccw'); 
-        const btnHardDrop = document.getElementById('btn-hard-drop');
-        const btnSoftDrop = document.getElementById('btn-soft-drop');
-
-        if (btnLeft) btnLeft.addEventListener('click', () => movePuyo(-1, 0));
-        if (btnRight) btnRight.addEventListener('click', () => movePuyo(1, 0));
-        
-        if (btnRotateCW) btnRotateCW.addEventListener('click', window.rotatePuyoCW); 
-        if (btnRotateCCW) btnRotateCCW.addEventListener('click', window.rotatePuyoCCW); 
-        
-        if (btnHardDrop) btnHardDrop.addEventListener('click', hardDrop);
-        
-        if (btnSoftDrop) btnSoftDrop.addEventListener('click', () => {
-            if (gameState === 'playing') {
-                clearInterval(dropTimer);
-                movePuyo(0, -1);
-                if (autoDropEnabled) startPuyoDropLoop();
-            }
-        });
-        
-        setupEditModeListeners(); 
-        document.initializedKeyHandler = true;
-    }
-    
-    checkMobileControlsVisibility();
-    renderBoard();
-    
-    saveState(false); 
-}
 
 window.resetGame = function() { 
     clearInterval(dropTimer); 
@@ -698,8 +591,6 @@ function generateNewPuyo() {
     while (nextPuyoColors.length < MAX_NEXT_PUYOS) {
         nextPuyoColors.push(getRandomPair());
     }
-}
-
     
     const [c1, c2] = nextPuyoColors.shift();
 
