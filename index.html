@@ -36,15 +36,27 @@
     <div id="setting-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); z-index: 1000; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box;">
         <div class="info-box" style="max-width: 400px; width: 100%; padding: 20px;">
             <h2 style="font-size: 1.2em; margin-bottom: 20px;">設定</h2>
+            
+            <!-- 重力待ち時間設定 -->
             <div style="margin: 20px 0; text-align: left;">
-                <label for="chain-speed-slider" style="display: block; font-size: 0.9em; color: #ccc; margin-bottom: 10px;">連鎖速度 (連鎖間の待機時間)</label>
+                <label for="gravity-wait-slider" style="display: block; font-size: 0.9em; color: #ccc; margin-bottom: 10px;">重力待ち時間 (消滅から落下まで)</label>
                 <div style="display: flex; align-items: center; gap: 15px;">
-                    <input type="range" id="chain-speed-slider" min="0" max="1000" step="50" value="300" style="flex: 1;" oninput="updateChainSpeed(this.value)">
-                    <span id="chain-speed-value" style="font-size: 1em; color: #fff; min-width: 60px;">300ms</span>
+                    <input type="range" id="gravity-wait-slider" min="0" max="1000" step="50" value="300" style="flex: 1;" oninput="updateGravityWait(this.value)">
+                    <span id="gravity-wait-value" style="font-size: 1em; color: #fff; min-width: 60px;">300ms</span>
                 </div>
-                <p style="font-size: 0.8em; color: #888; margin-top: 10px;">※値が小さいほど連鎖が速くなります。</p>
             </div>
-            <button onclick="toggleSettingMode()" style="background-color: #457b9d; color: white; margin-top: 20px; width: 100%;">戻る</button>
+
+            <!-- 連鎖待ち時間設定 -->
+            <div style="margin: 20px 0; text-align: left;">
+                <label for="chain-wait-slider" style="display: block; font-size: 0.9em; color: #ccc; margin-bottom: 10px;">連鎖待ち時間 (着地から次連鎖まで)</label>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <input type="range" id="chain-wait-slider" min="0" max="1000" step="50" value="300" style="flex: 1;" oninput="updateChainWait(this.value)">
+                    <span id="chain-wait-value" style="font-size: 1em; color: #fff; min-width: 60px;">300ms</span>
+                </div>
+            </div>
+
+            <p style="font-size: 0.8em; color: #888; margin-top: 10px;">※値が小さいほどアニメーションが速くなります。</p>
+            <button class="mode-toggle-btn" onclick="toggleSettingMode()" style="background-color: #457b9d; color: white; margin-top: 20px; width: 100%;">戻る</button>
         </div>
     </div>
 
@@ -88,7 +100,7 @@
                     <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
                     
                     <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
-                    <button class="setting-toggle-btn" onclick="toggleSettingMode()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #6c757d; color: white; margin-top: 5px;">設定</button>
+                    <button class="setting-toggle-btn" onclick="toggleSettingMode()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #6c757d; color: white; margin-top: 5px;">setting</button>
                 </div>
 
             </div>
