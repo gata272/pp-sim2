@@ -224,4 +224,130 @@ body {
     display: none; 
     margin-top: 15px;
     width: 100%;
-    max-width: 500px;
+    max-width: 500px; 
+    flex-direction: row; 
+    justify-content: center; 
+    gap: 6px; 
+    padding: 0 5px;
+    box-sizing: border-box;
+    align-items: stretch;
+}
+
+#mobile-controls.visible {
+    display: flex;
+}
+
+.btn-stack {
+    display: flex;
+    flex-direction: column;
+    flex: 1.5;
+    gap: 4px;
+    min-width: 0;
+}
+
+.mobile-btn {
+    flex: 1; 
+    min-width: 0;
+    height: 120px;
+    font-size: 1.2em; 
+    font-weight: bold;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background-color: #457b9d; 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+    transition: background-color 0.1s, transform 0.05s;
+}
+
+.small-btn {
+    flex: none;
+    height: calc(50% - 2px);
+    font-size: 0.9em; 
+    white-space: nowrap;
+}
+
+#btn-soft-drop, #btn-hard-drop { background-color: #5e81ac; }
+#btn-rotate-cw, #btn-rotate-ccw { background-color: #6a0dad; }
+
+.mobile-btn:active {
+    filter: brightness(1.2);
+    transform: scale(0.95);
+}
+
+/* 50手リスト */
+#edit-next-list-container {
+    max-height: 180px; 
+    overflow-y: auto;
+    background-color: #2a2a2a;
+    border: 1px dashed #555;
+}
+
+/* ネクスト */
+.next-puyo-slot {
+    width: 36px;
+    height: 72px; 
+    background-color: rgba(0, 0, 0, 0.4);
+    border: 1px solid #555;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+}
+
+/* スロット内のぷよサイズ */
+.next-puyo-slot .puyo {
+    width: 28px !important;
+    height: 28px !important;
+    margin: 1px 0;
+}
+
+/* 50手リスト（N3以降）の1行分のレイアウト */
+.next-puyo-slot-pair {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid #333;
+    background-color: #2a2a2a;
+}
+
+.next-puyo-slot-pair span {
+    font-size: 0.8em;
+    color: #888;
+    width: 30px;
+}
+
+#edit-next-list-container .next-puyo-slot {
+    width: 28px;
+    height: 56px;
+}
+
+#edit-next-list-container .puyo {
+    width: 20px !important;
+    height: 20px !important;
+    cursor: pointer;
+}
+
+.next-puyo-slot-pair .next-puyo-row {
+    margin: 0; 
+    gap: 8px; 
+    justify-content: flex-start; 
+    flex-grow: 1;
+    padding-left: 10px;
+    display: flex;
+    flex-direction: row; 
+    align-items: center;
+}
+
+/* リスト全体のスクロール設定 */
+#edit-next-list-container {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #444;
+}
