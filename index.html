@@ -72,7 +72,10 @@
                     <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
                     <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
                     
-                    <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="mode-toggle-btn" onclick="toggleMode()" style="flex: 1;">edit (E)</button>
+                        <button class="setting-toggle-btn" onclick="toggleSettingMode()" style="flex: 1; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #6c757d; color: white;">setting</button>
+                    </div>
                 </div>
 
             </div>
@@ -110,12 +113,30 @@
                 </div>
                 
                 <div id="edit-action-buttons" class="common-control">
-                    <div id="mode-toggle-container">
-                        <button class="mode-toggle-btn" onclick="toggleMode()">play (E)</button>
+                    <div id="mode-toggle-container" style="display: flex; gap: 5px; margin-bottom: 5px;">
+                        <button class="mode-toggle-btn" onclick="toggleMode()" style="flex: 1;">play (E)</button>
+                        <button class="setting-toggle-btn" onclick="toggleSettingMode()" style="flex: 1; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #6c757d; color: white;">setting</button>
                     </div>
                     <div id="reset-button-container">
                         <button id="reset-button-edit" onclick="resetGame(); toggleMode();">盤面リセット (R)</button>
                     </div>
+                </div>
+            </div>
+            
+            <div id="setting-info-container" class="setting-info" style="display: none;">
+                <div class="info-box">
+                    <h2>設定</h2>
+                    <div style="margin: 15px 0; text-align: left; padding: 0 10px;">
+                        <label for="chain-speed-slider" style="display: block; font-size: 0.8em; color: #ccc; margin-bottom: 5px;">連鎖速度 (連鎖間の待機時間)</label>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="range" id="chain-speed-slider" min="0" max="1000" step="50" value="300" style="flex: 1;" oninput="updateChainSpeed(this.value)">
+                            <span id="chain-speed-value" style="font-size: 0.9em; color: #fff; min-width: 50px;">300ms</span>
+                        </div>
+                        <p style="font-size: 0.7em; color: #888; margin-top: 5px;">※値が小さいほど連鎖が速くなります。</p>
+                    </div>
+                </div>
+                <div class="common-control">
+                    <button class="mode-toggle-btn" onclick="toggleSettingMode()" style="background-color: #457b9d; color: white;">戻る</button>
                 </div>
             </div>
             
@@ -132,7 +153,6 @@
     <button class="mobile-btn" id="btn-rotate-ccw">A</button>
 </div>
 <p class="small-text">puyo-sim_ver1.0 by gata</p>
-
     <script src="puyoAI.js"></script>
     <script src="puyoSim.js"></script>
     
