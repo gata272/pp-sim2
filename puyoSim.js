@@ -979,14 +979,11 @@ async function runChain() {
     gravity(); 
     renderBoard(); 
     
-    // 2. 着地後の待機（連鎖待ち時間）
-    await new Promise(resolve => setTimeout(resolve, chainWaitTime));
-    
-    // 3. 連結判定
+    // 2. 連結判定（まず連鎖が起きるか確認）
     const groups = findConnectedPuyos();
 
     if (groups.length === 0) {
-        // 連鎖終了
+        // 0連鎖の場合：待機時間なしで即座に操作可能に
         if (checkBoardEmpty()) {
             score += 3600; 
             updateUI(); 
@@ -1005,7 +1002,7 @@ async function runChain() {
             return;
         }
         
-        // 即座に操作可能にする（待機時間なし）
+        // 0連鎖時は待機なしで即座に操作可能に
         gameState = 'playing';
         generateNewPuyo(); 
         startPuyoDropLoop(); 
@@ -1013,6 +1010,9 @@ async function runChain() {
         renderBoard();
         return;
     }
+    
+    // 3. 連鎖が起きる場合：着地後の待機（連鎖待ち時間）
+    await new Promise(resolve => setTimeout(resolve, chainWaitTime));
 
     // 4. 消滅処理
     chainCount++;
