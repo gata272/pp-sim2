@@ -42,6 +42,9 @@ let dropInterval = 1000; // 1秒ごとに落下
 let dropTimer = null; 
 let autoDropEnabled = false; 
 
+// 連鎖速度設定
+let chainWaitTime = 300; // 連鎖間の待機時間 (ms) 
+
 // クイックターン用変数
 let lastFailedRotation = {
     type: null, // 'CW' or 'CCW'
@@ -76,12 +79,19 @@ function checkMobileControlsVisibility() {
     if (gameState === 'playing' && window.innerWidth <= 650) {
         mobileControls.classList.add('visible');
         document.body.classList.remove('edit-mode-active');
+        document.body.classList.remove('setting-mode-active');
     } else if (gameState === 'editing') {
         mobileControls.classList.remove('visible');
         document.body.classList.add('edit-mode-active');
+        document.body.classList.remove('setting-mode-active');
+    } else if (gameState === 'setting') {
+        mobileControls.classList.remove('visible');
+        document.body.classList.remove('edit-mode-active');
+        document.body.classList.add('setting-mode-active');
     } else {
         mobileControls.classList.remove('visible');
         document.body.classList.remove('edit-mode-active');
+        document.body.classList.remove('setting-mode-active');
     }
 }
 
@@ -93,6 +103,30 @@ window.resetGame = function() {
     initializeGame();
 }
 
+window.toggleSettingMode = function() {
+    const infoPanel = document.getElementById('info-panel');
+    
+    if (gameState === 'playing' || gameState === 'editing' || gameState === 'gameover') {
+        gameState = 'setting';
+        infoPanel.classList.add('setting-mode-active');
+        document.body.classList.add('setting-mode-active');
+        checkMobileControlsVisibility();
+    } else if (gameState === 'setting') {
+        gameState = 'playing';
+        infoPanel.classList.remove('setting-mode-active');
+        document.body.classList.remove('setting-mode-active');
+        checkMobileControlsVisibility();
+    }
+}
+
+window.updateChainSpeed = function(value) {
+    chainWaitTime = parseInt(value);
+    const display = document.getElementById('chain-speed-value');
+    if (display) {
+        display.textContent = chainWaitTime + 'ms';
+    }
+}
+
 window.toggleMode = function() {
     const infoPanel = document.getElementById('info-panel');
     const modeToggleButton = document.querySelector('.mode-toggle-btn');
@@ -101,6 +135,8 @@ window.toggleMode = function() {
     if (gameState === 'playing' || gameState === 'gameover') {
         clearInterval(dropTimer); 
         gameState = 'editing';
+        infoPanel.classList.remove('setting-mode-active');
+        document.body.classList.remove('setting-mode-active');
         infoPanel.classList.add('edit-mode-active');
         document.body.classList.add('edit-mode-active'); 
         
@@ -116,7 +152,9 @@ window.toggleMode = function() {
     } else if (gameState === 'editing') {
         gameState = 'playing';
         infoPanel.classList.remove('edit-mode-active');
-        document.body.classList.remove('edit-mode-active'); 
+        document.body.classList.remove('edit-mode-active');
+        infoPanel.classList.remove('setting-mode-active');
+        document.body.classList.remove('setting-mode-active'); 
         
         if (modeToggleButton) modeToggleButton.textContent = 'edit';
         
@@ -948,7 +986,7 @@ function clearGarbagePuyos(erasedCoords) {
 async function runChain() {
     gravity(); 
     renderBoard(); 
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, chainWaitTime));
     
     const groups = findConnectedPuyos();
 
@@ -999,7 +1037,7 @@ async function runChain() {
     renderBoard(); 
     updateUI();
 
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, chainWaitTime));
 
     runChain();
 }
