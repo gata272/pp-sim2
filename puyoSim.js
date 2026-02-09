@@ -79,19 +79,12 @@ function checkMobileControlsVisibility() {
     if (gameState === 'playing' && window.innerWidth <= 650) {
         mobileControls.classList.add('visible');
         document.body.classList.remove('edit-mode-active');
-        document.body.classList.remove('setting-mode-active');
     } else if (gameState === 'editing') {
         mobileControls.classList.remove('visible');
         document.body.classList.add('edit-mode-active');
-        document.body.classList.remove('setting-mode-active');
-    } else if (gameState === 'setting') {
-        mobileControls.classList.remove('visible');
-        document.body.classList.remove('edit-mode-active');
-        document.body.classList.add('setting-mode-active');
     } else {
         mobileControls.classList.remove('visible');
         document.body.classList.remove('edit-mode-active');
-        document.body.classList.remove('setting-mode-active');
     }
 }
 
@@ -103,20 +96,19 @@ window.resetGame = function() {
     initializeGame();
 }
 
+let previousGameState = 'playing';
 window.toggleSettingMode = function() {
-    const infoPanel = document.getElementById('info-panel');
+    const overlay = document.getElementById('setting-overlay');
     
-    if (gameState === 'playing' || gameState === 'editing' || gameState === 'gameover') {
+    if (gameState !== 'setting') {
+        previousGameState = gameState;
         gameState = 'setting';
-        infoPanel.classList.add('setting-mode-active');
-        document.body.classList.add('setting-mode-active');
-        checkMobileControlsVisibility();
-    } else if (gameState === 'setting') {
-        gameState = 'playing';
-        infoPanel.classList.remove('setting-mode-active');
-        document.body.classList.remove('setting-mode-active');
-        checkMobileControlsVisibility();
+        overlay.style.display = 'flex';
+    } else {
+        gameState = previousGameState;
+        overlay.style.display = 'none';
     }
+    checkMobileControlsVisibility();
 }
 
 window.updateChainSpeed = function(value) {
@@ -135,8 +127,6 @@ window.toggleMode = function() {
     if (gameState === 'playing' || gameState === 'gameover') {
         clearInterval(dropTimer); 
         gameState = 'editing';
-        infoPanel.classList.remove('setting-mode-active');
-        document.body.classList.remove('setting-mode-active');
         infoPanel.classList.add('edit-mode-active');
         document.body.classList.add('edit-mode-active'); 
         
@@ -153,25 +143,17 @@ window.toggleMode = function() {
         gameState = 'playing';
         infoPanel.classList.remove('edit-mode-active');
         document.body.classList.remove('edit-mode-active');
-        infoPanel.classList.remove('setting-mode-active');
-        document.body.classList.remove('setting-mode-active'); 
         
         if (modeToggleButton) modeToggleButton.textContent = 'edit';
         
         checkMobileControlsVisibility();
-
         boardElement.removeEventListener('click', handleBoardClickEditMode);
         
-        gravity(); 
+        if (autoDropEnabled) {
+            startPuyoDropLoop();
+        }
         
-        nextPuyoColors = JSON.parse(JSON.stringify(editingNextPuyos));
-        
-        currentPuyo = null; 
-        generateNewPuyo(); 
-        startPuyoDropLoop(); 
-        
-        saveState();
-        renderBoard();
+        renderBoard(); 
     }
 }
 
