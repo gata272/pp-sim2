@@ -15,7 +15,7 @@ color: #fff;
 padding: 10px;
 }
 
-/* レイアウトの強制横並び */
+/* レイアウト */
 #wrapper {
 display: flex;
 flex-direction: row;
@@ -47,7 +47,6 @@ background-image: linear-gradient(to right, #1a1a1a 1px, transparent 1px),
 background-size: var(--puyo-cell-size) var(--puyo-cell-size); 
 background-position: -1px -1px; 
 
-/* 幅を自動計算 (36 * 6 = 216px) */
 width: calc(var(--puyo-cell-size) * 6) !important; 
 height: calc(var(--puyo-cell-size) * 14) !important; 
 
@@ -63,8 +62,7 @@ position: relative;
 }
 
 /* 隠し領域の視覚化 */
-#puyo-board > div:nth-child(-n+12)
-{
+#puyo-board > div:nth-child(-n+12) {
 opacity: 0.5;
 background-color: rgba(50, 50, 50, 0.5);
 border-bottom: 1px solid rgba(255, 0, 0, 0.5);
@@ -97,17 +95,19 @@ box-shadow: inset 0 -3px 0 rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2);
 display: block;
 box-sizing: border-box;
 }
+
 #puyo-board > div {
 display: flex;
 justify-content: center;
 align-items: center;
 }
+
 #puyo-board > div > .puyo {
 width: 90%;
 height: 90%;
 }
 
-/* 情報パネルのレスポンシブ調整 */
+/* 情報パネル */
 #info-panel {
 display: flex;
 flex-direction: column;
@@ -159,6 +159,7 @@ justify-content: center;
 gap: 10px;
 margin-top: 5px;
 }
+
 #play-next-info .puyo {
 width: 22px;
 height: 22px;
@@ -181,6 +182,7 @@ font-size: 0.75em;
 font-weight: bold;
 color: white;
 background-color: #f4a261;
+cursor: pointer;
 }
 
 .mode-toggle-btn, #reset-button-edit, #reset-button-play, #auto-drop-toggle-button {
@@ -190,11 +192,51 @@ border: none;
 border-radius: 5px;
 font-size: 0.85em;
 font-weight: bold;
+cursor: pointer;
 }
 
 .mode-toggle-btn { background-color: #457b9d; color: white; }
-#reset-button-edit #reset-button-play { background-color: #e63946; color: white; }
+#reset-button-edit, #reset-button-play { background-color: #e63946; color: white; }
 #auto-drop-toggle-button { background-color: #2a9d8f; color: white; }
+
+#max-chain-button {
+width: 100%;
+margin-top: 10px;
+padding: 10px;
+background-color: #e74c3c;
+color: white;
+border: none;
+border-radius: 5px;
+cursor: pointer;
+font-weight: bold;
+font-size: 16px;
+}
+
+#ai-button {
+width: 100%;
+margin-top: 10px;
+padding: 10px;
+background-color: #ff9800;
+color: white;
+border: none;
+border-radius: 5px;
+cursor: pointer;
+font-weight: bold;
+font-size: 16px;
+}
+
+.setting-toggle-btn {
+width: 100%;
+padding: 8px;
+border: none;
+border-radius: 5px;
+font-size: 0.85em;
+font-weight: bold;
+background-color: #6c757d;
+color: white;
+margin-top: 5px;
+cursor: pointer;
+}
 
 /* モード表示 */
 .edit-info { display: none !important; }
@@ -209,8 +251,16 @@ grid-template-columns: repeat(3, 1fr);
 gap: 5px;
 margin-top: 5px;
 }
-#color-palette .puyo { width: 100%; aspect-ratio: 1/1; cursor: pointer; }
-#color-palette .puyo.selected { box-shadow: 0 0 0 2px #fff, 0 0 4px 2px #ffc107; }
+
+#color-palette .puyo {
+width: 100%;
+aspect-ratio: 1/1;
+cursor: pointer;
+}
+
+#color-palette .puyo.selected {
+box-shadow: 0 0 0 2px #fff, 0 0 4px 2px #ffc107;
+}
 
 /* 色定義 */
 .puyo-1 { background-color: #e63946; }
@@ -358,7 +408,7 @@ color: #495057;
 font-size: 9px;
 }
 
-/* スクロールバーのスタイル */
+/* スクロールバー */
 .ai-details-panel::-webkit-scrollbar {
 width: 6px;
 }
@@ -436,14 +486,6 @@ filter: brightness(1.2);
 transform: scale(0.95);
 }
 
-/* 50手リスト */
-#edit-next-list-container {
-max-height: 180px;
-overflow-y: auto;
-background-color: #2a2a2a;
-border: 1px dashed #555;
-}
-
 /* ネクスト */
 .next-puyo-slot {
 width: 36px;
@@ -458,14 +500,20 @@ justify-content: center;
 margin: 0 auto;
 }
 
-/* スロット内のぷよサイズ */
 .next-puyo-slot .puyo {
 width: 28px !important;
 height: 28px !important;
 margin: 1px 0;
 }
 
-/* 50手リスト（N3以降）の1行分のレイアウト */
+/* 50手リスト */
+#edit-next-list-container {
+max-height: 200px;
+overflow-y: auto;
+background-color: #2a2a2a;
+border: 1px dashed #555;
+}
+
 .next-puyo-slot-pair {
 display: flex;
 align-items: center;
@@ -503,62 +551,37 @@ flex-direction: row;
 align-items: center;
 }
 
-/* リスト全体のスクロール設定 */
-#edit-next-list-container {
-max-height: 200px;
-overflow-y: auto;
-border: 1px solid #444;
-}
-
-/* 追加のボタンスタイル */
-#max-chain-button {
-width: 100%;
-margin-top: 10px;
-padding: 10px;
-background-color: #e74c3c;
-color: white;
-border: none;
-border-radius: 5px;
-cursor: pointer;
-font-weight: bold;
-font-size: 16px;
-}
-
-#ai-button {
-width: 100%;
-margin-top: 10px;
-padding: 10px;
-background-color: #ff9800;
-color: white;
-border: none;
-border-radius: 5px;
-cursor: pointer;
-font-weight: bold;
-font-size: 16px;
-}
-
-.setting-toggle-btn {
-width: 100%;
-padding: 8px;
-border: none;
-border-radius: 5px;
-font-size: 0.85em;
-font-weight: bold;
-background-color: #6c757d;
-color: white;
-margin-top: 5px;
-cursor: pointer;
-}
-
-/* モバイル対応（AI思考パネル） */
+/* モバイル対応 */
 @media (max-width: 650px) {
-.ai-thinking-panel,
-.ai-details-panel {
-margin: 8px 0;
-padding: 8px;
+#wrapper {
+flex-direction: column;
+align-items: center;
+padding: 5px;
+gap: 10px;
 }
 
 ```
+#puyo-board {
+    --puyo-cell-size: 30px;
+    width: calc(var(--puyo-cell-size) * 6) !important;
+    height: calc(var(--puyo-cell-size) * 14) !important;
+    flex: none;
+    order: 1;
+    margin: 0 auto;
+}
+
+#info-panel {
+    order: 2;
+    max-width: 100%;
+    width: 100%;
+}
+
+.ai-thinking-panel,
+.ai-details-panel {
+    margin: 8px 0;
+    padding: 8px;
+}
+
 .ai-result-header {
     font-size: 12px;
 }
