@@ -510,6 +510,46 @@ overflow-y: auto;
 border: 1px solid #444;
 }
 
+/* 追加のボタンスタイル */
+#max-chain-button {
+width: 100%;
+margin-top: 10px;
+padding: 10px;
+background-color: #e74c3c;
+color: white;
+border: none;
+border-radius: 5px;
+cursor: pointer;
+font-weight: bold;
+font-size: 16px;
+}
+
+#ai-button {
+width: 100%;
+margin-top: 10px;
+padding: 10px;
+background-color: #ff9800;
+color: white;
+border: none;
+border-radius: 5px;
+cursor: pointer;
+font-weight: bold;
+font-size: 16px;
+}
+
+.setting-toggle-btn {
+width: 100%;
+padding: 8px;
+border: none;
+border-radius: 5px;
+font-size: 0.85em;
+font-weight: bold;
+background-color: #6c757d;
+color: white;
+margin-top: 5px;
+cursor: pointer;
+}
+
 /* モバイル対応（AI思考パネル） */
 @media (max-width: 650px) {
 .ai-thinking-panel,
