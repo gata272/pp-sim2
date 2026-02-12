@@ -1,7 +1,7 @@
 /**
 
-- PuyoAI v12 - System Compatible Edition
-- 既存のpuyoSim.jsと完全互換の強化版AI
+- PuyoAI v12 - System Compatible Edition with Loading Indicator
+- 既存のpuyoSim.jsと完全互換の強化版AI + 思考中表示機能
   */
   const PuyoAI = (function() {
   const WIDTH = 6;
@@ -323,120 +323,164 @@
   
   }
   
+  // ===== 思考中表示のヘルパー関数 =====
+  
+  function showThinkingIndicator(buttonId) {
+  const button = document.getElementById(buttonId);
+  if (button) {
+  button.disabled = true;
+  button.dataset.originalText = button.textContent;
+  button.textContent = ‘思考中…’;
+  button.style.opacity = ‘0.6’;
+  }
+  }
+  
+  function hideThinkingIndicator(buttonId) {
+  const button = document.getElementById(buttonId);
+  if (button && button.dataset.originalText) {
+  button.disabled = false;
+  button.textContent = button.dataset.originalText;
+  button.style.opacity = ‘1’;
+  delete button.dataset.originalText;
+  }
+  }
+  
   // ===== メインAPI =====
   
   function getBestMove(board, axisColor, childColor, nextAxisColor, nextChildColor) {
-  let bestScore = -Infinity;
-  let bestMove = { x: 2, rotation: 0 };
-  const allowed14 = is14thRowAllowed(board);
+  // 思考中表示を開始
+  showThinkingIndicator(‘ai-button’);
   
   ```
-   for (let x = 0; x < WIDTH; x++) {
-       if (!isReachable(board, x)) continue;
-       
-       for (let rot = 0; rot < 4; rot++) {
-           // 14段目チェック
-           let h = 0;
-           while(h < 14 && board[h][x] !== 0) h++;
-           
-           let willUse14 = false;
-           if (h === 13) willUse14 = true;
-           if (rot === 0 && h === 12) willUse14 = true;
-           if (rot === 1 && x < WIDTH - 1) {
-               let rh = 0;
-               while(rh < 14 && board[rh][x+1] !== 0) rh++;
-               if (rh === 13) willUse14 = true;
-           }
-           if (rot === 3 && x > 0) {
-               let lh = 0;
-               while(lh < 14 && board[lh][x-1] !== 0) lh++;
-               if (lh === 13) willUse14 = true;
-           }
-           
-           if (willUse14 && !allowed14) continue;
+   // 非同期処理でUIをブロックしないようにする
+   return new Promise((resolve) => {
+       setTimeout(() => {
+           let bestScore = -Infinity;
+           let bestMove = { x: 2, rotation: 0 };
+           const allowed14 = is14thRowAllowed(board);
   
-           let tempBoard = board.map(row => [...row]);
-           
-           if (!placePuyo(tempBoard, x, rot, axisColor, childColor)) {
-               continue;
-           }
-  
-           let chainRes = simulatePureChain(tempBoard);
-           let immediateScore = chainRes.chains * 2000;
-           let boardQuality = evaluateBoard(chainRes.finalBoard);
-           
-           let futureScore = 0;
-           if (nextAxisColor && nextChildColor) {
-               let maxFutureScore = -Infinity;
+           for (let x = 0; x < WIDTH; x++) {
+               if (!isReachable(board, x)) continue;
                
-               for (let nx = 0; nx < WIDTH; nx++) {
-                   if (!isReachable(chainRes.finalBoard, nx)) continue;
+               for (let rot = 0; rot < 4; rot++) {
+                   // 14段目チェック
+                   let h = 0;
+                   while(h < 14 && board[h][x] !== 0) h++;
                    
-                   for (let nrot = 0; nrot < 4; nrot++) {
-                       let nextBoard = chainRes.finalBoard.map(row => [...row]);
+                   let willUse14 = false;
+                   if (h === 13) willUse14 = true;
+                   if (rot === 0 && h === 12) willUse14 = true;
+                   if (rot === 1 && x < WIDTH - 1) {
+                       let rh = 0;
+                       while(rh < 14 && board[rh][x+1] !== 0) rh++;
+                       if (rh === 13) willUse14 = true;
+                   }
+                   if (rot === 3 && x > 0) {
+                       let lh = 0;
+                       while(lh < 14 && board[lh][x-1] !== 0) lh++;
+                       if (lh === 13) willUse14 = true;
+                   }
+                   
+                   if (willUse14 && !allowed14) continue;
+  
+                   let tempBoard = board.map(row => [...row]);
+                   
+                   if (!placePuyo(tempBoard, x, rot, axisColor, childColor)) {
+                       continue;
+                   }
+  
+                   let chainRes = simulatePureChain(tempBoard);
+                   let immediateScore = chainRes.chains * 2000;
+                   let boardQuality = evaluateBoard(chainRes.finalBoard);
+                   
+                   let futureScore = 0;
+                   if (nextAxisColor && nextChildColor) {
+                       let maxFutureScore = -Infinity;
                        
-                       if (placePuyo(nextBoard, nx, nrot, nextAxisColor, nextChildColor)) {
-                           let nextChainRes = simulatePureChain(nextBoard);
-                           let nextScore = nextChainRes.chains * 1000 + evaluateBoard(nextChainRes.finalBoard) * 0.6;
+                       for (let nx = 0; nx < WIDTH; nx++) {
+                           if (!isReachable(chainRes.finalBoard, nx)) continue;
                            
-                           if (nextScore > maxFutureScore) {
-                               maxFutureScore = nextScore;
+                           for (let nrot = 0; nrot < 4; nrot++) {
+                               let nextBoard = chainRes.finalBoard.map(row => [...row]);
+                               
+                               if (placePuyo(nextBoard, nx, nrot, nextAxisColor, nextChildColor)) {
+                                   let nextChainRes = simulatePureChain(nextBoard);
+                                   let nextScore = nextChainRes.chains * 1000 + evaluateBoard(nextChainRes.finalBoard) * 0.6;
+                                   
+                                   if (nextScore > maxFutureScore) {
+                                       maxFutureScore = nextScore;
+                                   }
+                               }
                            }
                        }
+                       
+                       futureScore = maxFutureScore;
+                   }
+                   
+                   let totalScore = immediateScore + boardQuality + futureScore;
+                   
+                   if (tempBoard[11][2] !== 0) {
+                       totalScore -= 200000;
+                   }
+                   
+                   if (totalScore > bestScore) {
+                       bestScore = totalScore;
+                       bestMove = { x, rotation: rot };
                    }
                }
-               
-               futureScore = maxFutureScore;
            }
            
-           let totalScore = immediateScore + boardQuality + futureScore;
+           // 思考中表示を終了
+           hideThinkingIndicator('ai-button');
            
-           if (tempBoard[11][2] !== 0) {
-               totalScore -= 200000;
-           }
-           
-           if (totalScore > bestScore) {
-               bestScore = totalScore;
-               bestMove = { x, rotation: rot };
-           }
-       }
-   }
-   
-   return bestMove;
+           resolve(bestMove);
+       }, 10); // UIを更新するための短い遅延
+   });
   ```
   
   }
   
   function findMaxChainPuyo(board) {
-  let bestChain = -1;
-  let bestPuyo = null;
+  // 思考中表示を開始
+  showThinkingIndicator(‘max-chain-button’);
   
   ```
-   for (let y = 0; y < 12; y++) {
-       for (let x = 0; x < WIDTH; x++) {
-           if (board[y][x] !== 0) {
-               let isExposed = false;
-               
-               if (y + 1 < 12 && board[y + 1][x] === 0) isExposed = true;
-               if (y - 1 >= 0 && board[y - 1][x] === 0) isExposed = true;
-               if (x + 1 < WIDTH && board[y][x + 1] === 0) isExposed = true;
-               if (x - 1 >= 0 && board[y][x - 1] === 0) isExposed = true;
+   return new Promise((resolve) => {
+       setTimeout(() => {
+           let bestChain = -1;
+           let bestPuyo = null;
   
-               if (isExposed) {
-                   let tempBoard = board.map(row => [...row]);
-                   tempBoard[y][x] = 0;
-                   applyGravity(tempBoard);
-                   let res = simulatePureChain(tempBoard);
-                   
-                   if (res.chains > bestChain) {
-                       bestChain = res.chains;
-                       bestPuyo = { x, y, chain: res.chains };
+           for (let y = 0; y < 12; y++) {
+               for (let x = 0; x < WIDTH; x++) {
+                   if (board[y][x] !== 0) {
+                       let isExposed = false;
+                       
+                       if (y + 1 < 12 && board[y + 1][x] === 0) isExposed = true;
+                       if (y - 1 >= 0 && board[y - 1][x] === 0) isExposed = true;
+                       if (x + 1 < WIDTH && board[y][x + 1] === 0) isExposed = true;
+                       if (x - 1 >= 0 && board[y][x - 1] === 0) isExposed = true;
+  
+                       if (isExposed) {
+                           let tempBoard = board.map(row => [...row]);
+                           tempBoard[y][x] = 0;
+                           applyGravity(tempBoard);
+                           let res = simulatePureChain(tempBoard);
+                           
+                           if (res.chains > bestChain) {
+                               bestChain = res.chains;
+                               bestPuyo = { x, y, chain: res.chains };
+                           }
+                       }
                    }
                }
            }
-       }
-   }
-   return bestPuyo;
+           
+           // 思考中表示を終了
+           hideThinkingIndicator('max-chain-button');
+           
+           resolve(bestPuyo);
+       }, 10);
+   });
   ```
   
   }
@@ -450,4 +494,4 @@
 // グローバルスコープに公開
 window.PuyoAI = PuyoAI;
 
-console.log(‘PuyoAI v12 loaded successfully’);
+console.log(‘PuyoAI v12 with Loading Indicator loaded successfully’);
