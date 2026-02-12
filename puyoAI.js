@@ -1,125 +1,19 @@
 /**
 
-- PuyoAI v13 - Transparent Thinking Edition
+- PuyoAI v12 - Enhanced Chain Building Edition (Simple Button State)
 - 
-- 思考過程を可視化:
-- - 思考中のローディング表示
-- - 各配置の評価スコア詳細
-- - 最終的な判断理由の表示
-    */
-    const PuyoAI = (function() {
-    const WIDTH = 6;
-    const HEIGHT = 14;
-    const COLORS = [1, 2, 3, 4];
-  
-  // 思考ログ用の配列
-  let thinkingLog = [];
-  let isThinking = false;
-  
-  /**
-  - 思考ログをクリア
-    */
-    function clearThinkingLog() {
-    thinkingLog = [];
-    }
-  
-  /**
-  - 思考ログに追加
-    */
-    function addThinkingLog(message, data = {}) {
-    thinkingLog.push({
-    message,
-    data,
-    timestamp: Date.now()
-    });
-    
-    // UIに反映
-    updateThinkingDisplay();
-    }
-  
-  /**
-  - 思考過程をUIに表示
-    */
-    function updateThinkingDisplay() {
-    const thinkingPanel = document.getElementById(‘ai-thinking-panel’);
-    if (!thinkingPanel) return;
-    
-    if (isThinking && thinkingLog.length > 0) {
-    const lastLog = thinkingLog[thinkingLog.length - 1];
-    thinkingPanel.innerHTML = `<div class="thinking-message">${lastLog.message}</div> ${Object.keys(lastLog.data).length > 0 ? `<div class="thinking-details">${formatThinkingData(lastLog.data)}</div>` : ''}`;
-    thinkingPanel.style.display = ‘block’;
-    } else {
-    thinkingPanel.style.display = ‘none’;
-    }
-    }
-  
-  /**
-  - 思考データを整形
-    */
-    function formatThinkingData(data) {
-    let html = ‘<ul>’;
-    for (let [key, value] of Object.entries(data)) {
-    if (typeof value === ‘number’) {
-    value = Math.round(value * 10) / 10; // 小数点1桁
-    }
-    html += `<li><strong>${key}:</strong> ${value}</li>`;
-    }
-    html += ‘</ul>’;
-    return html;
-    }
-  
-  /**
-  - 思考結果の詳細をコンソールとUIに出力
-    */
-    function showThinkingResult(evaluations, bestMove) {
-    console.log(”=== AI思考結果 ===”);
-    console.log(“評価した配置数:”, evaluations.length);
-    
-    // トップ5を表示
-    const topEvaluations = evaluations
-    .sort((a, b) => b.totalScore - a.totalScore)
-    .slice(0, 5);
-    
-    console.log(”\nトップ5の配置:”);
-    topEvaluations.forEach((ev, idx) => {
-    console.log(`${idx + 1}. x=${ev.x}, rot=${ev.rotation}, スコア=${Math.round(ev.totalScore)}`);
-    console.log(`   即座の連鎖: ${ev.immediateChain}鎖`);
-    console.log(`   ポテンシャル: ${Math.round(ev.potential)}`);
-    console.log(`   高さペナルティ: -${Math.round(ev.heightPenalty)}`);
-    console.log(`   色バランス: -${Math.round(ev.colorPenalty)}`);
-    if (ev.nextScore !== undefined) {
-    console.log(`   次の手評価: ${Math.round(ev.nextScore)}`);
-    }
-    });
-    
-    // UIに詳細を表示
-    const detailsPanel = document.getElementById(‘ai-details-panel’);
-    if (detailsPanel) {
-    let html = ‘<div class="ai-result-header">🤔 AI思考結果</div>’;
-    html += `<div class="ai-result-best">最良の手: x=${bestMove.x}, 回転=${['↑', '→', '↓', '←'][bestMove.rotation]}</div>`;
-    html += ‘<div class="ai-result-top">トップ5の候補:</div>’;
-    html += ‘<ol class="ai-evaluations-list">’;
-    
-    ```
-     topEvaluations.forEach(ev => {
-         const isSelected = ev.x === bestMove.x && ev.rotation === bestMove.rotation;
-         html += `<li class="${isSelected ? 'selected' : ''}">`;
-         html += `<div class="eval-position">x=${ev.x}, 回転=${['↑', '→', '↓', '←'][ev.rotation]} (${Math.round(ev.totalScore)}点)</div>`;
-         html += '<div class="eval-breakdown">';
-         html += `<span class="eval-item">連鎖: ${ev.immediateChain}鎖</span>`;
-         html += `<span class="eval-item">形: +${Math.round(ev.potential)}</span>`;
-         html += `<span class="eval-item">高さ: -${Math.round(ev.heightPenalty)}</span>`;
-         html += '</div>';
-         html += '</li>';
-     });
-     
-     html += '</ol>';
-     detailsPanel.innerHTML = html;
-     detailsPanel.style.display = 'block';
-    ```
-    
-    }
-    }
+- 主な改善点:
+- 1. 連鎖形状の認識（階段積み、GTR、連鎖の種）
+- 1. 色のバランス評価
+- 1. 高さペナルティの強化
+- 1. より深い探索（2手先読み）
+- 1. 連鎖ポテンシャルの詳細な評価
+- 1. ボタン状態の管理（思考中は無効化）
+   */
+   const PuyoAI = (function() {
+   const WIDTH = 6;
+   const HEIGHT = 14;
+   const COLORS = [1, 2, 3, 4];
   
   /**
   - 14段目(Y=13)への設置が許可されているかチェックする
@@ -452,24 +346,16 @@
   }
   
   /**
-  - 最適な手を探索（思考過程を表示）
+  - 最適な手を探索（ボタン状態管理付き）
     */
     function getBestMove(board, axisColor, childColor, nextAxisColor, nextChildColor) {
-    isThinking = true;
-    clearThinkingLog();
-    
-    addThinkingLog(“🤔 思考開始…”);
+    // ボタンを無効化
+    setAIButtonState(true);
     
     let bestScore = -Infinity;
     let bestMove = { x: 2, rotation: 0 };
-    let evaluations = [];
     const allowed14 = is14thRowAllowed(board);
     
-    addThinkingLog(“📊 可能な配置を評価中…”);
-    
-    let evaluatedCount = 0;
-    
-    // 全ての可能な配置を評価
     for (let x = 0; x < WIDTH; x++) {
     for (let rot = 0; rot < 4; rot++) {
     if (!isReachable(board, x)) continue;
@@ -489,46 +375,20 @@
     
          if (!placePuyo(tempBoard, x, rot, axisColor, childColor)) continue;
     
-         evaluatedCount++;
-         
-         // 評価中の表示を更新
-         if (evaluatedCount % 5 === 0) {
-             addThinkingLog(`評価中... (${evaluatedCount}手目)`);
-         }
-    
-         // === スコアリング ===
          let totalScore = 0;
-         let evaluation = {
-             x: x,
-             rotation: rot,
-             immediateChain: 0,
-             potential: 0,
-             heightPenalty: 0,
-             colorPenalty: 0,
-             totalScore: 0
-         };
          
-         // 1. 即座の連鎖評価
          let res1 = simulatePureChain(tempBoard);
-         evaluation.immediateChain = res1.chains;
          totalScore += res1.chains * 2000;
          
-         // 2. 高さペナルティ
          let heightPenalty = evaluateHeightPenalty(res1.finalBoard);
-         evaluation.heightPenalty = heightPenalty;
          totalScore -= heightPenalty;
          
-         // 3. 色のバランスペナルティ
          let colorPenalty = evaluateColorBalance(res1.finalBoard);
-         evaluation.colorPenalty = colorPenalty;
          totalScore -= colorPenalty;
          
-         // 4. 連鎖ポテンシャル
          let potential = evaluateDetailedChainPotential(res1.finalBoard);
-         evaluation.potential = potential;
          totalScore += potential;
          
-         // 5. 次の手のポテンシャル
          if (nextAxisColor && nextChildColor) {
              let nextMaxScore = -Infinity;
              
@@ -553,42 +413,45 @@
              }
              
              if (nextMaxScore > -Infinity) {
-                 evaluation.nextScore = nextMaxScore * 0.3;
                  totalScore += nextMaxScore * 0.3;
              }
          }
     
-         evaluation.totalScore = totalScore;
-         evaluations.push(evaluation);
-    
          if (totalScore > bestScore) {
              bestScore = totalScore;
              bestMove = { x, rotation: rot };
-             
-             addThinkingLog(`✨ 新しい最良手発見!`, {
-                 '位置': `x=${x}, 回転=${['↑', '→', '↓', '←'][rot]}`,
-                 'スコア': Math.round(totalScore),
-                 '即座の連鎖': `${res1.chains}鎖`
-             });
          }
      }
     ```
     
     }
     
-    addThinkingLog(“✅ 思考完了!”, {
-    ‘評価した手数’: evaluatedCount,
-    ‘最良の手’: `x=${bestMove.x}, 回転=${['↑', '→', '↓', '←'][bestMove.rotation]}`,
-    ‘スコア’: Math.round(bestScore)
-    });
+    console.log(“AI推奨位置: x=” + bestMove.x + “, rotation=” + bestMove.rotation + “, スコア=” + Math.round(bestScore));
     
-    // 思考結果の詳細を表示
-    showThinkingResult(evaluations, bestMove);
-    
-    isThinking = false;
-    updateThinkingDisplay();
+    // ボタンを有効化
+    setAIButtonState(false);
     
     return bestMove;
+    }
+  
+  /**
+  - AIボタンの状態を変更
+    */
+    function setAIButtonState(isThinking) {
+    const aiButton = document.getElementById(‘ai-button’);
+    if (!aiButton) return;
+    
+    if (isThinking) {
+    aiButton.disabled = true;
+    aiButton.style.backgroundColor = ‘#999’;
+    aiButton.style.cursor = ‘not-allowed’;
+    aiButton.textContent = ‘思考中…’;
+    } else {
+    aiButton.disabled = false;
+    aiButton.style.backgroundColor = ‘#ff9800’;
+    aiButton.style.cursor = ‘pointer’;
+    aiButton.textContent = ‘AIヒントを表示’;
+    }
     }
   
   function placePuyo(board, x, rot, axisColor, childColor) {
