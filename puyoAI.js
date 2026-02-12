@@ -1,18 +1,125 @@
 /**
 
-- PuyoAI v12 - Enhanced Chain Building Edition
+- PuyoAI v13 - Transparent Thinking Edition
 - 
-- 主な改善点:
-- 1. 連鎖形状の認識（階段積み、GTR、連鎖の種）
-- 1. 色のバランス評価
-- 1. 高さペナルティの強化
-- 1. より深い探索（3-4手先読み）
-- 1. 連鎖ポテンシャルの詳細な評価
-   */
-   const PuyoAI = (function() {
-   const WIDTH = 6;
-   const HEIGHT = 14;
-   const COLORS = [1, 2, 3, 4];
+- 思考過程を可視化:
+- - 思考中のローディング表示
+- - 各配置の評価スコア詳細
+- - 最終的な判断理由の表示
+    */
+    const PuyoAI = (function() {
+    const WIDTH = 6;
+    const HEIGHT = 14;
+    const COLORS = [1, 2, 3, 4];
+  
+  // 思考ログ用の配列
+  let thinkingLog = [];
+  let isThinking = false;
+  
+  /**
+  - 思考ログをクリア
+    */
+    function clearThinkingLog() {
+    thinkingLog = [];
+    }
+  
+  /**
+  - 思考ログに追加
+    */
+    function addThinkingLog(message, data = {}) {
+    thinkingLog.push({
+    message,
+    data,
+    timestamp: Date.now()
+    });
+    
+    // UIに反映
+    updateThinkingDisplay();
+    }
+  
+  /**
+  - 思考過程をUIに表示
+    */
+    function updateThinkingDisplay() {
+    const thinkingPanel = document.getElementById(‘ai-thinking-panel’);
+    if (!thinkingPanel) return;
+    
+    if (isThinking && thinkingLog.length > 0) {
+    const lastLog = thinkingLog[thinkingLog.length - 1];
+    thinkingPanel.innerHTML = `<div class="thinking-message">${lastLog.message}</div> ${Object.keys(lastLog.data).length > 0 ? `<div class="thinking-details">${formatThinkingData(lastLog.data)}</div>` : ''}`;
+    thinkingPanel.style.display = ‘block’;
+    } else {
+    thinkingPanel.style.display = ‘none’;
+    }
+    }
+  
+  /**
+  - 思考データを整形
+    */
+    function formatThinkingData(data) {
+    let html = ‘<ul>’;
+    for (let [key, value] of Object.entries(data)) {
+    if (typeof value === ‘number’) {
+    value = Math.round(value * 10) / 10; // 小数点1桁
+    }
+    html += `<li><strong>${key}:</strong> ${value}</li>`;
+    }
+    html += ‘</ul>’;
+    return html;
+    }
+  
+  /**
+  - 思考結果の詳細をコンソールとUIに出力
+    */
+    function showThinkingResult(evaluations, bestMove) {
+    console.log(”=== AI思考結果 ===”);
+    console.log(“評価した配置数:”, evaluations.length);
+    
+    // トップ5を表示
+    const topEvaluations = evaluations
+    .sort((a, b) => b.totalScore - a.totalScore)
+    .slice(0, 5);
+    
+    console.log(”\nトップ5の配置:”);
+    topEvaluations.forEach((ev, idx) => {
+    console.log(`${idx + 1}. x=${ev.x}, rot=${ev.rotation}, スコア=${Math.round(ev.totalScore)}`);
+    console.log(`   即座の連鎖: ${ev.immediateChain}鎖`);
+    console.log(`   ポテンシャル: ${Math.round(ev.potential)}`);
+    console.log(`   高さペナルティ: -${Math.round(ev.heightPenalty)}`);
+    console.log(`   色バランス: -${Math.round(ev.colorPenalty)}`);
+    if (ev.nextScore !== undefined) {
+    console.log(`   次の手評価: ${Math.round(ev.nextScore)}`);
+    }
+    });
+    
+    // UIに詳細を表示
+    const detailsPanel = document.getElementById(‘ai-details-panel’);
+    if (detailsPanel) {
+    let html = ‘<div class="ai-result-header">🤔 AI思考結果</div>’;
+    html += `<div class="ai-result-best">最良の手: x=${bestMove.x}, 回転=${['↑', '→', '↓', '←'][bestMove.rotation]}</div>`;
+    html += ‘<div class="ai-result-top">トップ5の候補:</div>’;
+    html += ‘<ol class="ai-evaluations-list">’;
+    
+    ```
+     topEvaluations.forEach(ev => {
+         const isSelected = ev.x === bestMove.x && ev.rotation === bestMove.rotation;
+         html += `<li class="${isSelected ? 'selected' : ''}">`;
+         html += `<div class="eval-position">x=${ev.x}, 回転=${['↑', '→', '↓', '←'][ev.rotation]} (${Math.round(ev.totalScore)}点)</div>`;
+         html += '<div class="eval-breakdown">';
+         html += `<span class="eval-item">連鎖: ${ev.immediateChain}鎖</span>`;
+         html += `<span class="eval-item">形: +${Math.round(ev.potential)}</span>`;
+         html += `<span class="eval-item">高さ: -${Math.round(ev.heightPenalty)}</span>`;
+         html += '</div>';
+         html += '</li>';
+     });
+     
+     html += '</ol>';
+     detailsPanel.innerHTML = html;
+     detailsPanel.style.display = 'block';
+    ```
+    
+    }
+    }
   
   /**
   - 14段目(Y=13)への設置が許可されているかチェックする
@@ -50,29 +157,22 @@
   
   /**
   - 高さに基づくペナルティを計算
-  - - 中央列（x=2,3）が高すぎるとペナルティ大
-  - - 全体的に高いとペナルティ
-  - - 高さの差が大きいと（凸凹が激しい）ペナルティ
-      */
-      function evaluateHeightPenalty(board) {
-      let heights = getColumnHeights(board);
-      let penalty = 0;
+    */
+    function evaluateHeightPenalty(board) {
+    let heights = getColumnHeights(board);
+    let penalty = 0;
     
-    // 中央列（x=2,3）の高さペナルティ
     if (heights[2] > 10) penalty += (heights[2] - 10) * 500;
     if (heights[3] > 10) penalty += (heights[3] - 10) * 500;
     
-    // 平均高さペナルティ
     let avgHeight = heights.reduce((a, b) => a + b, 0) / WIDTH;
     if (avgHeight > 8) penalty += (avgHeight - 8) * 100;
     
-    // 高さの分散（凸凹）ペナルティ
     let maxHeight = Math.max(…heights);
     let minHeight = Math.min(…heights);
     let heightDiff = maxHeight - minHeight;
     if (heightDiff > 4) penalty += (heightDiff - 4) * 50;
     
-    // 12段目に到達していたら大ペナルティ
     if (heights[2] >= 12) penalty += 10000;
     
     return penalty;
@@ -80,12 +180,10 @@
   
   /**
   - 色のバランスを評価
-  - - 各色が均等に配置されているほど高評価
-  - - 特定の色が偏りすぎているとペナルティ
-      */
-      function evaluateColorBalance(board) {
-      let colorCounts = {1: 0, 2: 0, 3: 0, 4: 0};
-      let totalPuyos = 0;
+    */
+    function evaluateColorBalance(board) {
+    let colorCounts = {1: 0, 2: 0, 3: 0, 4: 0};
+    let totalPuyos = 0;
     
     for (let y = 0; y < 12; y++) {
     for (let x = 0; x < WIDTH; x++) {
@@ -98,7 +196,6 @@
     
     if (totalPuyos === 0) return 0;
     
-    // 理想的な比率は25%ずつ
     let idealRatio = 0.25;
     let penalty = 0;
     
@@ -107,7 +204,6 @@
     let deviation = Math.abs(ratio - idealRatio);
     
     ```
-     // 偏差が大きいほどペナルティ
      if (deviation > 0.15) {
          penalty += (deviation - 0.15) * 200;
      }
@@ -120,7 +216,6 @@
   
   /**
   - 連鎖の「種」を検出
-  - 種 = 3個同色が隣接している状態（あと1個で消える）
     */
     function detectChainSeeds(board) {
     let seeds = [];
@@ -150,7 +245,6 @@
              });
          }
          
-         // 3個グループ = 連鎖の種
          if (group.length === 3) {
              seeds.push({ color, positions: group, size: 3 });
          }
@@ -164,22 +258,17 @@
   
   /**
   - 階段積みパターンの検出
-  - 階段積み = 連鎖の種が階段状に配置されている
     */
     function detectStairPattern(board) {
     let score = 0;
     let seeds = detectChainSeeds(board);
     
-    // 種の数が多いほど高評価
     score += seeds.length * 300;
     
-    // 縦方向に種が重なっていると階段積みの可能性
     for (let seed of seeds) {
     let avgY = seed.positions.reduce((sum, p) => sum + p.y, 0) / seed.positions.length;
-    let avgX = seed.positions.reduce((sum, p) => sum + p.x, 0) / seed.positions.length;
     
     ```
-     // 低い位置にある種ほど高評価（連鎖の起点として重要）
      if (avgY < 4) {
          score += (4 - avgY) * 50;
      }
@@ -192,19 +281,16 @@
   
   /**
   - GTR形（後折り）のパターン検出
-  - GTRの特徴: L字型の配置
     */
     function detectGTRPattern(board) {
     let score = 0;
     
-    // 簡易的なL字パターン検出
     for (let x = 0; x < WIDTH - 1; x++) {
     for (let y = 0; y < 10; y++) {
     let color = board[y][x];
     if (color === 0 || !COLORS.includes(color)) continue;
     
     ```
-         // L字の検出（横2個 + 縦2個）
          if (board[y][x+1] === color && 
              board[y+1][x] === color && 
              board[y+2][x] === color) {
@@ -224,15 +310,12 @@
     function evaluateDetailedChainPotential(board) {
     let score = 0;
     
-    // 1. 連鎖の種の評価
     let seedScore = detectStairPattern(board);
     score += seedScore;
     
-    // 2. GTRパターンの評価
     let gtrScore = detectGTRPattern(board);
     score += gtrScore;
     
-    // 3. 各列に1つずつぷよを置いてみる簡易評価
     let maxChain = 0;
     const allowed14 = is14thRowAllowed(board);
     
@@ -369,12 +452,22 @@
   }
   
   /**
-  - 最適な手を探索（改善版）
+  - 最適な手を探索（思考過程を表示）
     */
     function getBestMove(board, axisColor, childColor, nextAxisColor, nextChildColor) {
+    isThinking = true;
+    clearThinkingLog();
+    
+    addThinkingLog(“🤔 思考開始…”);
+    
     let bestScore = -Infinity;
     let bestMove = { x: 2, rotation: 0 };
+    let evaluations = [];
     const allowed14 = is14thRowAllowed(board);
+    
+    addThinkingLog(“📊 可能な配置を評価中…”);
+    
+    let evaluatedCount = 0;
     
     // 全ての可能な配置を評価
     for (let x = 0; x < WIDTH; x++) {
@@ -384,7 +477,6 @@
     ```
          let tempBoard = board.map(row => [...row]);
          
-         // 14段目チェック
          let willUse14 = false;
          let h = 0; 
          while(h < 14 && tempBoard[h][x] !== 0) h++;
@@ -397,26 +489,46 @@
     
          if (!placePuyo(tempBoard, x, rot, axisColor, childColor)) continue;
     
+         evaluatedCount++;
+         
+         // 評価中の表示を更新
+         if (evaluatedCount % 5 === 0) {
+             addThinkingLog(`評価中... (${evaluatedCount}手目)`);
+         }
+    
          // === スコアリング ===
          let totalScore = 0;
+         let evaluation = {
+             x: x,
+             rotation: rot,
+             immediateChain: 0,
+             potential: 0,
+             heightPenalty: 0,
+             colorPenalty: 0,
+             totalScore: 0
+         };
          
          // 1. 即座の連鎖評価
          let res1 = simulatePureChain(tempBoard);
-         totalScore += res1.chains * 2000; // 連鎖が起きれば大幅加点
+         evaluation.immediateChain = res1.chains;
+         totalScore += res1.chains * 2000;
          
          // 2. 高さペナルティ
          let heightPenalty = evaluateHeightPenalty(res1.finalBoard);
+         evaluation.heightPenalty = heightPenalty;
          totalScore -= heightPenalty;
          
          // 3. 色のバランスペナルティ
          let colorPenalty = evaluateColorBalance(res1.finalBoard);
+         evaluation.colorPenalty = colorPenalty;
          totalScore -= colorPenalty;
          
-         // 4. 連鎖ポテンシャル（詳細版）
+         // 4. 連鎖ポテンシャル
          let potential = evaluateDetailedChainPotential(res1.finalBoard);
+         evaluation.potential = potential;
          totalScore += potential;
          
-         // 5. 次の手のポテンシャル（2手先読み）
+         // 5. 次の手のポテンシャル
          if (nextAxisColor && nextChildColor) {
              let nextMaxScore = -Infinity;
              
@@ -441,21 +553,41 @@
              }
              
              if (nextMaxScore > -Infinity) {
-                 totalScore += nextMaxScore * 0.3; // 次の手は控えめに評価
+                 evaluation.nextScore = nextMaxScore * 0.3;
+                 totalScore += nextMaxScore * 0.3;
              }
          }
     
-         // 最良の手を更新
+         evaluation.totalScore = totalScore;
+         evaluations.push(evaluation);
+    
          if (totalScore > bestScore) {
              bestScore = totalScore;
              bestMove = { x, rotation: rot };
+             
+             addThinkingLog(`✨ 新しい最良手発見!`, {
+                 '位置': `x=${x}, 回転=${['↑', '→', '↓', '←'][rot]}`,
+                 'スコア': Math.round(totalScore),
+                 '即座の連鎖': `${res1.chains}鎖`
+             });
          }
      }
     ```
     
     }
     
-    console.log(“Best move score:”, bestScore, “Position:”, bestMove);
+    addThinkingLog(“✅ 思考完了!”, {
+    ‘評価した手数’: evaluatedCount,
+    ‘最良の手’: `x=${bestMove.x}, 回転=${['↑', '→', '↓', '←'][bestMove.rotation]}`,
+    ‘スコア’: Math.round(bestScore)
+    });
+    
+    // 思考結果の詳細を表示
+    showThinkingResult(evaluations, bestMove);
+    
+    isThinking = false;
+    updateThinkingDisplay();
+    
     return bestMove;
     }
   
