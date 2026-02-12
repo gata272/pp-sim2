@@ -1283,7 +1283,7 @@ const slots = [next1Element, next2Element];
 
 const createPuyo = (color) => {
     let puyo = document.createElement('div');
-    puyo.className = `puyo puyo-${color}`;
+    puyo.className = 'puyo puyo-' + color;
     return puyo;
 };
 
@@ -1313,7 +1313,7 @@ if (!listContainer || !visibleSlots[0] || !visibleSlots[1]) return;
 //クリックで編集可能なぷよ要素を作成するヘルパー関数
 const createEditablePuyo = (color, listIndex, puyoIndex) => {
     let puyo = document.createElement('div');
-    puyo.className = `puyo puyo-${color}`;
+    puyo.className = 'puyo puyo-' + color;
     
     puyo.addEventListener('pointerdown', (event) => {
         event.stopPropagation(); 
@@ -1353,7 +1353,7 @@ for (let i = NUM_VISIBLE_NEXT_PUYOS; i < MAX_NEXT_PUYOS; i++) {
 
     // 手数 (N3, N4...)
     const countSpan = document.createElement('span');
-    countSpan.textContent = `N${i + 1}`;
+    countSpan.textContent = 'N' + (i + 1);
     pairContainer.appendChild(countSpan);
     
     // ぷよの行
