@@ -1,18 +1,16 @@
 /**
 
-- PuyoAI v12 - Enhanced Chain Builder Edition
+- PuyoAI v12 - Enhanced & Compatible Edition
 - 
 - 主な改善点:
-- 1. より詳細な評価関数（連結数、色の分布、高さバランス）
-- 1. 探索深度の増加（3-4手先まで）
-- 1. 連鎖形状の評価（階段、縦3など）
-- 1. より賢い手の優先順位付け
+- 1. より詳細な評価関数（連結数、色の分布、高さバランス、連鎖形状）
+- 1. 探索深度を2手に調整（処理速度とのバランス）
+- 1. 既存システムとの完全互換性
    */
    const PuyoAI = (function() {
    const WIDTH = 6;
    const HEIGHT = 14;
    const COLORS = [1, 2, 3, 4];
-   const SEARCH_DEPTH = 3; // 探索深度（3手先まで読む）
   
   /**
   - 14段目(Y=13)への設置が許可されているかチェックする
@@ -42,24 +40,24 @@
     let score = 0;
     
     // 1. 連結数の評価（同色が隣接している数）
-    score += evaluateConnections(board) * 50;
+    score += evaluateConnections(board) * 80;
     
-    // 2. 色の分布評価（色が散らばりすぎていないか）
-    score += evaluateColorDistribution(board) * 30;
+    // 2. 色の集中度評価（色がまとまっているか）
+    score += evaluateColorClustering(board) * 40;
     
     // 3. 高さの評価（低い方が良い、バランスも重要）
-    score += evaluateHeight(board) * 20;
+    score += evaluateHeight(board) * 30;
     
     // 4. 連鎖形状の評価（階段、縦3など）
-    score += evaluateChainShapes(board) * 100;
+    score += evaluateChainShapes(board) * 120;
     
-    // 5. 2連結・3連結の評価（連鎖の種）
-    score += evaluateChainSeeds(board) * 80;
+    // 5. トリガー候補の評価（あと1個で消える位置）
+    score += evaluateTriggerPoints(board) * 100;
     
     // 6. 真ん中の高さペナルティ（3列目が高いと危険）
     let midHeight = 0;
     while (midHeight < 14 && board[midHeight][2] !== 0) midHeight++;
-    if (midHeight > 10) score -= (midHeight - 10) * 500;
+    if (midHeight > 10) score -= (midHeight - 10) * 800;
     
     return score;
     }
@@ -94,10 +92,10 @@
                  });
              }
              
-             // 2連結: +10, 3連結: +50, 4連結以上: +100
-             if (group.length === 2) connectionScore += 10;
-             else if (group.length === 3) connectionScore += 50;
-             else if (group.length >= 4) connectionScore += 100;
+             // 2連結: +15, 3連結: +80, 4連結以上: +150
+             if (group.length === 2) connectionScore += 15;
+             else if (group.length === 3) connectionScore += 80;
+             else if (group.length >= 4) connectionScore += 150;
          }
      }
     ```
@@ -107,49 +105,35 @@
     }
   
   /**
-  - 色の分布を評価（各色がまとまっているか）
+  - 色の集中度を評価（各色が縦に積まれているか）
     */
-    function evaluateColorDistribution(board) {
-    let colorCounts = [0, 0, 0, 0, 0]; // index 0は未使用
-    let colorCenters = [{x:0,y:0}, {x:0,y:0}, {x:0,y:0}, {x:0,y:0}, {x:0,y:0}];
+    function evaluateColorClustering(board) {
+    let clusterScore = 0;
     
-    for (let y = 0; y < 12; y++) {
+    // 各列の色の連続性を評価
     for (let x = 0; x < WIDTH; x++) {
-    let c = board[y][x];
-    if (c !== 0) {
-    colorCounts[c]++;
-    colorCenters[c].x += x;
-    colorCenters[c].y += y;
-    }
-    }
-    }
-    
-    let distributionScore = 0;
-    for (let c = 1; c <= 4; c++) {
-    if (colorCounts[c] > 0) {
-    // 色の重心を計算
-    colorCenters[c].x /= colorCounts[c];
-    colorCenters[c].y /= colorCounts[c];
+    let prevColor = 0;
+    let streak = 0;
     
     ```
-         // 各ぷよが重心に近いほど良い
-         let variance = 0;
-         for (let y = 0; y < 12; y++) {
-             for (let x = 0; x < WIDTH; x++) {
-                 if (board[y][x] === c) {
-                     let dx = x - colorCenters[c].x;
-                     let dy = y - colorCenters[c].y;
-                     variance += Math.sqrt(dx*dx + dy*dy);
-                 }
+     for (let y = 0; y < 12; y++) {
+         let c = board[y][x];
+         if (c !== 0) {
+             if (c === prevColor) {
+                 streak++;
+                 // 縦に連続しているほど良い
+                 clusterScore += streak * 5;
+             } else {
+                 streak = 1;
+                 prevColor = c;
              }
          }
-         // 分散が小さいほど良い
-         distributionScore -= variance;
      }
     ```
     
     }
-    return distributionScore;
+    
+    return clusterScore;
     }
   
   /**
@@ -170,17 +154,17 @@
     
     // 平均の高さが低いほど良い
     let avgHeight = totalHeight / WIDTH;
-    let heightScore = -(avgHeight * avgHeight);
+    let heightScore = -(avgHeight * avgHeight * 2);
     
     // 高さのばらつきが少ないほど良い
     let variance = 0;
     for (let h of heights) {
     variance += (h - avgHeight) * (h - avgHeight);
     }
-    heightScore -= variance;
+    heightScore -= variance * 2;
     
     // 最大の高さが11を超えるとペナルティ
-    if (maxHeight >= 11) heightScore -= 1000;
+    if (maxHeight >= 11) heightScore -= 2000;
     
     return heightScore;
     }
@@ -191,41 +175,40 @@
     function evaluateChainShapes(board) {
     let shapeScore = 0;
     
-    // 階段形状の検出（横方向）
+    // 階段形状の検出
     for (let y = 0; y < 11; y++) {
     for (let x = 0; x < WIDTH - 1; x++) {
     if (board[y][x] !== 0 && board[y+1][x+1] !== 0) {
-    // 階段の基本形
     if (board[y][x] === board[y+1][x+1]) {
-    shapeScore += 20;
+    shapeScore += 30;
     }
     }
     }
     }
     
-    // 縦3の検出
+    // 縦3の検出（強力な連鎖の基本）
     for (let y = 0; y < 10; y++) {
     for (let x = 0; x < WIDTH; x++) {
     if (board[y][x] !== 0 &&
     board[y][x] === board[y+1][x] &&
     board[y+1][x] === board[y+2][x]) {
-    shapeScore += 30;
+    shapeScore += 50;
     }
     }
     }
     
     // L字形状の検出
-    for (let y = 0; y < 11; y++) {
+    for (let y = 1; y < 11; y++) {
     for (let x = 0; x < WIDTH - 1; x++) {
     let c = board[y][x];
     if (c !== 0) {
     // L字（右下）
     if (board[y+1][x] === c && board[y+1][x+1] === c) {
-    shapeScore += 25;
+    shapeScore += 35;
     }
     // L字（右上）
-    if (y > 0 && board[y-1][x] === c && board[y][x+1] === c) {
-    shapeScore += 25;
+    if (board[y-1][x] === c && board[y][x+1] === c) {
+    shapeScore += 35;
     }
     }
     }
@@ -235,40 +218,40 @@
     }
   
   /**
-  - 連鎖の種（2連結、3連結）を評価
+  - トリガー候補を評価（あと1個で消える位置）
     */
-    function evaluateChainSeeds(board) {
-    let seedScore = 0;
+    function evaluateTriggerPoints(board) {
+    let triggerScore = 0;
     
-    // トリガーとなりうる位置を探す
-    for (let y = 1; y < 11; y++) {
+    for (let y = 0; y < 11; y++) {
     for (let x = 0; x < WIDTH; x++) {
-    if (board[y][x] === 0 && board[y-1][x] !== 0) {
-    // この位置にぷよを置くと連鎖が起きるか？
-    let color = board[y-1][x];
-    let count = 1;
+    if (board[y][x] === 0) {
+    // この空白に各色を置いた場合を評価
+    for (let color of COLORS) {
+    let count = 0;
     
     ```
-             // 周囲の同色をカウント
-             [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
-                 let nx = x + dx, ny = y + dy;
-                 if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && 
-                     board[ny][nx] === color) {
-                     count++;
-                 }
-             });
-             
-             // あと1個で消える状態（3連結）は高評価
-             if (count === 3) seedScore += 100;
-             // あと2個で消える状態（2連結）も評価
-             else if (count === 2) seedScore += 30;
+                 // 周囲の同色をカウント
+                 [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
+                     let nx = x + dx, ny = y + dy;
+                     if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && 
+                         board[ny][nx] === color) {
+                         count++;
+                     }
+                 });
+                 
+                 // あと1個で消える（3連結）は非常に高評価
+                 if (count === 3) triggerScore += 200;
+                 // あと2個で消える（2連結）も評価
+                 else if (count === 2) triggerScore += 50;
+             }
          }
      }
     ```
     
     }
     
-    return seedScore;
+    return triggerScore;
     }
   
   /**
@@ -335,79 +318,24 @@
   }
   }
   
-  /**
-  - 深い探索を行う（ミニマックス風）
-    */
-    function searchBestMove(board, axisColor, childColor, depth, futurePuyos) {
-    if (depth === 0) {
-    // 葉ノード: 盤面を評価
-    let chainRes = simulatePureChain(board);
-    let chainScore = chainRes.chains * 1000;
-    let boardScore = evaluateBoard(chainRes.finalBoard);
-    return { score: chainScore + boardScore, move: null };
-    }
-    
-    let bestScore = -Infinity;
-    let bestMove = null;
-    const allowed14 = is14thRowAllowed(board);
-    
-    // すべての可能な手を試す
-    let moves = generatePossibleMoves(board, allowed14);
-    
-    for (let move of moves) {
-    let tempBoard = board.map(row => […row]);
-    
-    ```
-     if (!placePuyo(tempBoard, move.x, move.rotation, axisColor, childColor)) {
-         continue;
-     }
-     
-     // 連鎖を実行
-     let chainRes = simulatePureChain(tempBoard);
-     let immediateScore = chainRes.chains * 1000;
-     
-     // 次の手を探索
-     let futureScore = 0;
-     if (depth > 1 && futurePuyos && futurePuyos.length > 0) {
-         let nextPuyo = futurePuyos[0];
-         let remainingPuyos = futurePuyos.slice(1);
-         let nextResult = searchBestMove(
-             chainRes.finalBoard, 
-             nextPuyo.axis, 
-             nextPuyo.child, 
-             depth - 1, 
-             remainingPuyos
-         );
-         futureScore = nextResult.score * 0.8; // 未来の評価は割引
-     } else {
-         // 未来のぷよがない場合は盤面評価のみ
-         futureScore = evaluateBoard(chainRes.finalBoard);
-     }
-     
-     let totalScore = immediateScore + futureScore;
-     
-     // 中央が高すぎる場合は大きなペナルティ
-     if (tempBoard[11][2] !== 0) {
-         totalScore -= 100000;
-     }
-     
-     if (totalScore > bestScore) {
-         bestScore = totalScore;
-         bestMove = move;
-     }
-    ```
-    
-    }
-    
-    return { score: bestScore, move: bestMove };
-    }
+  function isReachable(board, targetX) {
+  const startX = 2;
+  const direction = targetX > startX ? 1 : -1;
+  for (let x = startX; x !== targetX; x += direction) {
+  if (board[12][x] !== 0) return false;
+  }
+  return true;
+  }
   
   /**
-  - 可能な手をすべて生成
+  - 最適な手を取得（メインAPI）
     */
-    function generatePossibleMoves(board, allowed14) {
-    let moves = [];
+    function getBestMove(board, axisColor, childColor, nextAxisColor, nextChildColor) {
+    let bestScore = -Infinity;
+    let bestMove = { x: 2, rotation: 0 };
+    const allowed14 = is14thRowAllowed(board);
     
+    // すべての可能な手を評価
     for (let x = 0; x < WIDTH; x++) {
     if (!isReachable(board, x)) continue;
     
@@ -432,44 +360,63 @@
          }
          
          if (willUse14 && !allowed14) continue;
+    
+         // 盤面をコピーして手を試す
+         let tempBoard = board.map(row => [...row]);
          
-         moves.push({ x, rotation: rot });
+         if (!placePuyo(tempBoard, x, rot, axisColor, childColor)) {
+             continue;
+         }
+    
+         // 即座の連鎖を計算
+         let chainRes = simulatePureChain(tempBoard);
+         let immediateScore = chainRes.chains * 2000; // 連鎖は非常に高評価
+         
+         // 盤面の質を評価
+         let boardQuality = evaluateBoard(chainRes.finalBoard);
+         
+         // 次の手の評価（1手先読み）
+         let futureScore = 0;
+         if (nextAxisColor && nextChildColor) {
+             let maxFutureScore = -Infinity;
+             
+             for (let nx = 0; nx < WIDTH; nx++) {
+                 if (!isReachable(chainRes.finalBoard, nx)) continue;
+                 
+                 for (let nrot = 0; nrot < 4; nrot++) {
+                     let nextBoard = chainRes.finalBoard.map(row => [...row]);
+                     
+                     if (placePuyo(nextBoard, nx, nrot, nextAxisColor, nextChildColor)) {
+                         let nextChainRes = simulatePureChain(nextBoard);
+                         let nextScore = nextChainRes.chains * 1000 + evaluateBoard(nextChainRes.finalBoard) * 0.6;
+                         
+                         if (nextScore > maxFutureScore) {
+                             maxFutureScore = nextScore;
+                         }
+                     }
+                 }
+             }
+             
+             futureScore = maxFutureScore;
+         }
+         
+         let totalScore = immediateScore + boardQuality + futureScore;
+         
+         // 中央が高すぎる場合は大きなペナルティ
+         if (tempBoard[11][2] !== 0) {
+             totalScore -= 200000;
+         }
+         
+         if (totalScore > bestScore) {
+             bestScore = totalScore;
+             bestMove = { x, rotation: rot };
+         }
      }
     ```
     
     }
     
-    return moves;
-    }
-  
-  function isReachable(board, targetX) {
-  const startX = 2;
-  const direction = targetX > startX ? 1 : -1;
-  for (let x = startX; x !== targetX; x += direction) {
-  if (board[12][x] !== 0) return false;
-  }
-  return true;
-  }
-  
-  /**
-  - 最適な手を取得（メインAPI）
-    */
-    function getBestMove(board, axisColor, childColor, nextAxisColor, nextChildColor) {
-    // 未来のぷよリストを作成
-    let futurePuyos = [];
-    if (nextAxisColor && nextChildColor) {
-    futurePuyos.push({ axis: nextAxisColor, child: nextChildColor });
-    }
-    
-    // 深い探索を実行
-    let result = searchBestMove(board, axisColor, childColor, SEARCH_DEPTH, futurePuyos);
-    
-    if (result.move) {
-    return result.move;
-    }
-    
-    // フォールバック: 安全な手を返す
-    return { x: 2, rotation: 0 };
+    return bestMove;
     }
   
   function placePuyo(board, x, rot, axisColor, childColor) {
