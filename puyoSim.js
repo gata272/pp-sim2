@@ -1475,75 +1475,192 @@ document.addEventListener('DOMContentLoaded', () => {
 })();
 
 
-// AI連携コード（ボタン状態管理付き）
+// デバッグログを画面に表示する関数
+(function() {
+    let debugLog = null;
+    
+    window.showDebugLog = function(message) {
+        if (!debugLog) {
+            debugLog = document.createElement('div');
+            debugLog.id = 'debug-log';
+            debugLog.style.position = 'fixed';
+            debugLog.style.top = '10px';
+            debugLog.style.right = '10px';
+            debugLog.style.width = '300px';
+            debugLog.style.maxHeight = '400px';
+            debugLog.style.overflow = 'auto';
+            debugLog.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+            debugLog.style.color = '#0f0';
+            debugLog.style.padding = '10px';
+            debugLog.style.fontSize = '10px';
+            debugLog.style.fontFamily = 'monospace';
+            debugLog.style.zIndex = '10000';
+            debugLog.style.borderRadius = '5px';
+            debugLog.style.border = '2px solid #0f0';
+            document.body.appendChild(debugLog);
+            
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = '✕';
+            closeBtn.style.position = 'absolute';
+            closeBtn.style.top = '5px';
+            closeBtn.style.right = '5px';
+            closeBtn.style.background = '#f00';
+            closeBtn.style.color = '#fff';
+            closeBtn.style.border = 'none';
+            closeBtn.style.borderRadius = '3px';
+            closeBtn.style.padding = '2px 6px';
+            closeBtn.style.cursor = 'pointer';
+            closeBtn.onclick = function() {
+                debugLog.style.display = 'none';
+            };
+            debugLog.appendChild(closeBtn);
+        }
+        
+        debugLog.style.display = 'block';
+        const logEntry = document.createElement('div');
+        logEntry.textContent = '> ' + message;
+        logEntry.style.borderBottom = '1px solid #333';
+        logEntry.style.padding = '2px 0';
+        debugLog.appendChild(logEntry);
+        debugLog.scrollTop = debugLog.scrollHeight;
+    };
+    
+    window.clearDebugLog = function() {
+        if (debugLog) {
+            debugLog.innerHTML = '';
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = '✕';
+            closeBtn.style.position = 'absolute';
+            closeBtn.style.top = '5px';
+            closeBtn.style.right = '5px';
+            closeBtn.style.background = '#f00';
+            closeBtn.style.color = '#fff';
+            closeBtn.style.border = 'none';
+            closeBtn.style.borderRadius = '3px';
+            closeBtn.style.padding = '2px 6px';
+            closeBtn.style.cursor = 'pointer';
+            closeBtn.onclick = function() {
+                debugLog.style.display = 'none';
+            };
+            debugLog.appendChild(closeBtn);
+        }
+    };
+})();
+
+// PuyoAIが読み込まれるまで待機する関数
+function waitForPuyoAI(callback, maxAttempts = 50) {
+    let attempts = 0;
+    const checkInterval = setInterval(function() {
+        attempts++;
+        if (typeof PuyoAI !== 'undefined' && PuyoAI.getBestMove) {
+            clearInterval(checkInterval);
+            showDebugLog('PuyoAI読み込み成功 (試行' + attempts + '回目)');
+            callback();
+        } else if (attempts >= maxAttempts) {
+            clearInterval(checkInterval);
+            showDebugLog('ERROR: PuyoAI読み込みタイムアウト');
+            alert('エラー: PuyoAIが読み込まれませんでした。puyoAI.jsファイルを確認してください。');
+        }
+    }, 100);
+}
+
+// AI連携コード（PuyoAI読み込み待機版）
 (function() {
     let aiHint = null;
     const PUYO_COLORS = { 
-        1: '#e63946', // 赤
-        2: '#457b9d', // 青
-        3: '#8ac926', // 緑
-        4: '#fca311', // 黄
-        5: '#ccc',    // おじゃま
-        0: 'transparent' 
+        1: '#e63946', 2: '#457b9d', 3: '#8ac926', 4: '#fca311', 5: '#ccc', 0: 'transparent' 
     };
 
-    window.addEventListener('load', function() {
+    // DOMContentLoadedを待ってから初期化
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initAI);
+    } else {
+        initAI();
+    }
+
+    function initAI() {
+        showDebugLog('AI初期化開始');
+        
+        // PuyoAIの読み込みを待機
+        waitForPuyoAI(function() {
+            setupAIButton();
+        });
+    }
+
+    function setupAIButton() {
         const aiButton = document.getElementById('ai-button');
+        showDebugLog('AIボタン設定: ' + (aiButton ? 'OK' : 'NG'));
+        
         if (aiButton) {
             aiButton.addEventListener('click', async () => {
+                clearDebugLog();
+                showDebugLog('AIボタンクリック');
+                showDebugLog('gameState: ' + gameState);
+                
                 if (gameState !== 'playing' || !currentPuyo) {
                     alert('プレイ中のみAIヒントを表示できます。');
                     return;
                 }
 
-                // ボタンを灰色にして無効化
+                showDebugLog('currentPuyo存在: ' + (currentPuyo ? 'YES' : 'NO'));
+                
                 aiButton.disabled = true;
                 aiButton.style.backgroundColor = '#999';
                 aiButton.style.cursor = 'not-allowed';
                 aiButton.textContent = '思考中...';
+                showDebugLog('ボタン灰色化完了');
 
-                // 少し遅延を入れてUIを更新
-                await new Promise(resolve => setTimeout(resolve, 50));
+                await new Promise(resolve => setTimeout(resolve, 100));
 
                 try {
-                    // 次のぷよを取得（NEXT1とNEXT2）
                     const next1 = nextPuyoColors[0] || [0, 0];
-                    const next2 = nextPuyoColors[1] || [0, 0];
+                    showDebugLog('next1: [' + next1[0] + ',' + next1[1] + ']');
+                    showDebugLog('PuyoAI確認: ' + (typeof PuyoAI !== 'undefined' ? 'OK' : 'NG'));
 
                     if (typeof PuyoAI !== 'undefined' && PuyoAI.getBestMove) {
-                        // AIに最適な場所を計算させる（3手先読み）
+                        showDebugLog('AI計算開始...');
+                        
                         aiHint = PuyoAI.getBestMove(
                             board, 
                             currentPuyo.mainColor, 
                             currentPuyo.subColor,
-                            next1[0],  // NEXT1のメイン
-                            next1[1]   // NEXT1のサブ
+                            next1[0],
+                            next1[1]
                         );
                         
-                        console.log('AI推奨位置:', aiHint);
-                        console.log('現在のぷよ:', {main: currentPuyo.mainColor, sub: currentPuyo.subColor});
-                        console.log('NEXT1:', next1, 'NEXT2:', next2);
+                        showDebugLog('AI結果: ' + (aiHint ? 'x=' + aiHint.x + ' rot=' + aiHint.rotation : 'NULL'));
                         
-                        showAIHintOnBoard();
+                        if (aiHint) {
+                            showAIHintOnBoard();
+                        } else {
+                            showDebugLog('ERROR: aiHintがnull');
+                        }
+                    } else {
+                        showDebugLog('ERROR: PuyoAI未定義');
+                        alert('エラー: PuyoAIが利用できません');
                     }
                 } catch (error) {
-                    console.error('AI計算エラー:', error);
-                    alert('AI計算中にエラーが発生しました。');
+                    showDebugLog('ERROR: ' + error.message);
+                    alert('エラー: ' + error.message);
                 } finally {
-                    // ボタンを元の色に戻す
                     aiButton.disabled = false;
                     aiButton.style.backgroundColor = '#ff9800';
                     aiButton.style.cursor = 'pointer';
                     aiButton.textContent = 'アシスト';
+                    showDebugLog('ボタン復元完了');
                 }
             });
         }
-    });
+    }
 
     function showAIHintOnBoard() {
-        if (!aiHint || !currentPuyo) return;
+        showDebugLog('=== showAIHint開始 ===');
         
-        // 既存のヒントを削除
+        if (!aiHint || !currentPuyo) {
+            showDebugLog('ERROR: hint/puyo無し');
+            return;
+        }
+        
         document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
         
         const axisX = aiHint.x;
@@ -1552,34 +1669,44 @@ document.addEventListener('DOMContentLoaded', () => {
         let childY = axisY;
         const r = aiHint.rotation;
         
-        // 回転に応じた子ぷよの位置を計算
+        showDebugLog('軸X=' + axisX + ' 軸Y=' + axisY + ' rot=' + r);
+        
         if (r === 0) {
-            // 上
             childY = getDropY(axisX, axisY + 1);
         } else if (r === 1) {
-            // 右
             childX = axisX + 1;
             childY = getDropY(childX);
         } else if (r === 2) {
-            // 下
             childY = axisY;
             axisY = getDropY(axisX, childY + 1);
         } else if (r === 3) {
-            // 左
             childX = axisX - 1;
             childY = getDropY(childX);
         }
         
+        showDebugLog('子X=' + childX + ' 子Y=' + childY);
+        
         const axisColorCode = PUYO_COLORS[currentPuyo.mainColor] || '#fff';
         const childColorCode = PUYO_COLORS[currentPuyo.subColor] || '#fff';
         
-        // 13段目より下にある場合のみ表示（ゲームオーバーライン以下）
+        showDebugLog('軸色=' + axisColorCode);
+        showDebugLog('子色=' + childColorCode);
+        
         if (axisY < 13) {
+            showDebugLog('軸ドット作成試行');
             createDot(axisX, axisY, axisColorCode, '軸ぷよ');
+        } else {
+            showDebugLog('軸Y>=13 非表示');
         }
+        
         if (childY < 13) {
+            showDebugLog('子ドット作成試行');
             createDot(childX, childY, childColorCode, '子ぷよ');
+        } else {
+            showDebugLog('子Y>=13 非表示');
         }
+        
+        showDebugLog('=== showAIHint完了 ===');
     }
 
     function getDropY(x, startY = 0) {
@@ -1592,9 +1719,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function createDot(x, y, color, label) {
-        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return;
+        showDebugLog('createDot: (' + x + ',' + y + ')');
         
-        const cell = document.getElementById(`cell-${x}-${y}`);
+        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
+            showDebugLog('ERROR: 範囲外');
+            return;
+        }
+        
+        const cellId = 'cell-' + x + '-' + y;
+        const cell = document.getElementById(cellId);
+        
+        showDebugLog('cell ID: ' + cellId);
+        showDebugLog('cell存在: ' + (cell ? 'YES' : 'NO'));
+        
         if (cell) {
             const dot = document.createElement('div');
             dot.className = 'ai-hint-dot';
@@ -1613,6 +1750,10 @@ document.addEventListener('DOMContentLoaded', () => {
             
             cell.style.position = 'relative';
             cell.appendChild(dot);
+            
+            showDebugLog('ドット追加成功');
+        } else {
+            showDebugLog('ERROR: cell未発見');
         }
     }
 
@@ -1622,11 +1763,24 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 })();
 
-// 最大連鎖数表示機能（ボタン状態管理付き）
+// 最大連鎖数表示機能
 (function() {
     let maxChainPuyo = null;
 
-    window.addEventListener('load', function() {
+    // DOMContentLoadedを待ってから初期化
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initMaxChain);
+    } else {
+        initMaxChain();
+    }
+
+    function initMaxChain() {
+        waitForPuyoAI(function() {
+            setupMaxChainButton();
+        });
+    }
+
+    function setupMaxChainButton() {
         const maxChainButton = document.getElementById('max-chain-button');
         if (maxChainButton) {
             maxChainButton.addEventListener('click', async () => {
@@ -1635,14 +1789,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 
-                // ボタンを灰色にして無効化
                 maxChainButton.disabled = true;
                 maxChainButton.style.backgroundColor = '#999';
                 maxChainButton.style.cursor = 'not-allowed';
                 maxChainButton.textContent = '解析中...';
                 
-                // 少し遅延を入れてUIを更新
-                await new Promise(resolve => setTimeout(resolve, 50));
+                await new Promise(resolve => setTimeout(resolve, 100));
                 
                 try {
                     const boardCopy = board.map(row => [...row]);
@@ -1657,10 +1809,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
                 } catch (error) {
-                    console.error('最大連鎖解析エラー:', error);
                     alert('連鎖解析中にエラーが発生しました。');
                 } finally {
-                    // ボタンを元の色に戻す
                     maxChainButton.disabled = false;
                     maxChainButton.style.backgroundColor = '#e74c3c';
                     maxChainButton.style.cursor = 'pointer';
@@ -1668,7 +1818,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         }
-    });
+    }
 
     function showMaxChainPuyoOnBoard() {
         if (!maxChainPuyo) return;
@@ -1679,7 +1829,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const chainCount = maxChainPuyo.chain;
         
         drawRedBox(x, y, chainCount);
-        console.log('最大連鎖: ' + chainCount + '鎖 at (' + x + ', ' + y + ')');
     }
 
     function drawRedBox(x, y, chainCount) {
@@ -1698,7 +1847,6 @@ document.addEventListener('DOMContentLoaded', () => {
             box.style.borderRadius = '4px';
             box.style.backgroundColor = 'rgba(231, 76, 60, 0.2)';
             
-            // 連鎖数を表示
             const label = document.createElement('div');
             label.textContent = chainCount + '鎖';
             label.style.position = 'absolute';
