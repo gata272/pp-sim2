@@ -1,170 +1,155 @@
 <!DOCTYPE html>
-
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Puyo Puyo Simulator</title>
+    
+    <meta name="apple-mobile-web-app-title" content="Puyo Sim Test">
+    <meta name="application-name" content="Puyo Sim Test">
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="android-icon-192x192.png.png">
+    <meta name="theme-color" content="#5e81ac">
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <link rel="stylesheet" href="style.css"> 
 
-```
-<meta name="apple-mobile-web-app-title" content="Puyo Sim Test">
-<meta name="application-name" content="Puyo Sim Test">
-
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png.png">
-<link rel="icon" type="image/png" sizes="192x192" href="android-icon-192x192.png.png">
-<meta name="theme-color" content="#5e81ac">
-
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-
-<link rel="stylesheet" href="style.css">
-```
-
+    <style>
+        #max-chain-button { width: 100%; margin-top: 10px; padding: 10px; background-color: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 16px; }
+        #ai-button { width: 100%; margin-top: 10px; padding: 10px; background-color: #ff9800; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 16px; }
+        .next-puyo-row { display: flex; justify-content: center; gap: 15px; margin-top: 5px; }
+        .next-puyo-slot { display: flex; flex-direction: column-reverse; align-items: center; gap: 2px; min-width: 30px; min-height: 60px; background-color: rgba(0, 0, 0, 0.3); padding: 5px; border-radius: 5px; }
+        .next-puyo-slot .puyo { width: 24px; height: 24px; }
+        #edit-next-list-container { max-height: 200px; overflow-y: auto; margin-top: 10px; background: #1a1a1a; padding: 5px; border: 1px solid #444; text-align: left; }
+        .edit-next-item { display: flex; align-items: center; padding: 2px 5px; border-bottom: 1px solid #333; font-size: 12px; color: #ccc; }
+        .edit-next-label { width: 35px; font-weight: bold; }
+        .edit-next-puyos { display: flex; gap: 4px; margin-left: 10px; }
+        .edit-next-puyos .puyo { width: 16px; height: 16px; border-radius: 50%; }
+    </style>
 </head>
 <body>
-
-```
-<div id="setting-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); z-index: 1000; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box;">
-    <div class="info-box" style="max-width: 400px; width: 100%; padding: 20px;">
-        <h2 style="font-size: 1.2em; margin-bottom: 20px;">設定</h2>
-        
-        <!-- 重力待ち時間設定 -->
-        <div style="margin: 20px 0; text-align: left;">
-            <label for="gravity-wait-slider" style="display: block; font-size: 0.9em; color: #ccc; margin-bottom: 10px;">重力待ち時間 (消滅から落下まで)</label>
-            <div style="display: flex; align-items: center; gap: 15px;">
-                <input type="range" id="gravity-wait-slider" min="0" max="1000" step="50" value="300" style="flex: 1;" oninput="updateGravityWait(this.value)">
-                <span id="gravity-wait-value" style="font-size: 1em; color: #fff; min-width: 60px;">300ms</span>
-            </div>
-        </div>
-
-        <!-- 連鎖待ち時間設定 -->
-        <div style="margin: 20px 0; text-align: left;">
-            <label for="chain-wait-slider" style="display: block; font-size: 0.9em; color: #ccc; margin-bottom: 10px;">連鎖待ち時間 (着地から次連鎖まで)</label>
-            <div style="display: flex; align-items: center; gap: 15px;">
-                <input type="range" id="chain-wait-slider" min="0" max="1000" step="50" value="300" style="flex: 1;" oninput="updateChainWait(this.value)">
-                <span id="chain-wait-value" style="font-size: 1em; color: #fff; min-width: 60px;">300ms</span>
-            </div>
-        </div>
-
-        <p style="font-size: 0.8em; color: #888; margin-top: 10px;">※値が小さいほどアニメーションが速くなります。</p>
-        <button id="setting-back-btn" onclick="toggleSettingMode()" style="background-color: #457b9d; color: white; margin-top: 20px; width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.9em; font-weight: bold; cursor: pointer;">戻る</button>
-    </div>
-</div>
-
-<div id="wrapper">
     
-    <div id="puyo-board">
+    <div id="setting-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); z-index: 1000; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box;">
+        <div class="info-box" style="max-width: 400px; width: 100%; padding: 20px;">
+            <h2 style="font-size: 1.2em; margin-bottom: 20px;">設定</h2>
+            
+            <!-- 重力待ち時間設定 -->
+            <div style="margin: 20px 0; text-align: left;">
+                <label for="gravity-wait-slider" style="display: block; font-size: 0.9em; color: #ccc; margin-bottom: 10px;">重力待ち時間 (消滅から落下まで)</label>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <input type="range" id="gravity-wait-slider" min="0" max="1000" step="50" value="300" style="flex: 1;" oninput="updateGravityWait(this.value)">
+                    <span id="gravity-wait-value" style="font-size: 1em; color: #fff; min-width: 60px;">300ms</span>
+                </div>
+            </div>
+
+            <!-- 連鎖待ち時間設定 -->
+            <div style="margin: 20px 0; text-align: left;">
+                <label for="chain-wait-slider" style="display: block; font-size: 0.9em; color: #ccc; margin-bottom: 10px;">連鎖待ち時間 (着地から次連鎖まで)</label>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <input type="range" id="chain-wait-slider" min="0" max="1000" step="50" value="300" style="flex: 1;" oninput="updateChainWait(this.value)">
+                    <span id="chain-wait-value" style="font-size: 1em; color: #fff; min-width: 60px;">300ms</span>
+                </div>
+            </div>
+
+            <p style="font-size: 0.8em; color: #888; margin-top: 10px;">※値が小さいほどアニメーションが速くなります。</p>
+            <button id="setting-back-btn" onclick="toggleSettingMode()" style="background-color: #457b9d; color: white; margin-top: 20px; width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.9em; font-weight: bold; cursor: pointer;">戻る</button>
+        </div>
     </div>
 
-    <div id="info-panel">
-
-        <div id="play-info-container" class="play-info">
-            
-            <div id="play-next-info" class="info-box info-group-a">
-                <h2>NEXT</h2>
-                <div class="next-puyo-row">
-                    <div id="next-puyo-1" class="next-puyo-slot"></div>
-                    <div id="next-puyo-2" class="next-puyo-slot"></div>
-                </div>
-            </div>
-
-            <div id="play-stats-info">
-                <div id="score-box" class="info-box">
-                    <h2>スコア</h2>
-                    <span id="score">0</span>
-                </div>
-                <div id="chain-box" class="info-box">
-                    <h2>連鎖数</h2>
-                    <span id="chain-count">0</span>
-                </div>
-                <div id="max-chain-box" class="info-box">
-                    <h2>最大連鎖数</h2>
-                    <span id="max-chain-display">-</span>
-                </div>
-            </div>
-            
-            <div id="history-controls" class="common-control">
-                <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
-                <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
-            </div>
-
-            <!-- AI思考パネル（リアルタイム表示） -->
-            <div id="ai-thinking-panel" class="ai-thinking-panel" style="display: none;">
-                <div class="thinking-spinner">🤔</div>
-                <div class="thinking-message">思考中...</div>
-                <div class="thinking-details"></div>
-            </div>
-
-            <!-- AI思考結果パネル（詳細表示） -->
-            <div id="ai-details-panel" class="ai-details-panel" style="display: none;">
-                <!-- JavaScriptで動的に生成されます -->
-            </div>
-            
-            <div id="play-controls" class="common-control">
-                <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
-                <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
-                <button id="max-chain-button">最大連鎖数を表示</button>
-                <button id="ai-button">AIヒントを表示</button>
-                
-                <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
-                <button class="setting-toggle-btn" onclick="toggleSettingMode()">setting</button>
-            </div>
-
-        </div>
+    <div id="wrapper">
         
-        <div id="edit-info-container" class="edit-info">
-            
-            <div id="color-palette" class="info-box edit-group-a">
-                <h2>パレット</h2>
-                <div class="palette-row">
-                    <div class="puyo palette-color puyo-1" data-color="1"></div>
-                    <div class="puyo palette-color puyo-2" data-color="2"></div>
-                    <div class="puyo palette-color puyo-3" data-color="3"></div>
-                </div>
-                <div class="palette-row">
-                    <div class="puyo palette-color puyo-4" data-color="4"></div>
-                    <div class="puyo palette-color puyo-5" data-color="5"></div>
-                    <div class="puyo palette-color puyo-0" data-color="0"></div>
-                </div>
-            </div>
-
-            <div id="stage-code-info" class="info-box">
-                <h2>ステージコード</h2>
-                <div style="margin-bottom: 10px;">
-                    <textarea id="stage-code-input" placeholder="ステージコードを入力" rows="3" style="width: 100%; box-sizing: border-box; resize: none;"></textarea>
-                    <button onclick="loadStageCode()" style="width: 100%; padding: 8px; background-color: #f4a261; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 5px;">コードを読み込む</button>
-                </div>
-                <button onclick="copyStageCode()" style="width: 100%; padding: 8px; background-color: #2a9d8f; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">現在のステージ・ネクストをコード化 (コピー)</button>
-            </div>
-            
-            <div id="edit-next-info" class="info-box"> 
-                <h2>ネクスト設定<br>(左が下にきます)</h2>
-                
-                <div class="next-puyo-row">
-                    <div class="next-puyo-slot" id="edit-next-1"></div>
-                    <div class="next-puyo-slot" id="edit-next-2"></div>
-                </div>
-                
-                <div id="edit-next-list-container"></div>
-                
-                <button onclick="clearEditNext()" style="margin-top:10px; width:100%; padding:5px; background-color: #e63946; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクストをランダムで再生成</button>
-            </div>
-            
-            <div id="edit-action-buttons" class="common-control">
-                <div id="mode-toggle-container">
-                    <button class="mode-toggle-btn" onclick="toggleMode()">play (E)</button>
-                    <button class="setting-toggle-btn" onclick="toggleSettingMode()">setting</button>
-                </div>
-                <div id="reset-button-container">
-                    <button id="reset-button-edit" onclick="resetGame(); toggleMode();">盤面リセット (R)</button>
-                </div>
-            </div>
+        <div id="puyo-board">
         </div>
-        
+
+        <div id="info-panel">
+
+            <div id="play-info-container" class="play-info">
+                
+                <div id="play-next-info" class="info-box info-group-a">
+                    <h2>NEXT</h2>
+                    <div class="next-puyo-row">
+                        <div id="next-puyo-1" class="next-puyo-slot">
+                            </div>
+                        <div id="next-puyo-2" class="next-puyo-slot">
+                            </div>
+                    </div>
+                </div>
+
+                <div id="play-stats-info">
+                    <div id="score-box" class="info-box">
+                        <h2>スコア</h2>
+                        <span id="score">0</span>
+                    </div>
+                    <div id="chain-box" class="info-box">
+                        <h2>連鎖数</h2>
+                        <span id="chain-count">0</span>
+                    </div>
+                </div>
+                
+                <div id="history-controls" class="common-control">
+                    <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
+                    <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
+                </div>
+                
+                <div id="play-controls" class="common-control">
+                    <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
+                    <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
+                    
+                    <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
+                    <button class="setting-toggle-btn" onclick="toggleSettingMode()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #6c757d; color: white; margin-top: 5px;">setting</button>
+                </div>
+
+            </div>
+            
+            <div id="edit-info-container" class="edit-info">
+                
+                <div id="color-palette" class="info-box edit-group-a">
+                    <h2>パレット</h2>
+                    <div class="palette-row">
+                        <div class="puyo palette-color puyo-1" data-color="1"></div> <div class="puyo palette-color puyo-2" data-color="2"></div> <div class="puyo palette-color puyo-3" data-color="3"></div> </div>
+                    <div class="palette-row">
+                        <div class="puyo palette-color puyo-4" data-color="4"></div> <div class="puyo palette-color puyo-5" data-color="5"></div> <div class="puyo palette-color puyo-0" data-color="0"></div> </div>
+                </div>
+
+                <div id="stage-code-info" class="info-box">
+                    <h2>ステージコード</h2>
+                    <div style="margin-bottom: 10px;">
+                        <textarea id="stage-code-input" placeholder="ステージコードを入力" rows="3" style="width: 100%; box-sizing: border-box; resize: none;"></textarea>
+                        <button onclick="loadStageCode()" style="width: 100%; padding: 8px; background-color: #f4a261; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 5px;">コードを読み込む</button>
+                    </div>
+                    <button onclick="copyStageCode()" style="width: 100%; padding: 8px; background-color: #2a9d8f; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">現在のステージ・ネクストをコード化 (コピー)</button>
+                </div>
+                <div id="edit-next-info" class="info-box"> 
+                    <h2>ネクスト設定<br>(左が下にきます)</h2>
+                    
+                    <div class="next-puyo-row">
+                        <div class="next-puyo-slot" id="edit-next-1"></div>
+                        <div class="next-puyo-slot" id="edit-next-2"></div>
+                    </div>
+                    
+                    <div id="edit-next-list-container">
+                        </div>
+                    
+                    <button onclick="clearEditNext()" style="margin-top:10px; width:100%; padding:5px; background-color: #e63946; color: white; border: none; font-weight: bold; border-radius: 5px; cursor: pointer;">ネクストをランダムで再生成</button>
+                </div>
+                
+                <div id="edit-action-buttons" class="common-control">
+                    <div id="mode-toggle-container">
+                        <button class="mode-toggle-btn" onclick="toggleMode()">play (E)</button>
+                        <button class="setting-toggle-btn" onclick="toggleSettingMode()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #6c757d; color: white; margin-top: 5px;">setting</button>
+                    </div>
+                    <div id="reset-button-container">
+                        <button id="reset-button-edit" onclick="resetGame(); toggleMode();">盤面リセット (R)</button>
+                    </div>
+                </div>
+            </div>
+            
+        </div>
     </div>
-</div>
-
 <div id="mobile-controls">
     <button class="mobile-btn" id="btn-left">←</button>
     <div class="btn-stack">
@@ -175,24 +160,21 @@
     <button class="mobile-btn" id="btn-rotate-cw">B</button>
     <button class="mobile-btn" id="btn-rotate-ccw">A</button>
 </div>
-
-<p class="small-text">puyo-sim_ver1.0 by gata</p>
-
-<script src="puyoAI.js"></script>
-<script src="puyoSim.js"></script>
-
-<script>
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function() {
-            navigator.serviceWorker.register('sw.js').then(function(registration) {
-                console.log('Service Worker registered successfully:', registration);
-            }).catch(function(error) {
-                console.log('Service Worker registration failed:', error);
+<p class="small-text">puyo-sim_ver1.0.4 by gata</p>
+    <script src="puyoAI.js"></script>
+    <script src="puyoSim.js"></script>
+    
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('sw.js').then(function(registration) {
+                    console.log('Service Worker registered successfully:', registration);
+                }).catch(function(error) {
+                    console.log('Service Worker registration failed:', error);
+                });
             });
-        });
-    }
-</script>
-```
+        }
+    </script>
 
 </body>
 </html>
