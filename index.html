@@ -88,6 +88,10 @@
                         <h2>連鎖数</h2>
                         <span id="chain-count">0</span>
                     </div>
+                    <div id="max-chain-box" class="info-box">
+                        <h2>最大連鎖数</h2>
+                        <span id="max-chain-display">-</span>
+                    </div>
                 </div>
                 
                 <div id="history-controls" class="common-control">
@@ -98,7 +102,8 @@
                 <div id="play-controls" class="common-control">
                     <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
                     <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
-                    
+                    <button id="max-chain-button">最大連鎖数を表示</button>
+                    <button id="ai-button">AIヒントを表示</button>
                     <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
                     <button class="setting-toggle-btn" onclick="toggleSettingMode()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #6c757d; color: white; margin-top: 5px;">setting</button>
                 </div>
