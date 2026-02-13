@@ -1475,7 +1475,7 @@ document.addEventListener('DOMContentLoaded', () => {
 })();
 
 
-// AI連携コード（ボタン状態管理付き）
+// AI連携コード（ボタン状態管理付き・デバッグ版）
 (function() {
     let aiHint = null;
     const PUYO_COLORS = { 
@@ -1488,9 +1488,17 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.addEventListener('load', function() {
+        console.log('AI連携コード読み込み完了');
+        
         const aiButton = document.getElementById('ai-button');
+        console.log('AIボタン:', aiButton);
+        
         if (aiButton) {
             aiButton.addEventListener('click', async () => {
+                console.log('=== AIボタンがクリックされました ===');
+                console.log('gameState:', gameState);
+                console.log('currentPuyo:', currentPuyo);
+                
                 if (gameState !== 'playing' || !currentPuyo) {
                     alert('プレイ中のみAIヒントを表示できます。');
                     return;
@@ -1501,6 +1509,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 aiButton.style.backgroundColor = '#999';
                 aiButton.style.cursor = 'not-allowed';
                 aiButton.textContent = '思考中...';
+                console.log('ボタンを灰色に変更');
 
                 // 少し遅延を入れてUIを更新
                 await new Promise(resolve => setTimeout(resolve, 50));
@@ -1509,9 +1518,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     // 次のぷよを取得（NEXT1とNEXT2）
                     const next1 = nextPuyoColors[0] || [0, 0];
                     const next2 = nextPuyoColors[1] || [0, 0];
+                    
+                    console.log('nextPuyoColors:', nextPuyoColors);
+                    console.log('next1:', next1);
+                    console.log('next2:', next2);
+                    console.log('PuyoAI:', typeof PuyoAI);
 
                     if (typeof PuyoAI !== 'undefined' && PuyoAI.getBestMove) {
-                        // AIに最適な場所を計算させる（3手先読み）
+                        console.log('AI計算開始...');
+                        
+                        // AIに最適な場所を計算させる
                         aiHint = PuyoAI.getBestMove(
                             board, 
                             currentPuyo.mainColor, 
@@ -1524,77 +1540,137 @@ document.addEventListener('DOMContentLoaded', () => {
                         console.log('現在のぷよ:', {main: currentPuyo.mainColor, sub: currentPuyo.subColor});
                         console.log('NEXT1:', next1, 'NEXT2:', next2);
                         
-                        showAIHintOnBoard();
+                        if (aiHint) {
+                            console.log('showAIHintOnBoard を呼び出します');
+                            showAIHintOnBoard();
+                        } else {
+                            console.error('aiHintがnullです');
+                        }
+                    } else {
+                        console.error('PuyoAIが見つかりません');
                     }
                 } catch (error) {
                     console.error('AI計算エラー:', error);
-                    alert('AI計算中にエラーが発生しました。');
+                    console.error('エラースタック:', error.stack);
+                    alert('AI計算中にエラーが発生しました: ' + error.message);
                 } finally {
                     // ボタンを元の色に戻す
                     aiButton.disabled = false;
                     aiButton.style.backgroundColor = '#ff9800';
                     aiButton.style.cursor = 'pointer';
                     aiButton.textContent = 'アシスト';
+                    console.log('ボタンを元の色に戻しました');
                 }
             });
         }
     });
 
     function showAIHintOnBoard() {
-        if (!aiHint || !currentPuyo) return;
+        console.log('=== showAIHintOnBoard 開始 ===');
+        console.log('aiHint:', aiHint);
+        console.log('currentPuyo:', currentPuyo);
+        
+        if (!aiHint || !currentPuyo) {
+            console.error('aiHintまたはcurrentPuyoがありません');
+            return;
+        }
         
         // 既存のヒントを削除
-        document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
+        const existingDots = document.querySelectorAll('.ai-hint-dot');
+        console.log('既存のドット数:', existingDots.length);
+        existingDots.forEach(el => el.remove());
         
         const axisX = aiHint.x;
+        console.log('axisX:', axisX);
+        
         let axisY = getDropY(axisX);
+        console.log('axisY (初期):', axisY);
+        
         let childX = axisX;
         let childY = axisY;
         const r = aiHint.rotation;
+        console.log('rotation:', r);
         
         // 回転に応じた子ぷよの位置を計算
         if (r === 0) {
             // 上
             childY = getDropY(axisX, axisY + 1);
+            console.log('rotation 0 (上): childY =', childY);
         } else if (r === 1) {
             // 右
             childX = axisX + 1;
             childY = getDropY(childX);
+            console.log('rotation 1 (右): childX =', childX, 'childY =', childY);
         } else if (r === 2) {
             // 下
             childY = axisY;
             axisY = getDropY(axisX, childY + 1);
+            console.log('rotation 2 (下): axisY =', axisY, 'childY =', childY);
         } else if (r === 3) {
             // 左
             childX = axisX - 1;
             childY = getDropY(childX);
+            console.log('rotation 3 (左): childX =', childX, 'childY =', childY);
         }
         
         const axisColorCode = PUYO_COLORS[currentPuyo.mainColor] || '#fff';
         const childColorCode = PUYO_COLORS[currentPuyo.subColor] || '#fff';
         
-        // 13段目より下にある場合のみ表示（ゲームオーバーライン以下）
+        console.log('軸ぷよ色:', axisColorCode);
+        console.log('子ぷよ色:', childColorCode);
+        console.log('軸ぷよ位置: (', axisX, ',', axisY, ')');
+        console.log('子ぷよ位置: (', childX, ',', childY, ')');
+        
+        // 13段目より下にある場合のみ表示
         if (axisY < 13) {
+            console.log('軸ぷよのドットを作成します');
             createDot(axisX, axisY, axisColorCode, '軸ぷよ');
+        } else {
+            console.log('軸ぷよは13段目以上なので表示しません');
         }
+        
         if (childY < 13) {
+            console.log('子ぷよのドットを作成します');
             createDot(childX, childY, childColorCode, '子ぷよ');
+        } else {
+            console.log('子ぷよは13段目以上なので表示しません');
         }
+        
+        console.log('=== showAIHintOnBoard 終了 ===');
     }
 
     function getDropY(x, startY = 0) {
-        if (x < 0 || x >= WIDTH) return -1;
+        console.log('getDropY: x =', x, 'startY =', startY);
+        
+        if (x < 0 || x >= WIDTH) {
+            console.log('getDropY: xが範囲外');
+            return -1;
+        }
+        
         let y = Math.max(0, startY);
         while (y < HEIGHT && board[y][x] !== COLORS.EMPTY) {
             y++;
         }
+        
+        console.log('getDropY 結果: y =', y);
         return y;
     }
 
     function createDot(x, y, color, label) {
-        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return;
+        console.log('=== createDot 開始 ===');
+        console.log('x:', x, 'y:', y, 'color:', color, 'label:', label);
         
-        const cell = document.getElementById(`cell-${x}-${y}`);
+        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
+            console.error('createDot: 座標が範囲外');
+            return;
+        }
+        
+        const cellId = `cell-${x}-${y}`;
+        console.log('cellId:', cellId);
+        
+        const cell = document.getElementById(cellId);
+        console.log('cell要素:', cell);
+        
         if (cell) {
             const dot = document.createElement('div');
             dot.className = 'ai-hint-dot';
@@ -1613,10 +1689,18 @@ document.addEventListener('DOMContentLoaded', () => {
             
             cell.style.position = 'relative';
             cell.appendChild(dot);
+            
+            console.log('ドットを追加しました:', dot);
+            console.log('cell.children:', cell.children);
+        } else {
+            console.error('cell要素が見つかりません:', cellId);
         }
+        
+        console.log('=== createDot 終了 ===');
     }
 
     window.clearAIHint = function() {
+        console.log('clearAIHint 呼び出し');
         aiHint = null;
         document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
     };
@@ -1635,13 +1719,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 
-                // ボタンを灰色にして無効化
                 maxChainButton.disabled = true;
                 maxChainButton.style.backgroundColor = '#999';
                 maxChainButton.style.cursor = 'not-allowed';
                 maxChainButton.textContent = '解析中...';
                 
-                // 少し遅延を入れてUIを更新
                 await new Promise(resolve => setTimeout(resolve, 50));
                 
                 try {
@@ -1660,7 +1742,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.error('最大連鎖解析エラー:', error);
                     alert('連鎖解析中にエラーが発生しました。');
                 } finally {
-                    // ボタンを元の色に戻す
                     maxChainButton.disabled = false;
                     maxChainButton.style.backgroundColor = '#e74c3c';
                     maxChainButton.style.cursor = 'pointer';
@@ -1698,7 +1779,6 @@ document.addEventListener('DOMContentLoaded', () => {
             box.style.borderRadius = '4px';
             box.style.backgroundColor = 'rgba(231, 76, 60, 0.2)';
             
-            // 連鎖数を表示
             const label = document.createElement('div');
             label.textContent = chainCount + '鎖';
             label.style.position = 'absolute';
