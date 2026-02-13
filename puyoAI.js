@@ -1,12 +1,13 @@
 /**
- * PuyoAI v13 - 10-Chain Master Edition
+ * PuyoAI v14 - 10+ Chain Optimized Edition
  * 
- * 改善戦略:
- * 1. 即連鎖を**抑制**し、連鎖構築を優先
- * 2. 階段積み・GTR・折り返しの形を正確に評価
- * 3. 各色の配置位置を分析（左右に分ける等）
- * 4. 連鎖の「種」（3個の固まり）を意図的に作る
- * 5. 発火点（トリガー）の位置を意識
+ * v13からの改善点（シミュレーション結果を元に最適化）:
+ * 1. 即連鎖抑制を更に強化（序盤の閾値を40個に引き上げ）
+ * 2. 連鎖ポテンシャルの重みを8000に増加
+ * 3. 縦の連鎖（同じ列に同色を積む）も評価
+ * 4. 連鎖の「層」を意識（下から順に色を分ける）
+ * 5. L字・T字形の検出を追加
+ * 6. 発火タイミングの最適化
  */
 const PuyoAI = (function() {
     const WIDTH = 6;
@@ -41,34 +42,6 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 連鎖の「種」の数を数える（3個の同色の固まり）
-     */
-    function countChainSeeds(board) {
-        let seedCount = 0;
-        let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
-        
-        for (let color of COLORS) {
-            for (let y = 0; y < 12; y++) {
-                for (let x = 0; x < WIDTH; x++) {
-                    if (board[y][x] === color && !visited[y][x]) {
-                        let clusterSize = getClusterSize(board, x, y, color, visited);
-                        // 3個の固まりが連鎖の種として最適
-                        if (clusterSize === 3) {
-                            seedCount += 2; // 3個は高評価
-                        } else if (clusterSize >= 4) {
-                            // 4個以上は即消えるので連鎖構築には不利
-                            seedCount -= 1;
-                        } else if (clusterSize === 2) {
-                            seedCount += 1; // 2個も悪くない
-                        }
-                    }
-                }
-            }
-        }
-        return seedCount;
-    }
-
-    /**
      * 色の固まりサイズを取得
      */
     function getClusterSize(board, startX, startY, color, visited) {
@@ -93,8 +66,81 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 階段積みの評価（連鎖の基本形）
-     * 左から右、または右から左への綺麗な階段を高評価
+     * 連鎖の「種」の数を数える - 改良版
+     * 3個の固まりを最重視、2個も評価
+     */
+    function countChainSeeds(board) {
+        let seedScore = 0;
+        let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
+        
+        for (let color of COLORS) {
+            for (let y = 0; y < 12; y++) {
+                for (let x = 0; x < WIDTH; x++) {
+                    if (board[y][x] === color && !visited[y][x]) {
+                        let clusterSize = getClusterSize(board, x, y, color, visited);
+                        
+                        if (clusterSize === 3) {
+                            seedScore += 300; // 3個が最適
+                        } else if (clusterSize === 2) {
+                            seedScore += 150; // 2個も良い
+                        } else if (clusterSize >= 4) {
+                            // 4個以上は位置によって判断
+                            // 下の方（Y<4）なら発火準備としてOK
+                            let avgY = 0;
+                            let count = 0;
+                            for (let ty = 0; ty < 12; ty++) {
+                                for (let tx = 0; tx < WIDTH; tx++) {
+                                    if (board[ty][tx] === color) {
+                                        avgY += ty;
+                                        count++;
+                                    }
+                                }
+                            }
+                            avgY /= count;
+                            
+                            if (avgY < 4) {
+                                seedScore += 50; // 下層なら許容
+                            } else {
+                                seedScore -= 200; // 上層で4個は避ける
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return seedScore;
+    }
+
+    /**
+     * 縦の連鎖を評価（同じ列に同色を3個積む）
+     */
+    function evaluateVerticalChains(board) {
+        let score = 0;
+        
+        for (let x = 0; x < WIDTH; x++) {
+            for (let color of COLORS) {
+                let consecutiveCount = 0;
+                for (let y = 0; y < 12; y++) {
+                    if (board[y][x] === color) {
+                        consecutiveCount++;
+                    } else {
+                        if (consecutiveCount === 3) {
+                            score += 200; // 縦3連は良い
+                        }
+                        consecutiveCount = 0;
+                    }
+                }
+                if (consecutiveCount === 3) {
+                    score += 200;
+                }
+            }
+        }
+        
+        return score;
+    }
+
+    /**
+     * 階段積みの評価 - 改良版
      */
     function evaluateStairPattern(board) {
         let score = 0;
@@ -104,12 +150,16 @@ const PuyoAI = (function() {
         for (let x = 0; x < WIDTH - 1; x++) {
             let h1 = getColumnHeight(board, x);
             let h2 = getColumnHeight(board, x + 1);
-            if (h2 === h1 + 1) {
-                leftToRight += 100; // 完璧な階段
-            } else if (h2 === h1) {
-                leftToRight += 30; // 同じ高さも許容
-            } else if (h2 === h1 - 1) {
-                leftToRight -= 50; // 逆階段はペナルティ
+            let diff = h2 - h1;
+            
+            if (diff === 1) {
+                leftToRight += 150; // 完璧な階段
+            } else if (diff === 0) {
+                leftToRight += 50; // 同じ高さも許容
+            } else if (diff === 2) {
+                leftToRight += 80; // 2段差も許容
+            } else if (diff < 0) {
+                leftToRight -= 100; // 逆階段はペナルティ
             }
         }
         
@@ -118,12 +168,16 @@ const PuyoAI = (function() {
         for (let x = WIDTH - 1; x > 0; x--) {
             let h1 = getColumnHeight(board, x);
             let h2 = getColumnHeight(board, x - 1);
-            if (h2 === h1 + 1) {
-                rightToLeft += 100;
-            } else if (h2 === h1) {
-                rightToLeft += 30;
-            } else if (h2 === h1 - 1) {
-                rightToLeft -= 50;
+            let diff = h2 - h1;
+            
+            if (diff === 1) {
+                rightToLeft += 150;
+            } else if (diff === 0) {
+                rightToLeft += 50;
+            } else if (diff === 2) {
+                rightToLeft += 80;
+            } else if (diff < 0) {
+                rightToLeft -= 100;
             }
         }
         
@@ -132,66 +186,145 @@ const PuyoAI = (function() {
     }
 
     /**
-     * GTR形の検出（2列目が一番高く、1列目・3列目が低い）
+     * L字・T字形の検出
+     * 連鎖の接続に重要
+     */
+    function evaluateLTShapes(board) {
+        let score = 0;
+        
+        for (let color of COLORS) {
+            for (let y = 1; y < 11; y++) {
+                for (let x = 1; x < WIDTH - 1; x++) {
+                    if (board[y][x] === color) {
+                        // L字形のパターン
+                        // ┌─ または ─┐ または └─ または ─┘
+                        let patterns = [
+                            [board[y-1][x] === color && board[y][x+1] === color], // ┌
+                            [board[y-1][x] === color && board[y][x-1] === color], // ┐
+                            [board[y+1][x] === color && board[y][x+1] === color], // └
+                            [board[y+1][x] === color && board[y][x-1] === color], // ┘
+                        ];
+                        
+                        if (patterns.some(p => p[0])) {
+                            score += 100;
+                        }
+                        
+                        // T字形
+                        // ┬ または ┴ または ├ または ┤
+                        let tPatterns = [
+                            [board[y-1][x] === color && board[y][x+1] === color && board[y][x-1] === color], // ┬
+                            [board[y+1][x] === color && board[y][x+1] === color && board[y][x-1] === color], // ┴
+                            [board[y][x+1] === color && board[y-1][x] === color && board[y+1][x] === color], // ├
+                            [board[y][x-1] === color && board[y-1][x] === color && board[y+1][x] === color], // ┤
+                        ];
+                        
+                        if (tPatterns.some(p => p[0])) {
+                            score += 150;
+                        }
+                    }
+                }
+            }
+        }
+        
+        return score;
+    }
+
+    /**
+     * 色の層分け評価
+     * 下から順に色を分けると連鎖しやすい
+     */
+    function evaluateColorLayers(board) {
+        let score = 0;
+        
+        // 各層（高さ0-2, 3-5, 6-8, 9-11）で主要な色を分析
+        let layers = [
+            {start: 0, end: 3},
+            {start: 3, end: 6},
+            {start: 6, end: 9},
+            {start: 9, end: 12}
+        ];
+        
+        let layerColors = [];
+        
+        for (let layer of layers) {
+            let colorCount = {};
+            for (let color of COLORS) colorCount[color] = 0;
+            
+            for (let y = layer.start; y < layer.end; y++) {
+                for (let x = 0; x < WIDTH; x++) {
+                    let c = board[y][x];
+                    if (c !== 0) {
+                        colorCount[c]++;
+                    }
+                }
+            }
+            
+            // この層で最も多い色
+            let maxColor = 0;
+            let maxCount = 0;
+            for (let color of COLORS) {
+                if (colorCount[color] > maxCount) {
+                    maxCount = colorCount[color];
+                    maxColor = color;
+                }
+            }
+            
+            layerColors.push(maxColor);
+            
+            // その色が50%以上を占めていれば良い層分け
+            let totalInLayer = Object.values(colorCount).reduce((a, b) => a + b, 0);
+            if (totalInLayer > 0 && maxCount / totalInLayer > 0.5) {
+                score += 200;
+            }
+        }
+        
+        // 隣接する層で異なる色が主要なら高評価
+        for (let i = 0; i < layerColors.length - 1; i++) {
+            if (layerColors[i] !== layerColors[i+1] && layerColors[i] !== 0 && layerColors[i+1] !== 0) {
+                score += 150;
+            }
+        }
+        
+        return score;
+    }
+
+    /**
+     * GTRパターンの検出 - 改良版
      */
     function evaluateGTRPattern(board) {
         let score = 0;
         
-        // 列1が基準、列2が高い、列3が中間
+        // 左側のGTR（列0-2）
         let h0 = getColumnHeight(board, 0);
         let h1 = getColumnHeight(board, 1);
         let h2 = getColumnHeight(board, 2);
         
-        // 典型的なGTR: 列2が一番高い
-        if (h1 > h0 && h1 > h2) {
-            score += 150;
-            // 高さ差が2~3段が理想
-            if (Math.abs(h1 - h0) >= 2 && Math.abs(h1 - h0) <= 3) {
-                score += 100;
-            }
+        if (h1 > h0 && h1 > h2 && h1 - h0 >= 2 && h1 - h2 >= 1) {
+            score += 250;
+        }
+        
+        // 右側のGTR（列3-5）
+        let h3 = getColumnHeight(board, 3);
+        let h4 = getColumnHeight(board, 4);
+        let h5 = getColumnHeight(board, 5);
+        
+        if (h4 > h3 && h4 > h5 && h4 - h3 >= 1 && h4 - h5 >= 2) {
+            score += 250;
         }
         
         return score;
     }
 
     /**
-     * 色の配置バランス評価
-     * 各色が特定のエリアに集中しているか
-     */
-    function evaluateColorSegregation(board) {
-        let score = 0;
-        
-        for (let color of COLORS) {
-            let leftCount = 0;
-            let rightCount = 0;
-            
-            for (let y = 0; y < 12; y++) {
-                for (let x = 0; x < 3; x++) {
-                    if (board[y][x] === color) leftCount++;
-                }
-                for (let x = 3; x < 6; x++) {
-                    if (board[y][x] === color) rightCount++;
-                }
-            }
-            
-            // 色が左右どちらかに偏っているほど良い
-            let segregation = Math.abs(leftCount - rightCount);
-            score += segregation * 10;
-        }
-        
-        return score;
-    }
-
-    /**
-     * 発火点の評価（一番下の層に4個揃いそうな色があるか）
+     * 発火点の評価 - 改良版
      */
     function evaluateTriggerPoint(board) {
         let score = 0;
         
-        // 最下層（Y=0-2）での各色の配置を確認
+        // 最下層（Y=0-3）での各色の配置を確認
         for (let color of COLORS) {
             let bottomCount = 0;
-            for (let y = 0; y < 3; y++) {
+            for (let y = 0; y < 4; y++) {
                 for (let x = 0; x < WIDTH; x++) {
                     if (board[y][x] === color) bottomCount++;
                 }
@@ -199,7 +332,9 @@ const PuyoAI = (function() {
             
             // 3個あれば発火点候補
             if (bottomCount === 3) {
-                score += 200;
+                score += 300;
+            } else if (bottomCount === 2) {
+                score += 100; // 2個も良い
             }
         }
         
@@ -207,13 +342,12 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 連鎖ポテンシャルの詳細評価
+     * 連鎖ポテンシャルの評価
      */
     function evaluateChainPotential(board) {
         let maxChain = 0;
         const allowed14 = is14thRowAllowed(board);
 
-        // 各色を1個だけ置いてみて、最大連鎖数を計算
         for (let x = 0; x < WIDTH; x++) {
             for (let color of COLORS) {
                 let tempBoard = board.map(row => [...row]);
@@ -234,13 +368,12 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 盤面の総合評価
+     * 盤面の総合評価 - v14最適化版
      */
     function evaluateBoard(board, immediateChains) {
         let score = 0;
         
-        // 1. 即連鎖は**抑制**（序盤は特に）
-        // 盤面の埋まり具合で判断
+        // ぷよの総数を計算
         let totalPuyos = 0;
         for (let y = 0; y < 12; y++) {
             for (let x = 0; x < WIDTH; x++) {
@@ -248,32 +381,35 @@ const PuyoAI = (function() {
             }
         }
         
-        if (totalPuyos < 30) {
-            // 序盤（30個未満）: 即連鎖を避ける
+        // 1. 即連鎖の抑制 - 閾値を40個に引き上げ
+        if (totalPuyos < 40) {
+            // 序盤（40個未満）: 即連鎖を強く避ける
             if (immediateChains > 0) {
-                score -= immediateChains * 5000; // 大幅ペナルティ
+                score -= immediateChains * 8000; // v13の5000から8000に増加
             }
-        } else if (totalPuyos < 50) {
-            // 中盤（30-50個）: 小さい連鎖は許容
+        } else if (totalPuyos < 55) {
+            // 中盤（40-55個）: 小連鎖はペナルティ
             if (immediateChains === 1) {
-                score -= 2000;
-            } else if (immediateChains >= 2) {
-                score += immediateChains * 3000; // 2連鎖以上なら良い
+                score -= 3000;
+            } else if (immediateChains >= 2 && immediateChains < 5) {
+                score += immediateChains * 2000;
+            } else if (immediateChains >= 5) {
+                score += immediateChains * 6000; // 5連鎖以上なら高評価
             }
         } else {
-            // 終盤（50個以上）: 連鎖を打つ
-            score += immediateChains * 8000;
+            // 終盤（55個以上）: 連鎖を打つ
+            score += immediateChains * 10000;
         }
         
-        // 2. 連鎖ポテンシャル（最重要）
+        // 2. 連鎖ポテンシャル（最重要） - 重みを8000に増加
         let potential = evaluateChainPotential(board);
-        score += potential * 5000; // 高い重み
+        score += potential * 8000; // v13の5000から8000に増加
         
-        // 3. 連鎖の種の数
+        // 3. 連鎖の種
         let seeds = countChainSeeds(board);
-        score += seeds * 300;
+        score += seeds;
         
-        // 4. 階段積みパターン
+        // 4. 階段積み
         let stairScore = evaluateStairPattern(board);
         score += stairScore;
         
@@ -281,29 +417,37 @@ const PuyoAI = (function() {
         let gtrScore = evaluateGTRPattern(board);
         score += gtrScore;
         
-        // 6. 色の分離
-        let segregation = evaluateColorSegregation(board);
-        score += segregation;
-        
-        // 7. 発火点
+        // 6. 発火点
         let trigger = evaluateTriggerPoint(board);
         score += trigger;
         
-        // 8. 高さのペナルティ
+        // 7. 縦の連鎖
+        let vertical = evaluateVerticalChains(board);
+        score += vertical;
+        
+        // 8. L字・T字形
+        let ltShapes = evaluateLTShapes(board);
+        score += ltShapes;
+        
+        // 9. 色の層分け
+        let layers = evaluateColorLayers(board);
+        score += layers;
+        
+        // 10. 高さのペナルティ
         let maxHeight = 0;
         for (let x = 0; x < WIDTH; x++) {
             let h = getColumnHeight(board, x);
             if (h > maxHeight) maxHeight = h;
         }
         if (maxHeight > 10) {
-            score -= (maxHeight - 10) * 2000; // 高すぎは危険
+            score -= (maxHeight - 10) * 2500;
         }
         
-        // 9. 中央の列は低めに保つ
+        // 11. 中央を低く保つ
         let centerHeight = getColumnHeight(board, 2) + getColumnHeight(board, 3);
-        score += (24 - centerHeight) * 50;
+        score += (24 - centerHeight) * 80;
         
-        // 10. ゲームオーバーラインチェック
+        // 12. ゲームオーバーラインチェック
         if (board[11][2] !== 0) {
             return -Infinity;
         }
@@ -319,14 +463,12 @@ const PuyoAI = (function() {
         let bestMove = { x: 2, rotation: 0 };
         const allowed14 = is14thRowAllowed(board);
 
-        // 1手目の全パターンを評価
         for (let x = 0; x < WIDTH; x++) {
             for (let rot = 0; rot < 4; rot++) {
                 if (!isReachable(board, x)) continue;
 
                 let tempBoard = board.map(row => [...row]);
                 
-                // 14段目への設置チェック
                 let willUse14 = false;
                 let h = 0; 
                 while(h < 14 && tempBoard[h][x] !== 0) h++;
@@ -337,20 +479,17 @@ const PuyoAI = (function() {
 
                 if (!placePuyo(tempBoard, x, rot, axisColor, childColor)) continue;
 
-                // 連鎖シミュレーション
                 let res1 = simulatePureChain(tempBoard);
-                
-                // 盤面を評価
                 let score = evaluateBoard(res1.finalBoard, res1.chains);
                 
-                // 2手先も簡易評価
+                // 2手先も評価
                 if (nextAxisColor && nextChildColor) {
                     let best2ndScore = -Infinity;
                     
                     for (let nx = 0; nx < WIDTH; nx++) {
                         if (!isReachable(res1.finalBoard, nx)) continue;
                         
-                        for (let nrot = 0; nrot < 2; nrot++) { // 回転は2パターンだけ（高速化）
+                        for (let nrot = 0; nrot < 2; nrot++) {
                             let nextBoard = res1.finalBoard.map(row => [...row]);
                             if (!placePuyo(nextBoard, nx, nrot, nextAxisColor, nextChildColor)) continue;
                             
@@ -363,7 +502,7 @@ const PuyoAI = (function() {
                         }
                     }
                     
-                    score += best2ndScore * 0.3; // 2手先の重みは低め
+                    score += best2ndScore * 0.4; // v13の0.3から0.4に増加
                 }
 
                 if (score > bestScore) {
@@ -376,9 +515,7 @@ const PuyoAI = (function() {
         return bestMove;
     }
 
-    /**
-     * 連鎖シミュレーション
-     */
+    // 以下、ヘルパー関数（v13と同じ）
     function simulatePureChain(board) {
         let tempBoard = board.map(row => [...row]);
         let chainCount = 0;
@@ -394,9 +531,6 @@ const PuyoAI = (function() {
         return { chains: chainCount, finalBoard: tempBoard };
     }
 
-    /**
-     * 連鎖の1ステップを処理
-     */
     function processStep(board) {
         let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
         let exploded = false;
@@ -433,9 +567,6 @@ const PuyoAI = (function() {
         return exploded;
     }
 
-    /**
-     * 重力処理
-     */
     function applyGravity(board) {
         for (let x = 0; x < WIDTH; x++) {
             let writeY = 0;
@@ -449,9 +580,6 @@ const PuyoAI = (function() {
         }
     }
 
-    /**
-     * 到達可能性チェック
-     */
     function isReachable(board, targetX) {
         const startX = 2;
         const direction = targetX > startX ? 1 : -1;
@@ -461,9 +589,6 @@ const PuyoAI = (function() {
         return true;
     }
 
-    /**
-     * ぷよを配置
-     */
     function placePuyo(board, x, rot, axisColor, childColor) {
         let coords = [];
         coords.push({x: x, y: 13, color: axisColor});
@@ -486,9 +611,6 @@ const PuyoAI = (function() {
         return true;
     }
 
-    /**
-     * 盤面上のぷよを一つ消したときに発生する最大連鎖数を探索する
-     */
     function findMaxChainPuyo(board) {
         let bestChain = -1;
         let bestPuyo = null;
