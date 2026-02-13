@@ -1499,7 +1499,6 @@ document.addEventListener('DOMContentLoaded', () => {
             debugLog.style.border = '2px solid #0f0';
             document.body.appendChild(debugLog);
             
-            // 閉じるボタン
             const closeBtn = document.createElement('button');
             closeBtn.textContent = '✕';
             closeBtn.style.position = 'absolute';
@@ -1548,15 +1547,49 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 })();
 
-// AI連携コード（画面ログ付き）
+// PuyoAIが読み込まれるまで待機する関数
+function waitForPuyoAI(callback, maxAttempts = 50) {
+    let attempts = 0;
+    const checkInterval = setInterval(function() {
+        attempts++;
+        if (typeof PuyoAI !== 'undefined' && PuyoAI.getBestMove) {
+            clearInterval(checkInterval);
+            showDebugLog('PuyoAI読み込み成功 (試行' + attempts + '回目)');
+            callback();
+        } else if (attempts >= maxAttempts) {
+            clearInterval(checkInterval);
+            showDebugLog('ERROR: PuyoAI読み込みタイムアウト');
+            alert('エラー: PuyoAIが読み込まれませんでした。puyoAI.jsファイルを確認してください。');
+        }
+    }, 100);
+}
+
+// AI連携コード（PuyoAI読み込み待機版）
 (function() {
     let aiHint = null;
     const PUYO_COLORS = { 
         1: '#e63946', 2: '#457b9d', 3: '#8ac926', 4: '#fca311', 5: '#ccc', 0: 'transparent' 
     };
 
-    window.addEventListener('load', function() {
+    // DOMContentLoadedを待ってから初期化
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initAI);
+    } else {
+        initAI();
+    }
+
+    function initAI() {
+        showDebugLog('AI初期化開始');
+        
+        // PuyoAIの読み込みを待機
+        waitForPuyoAI(function() {
+            setupAIButton();
+        });
+    }
+
+    function setupAIButton() {
         const aiButton = document.getElementById('ai-button');
+        showDebugLog('AIボタン設定: ' + (aiButton ? 'OK' : 'NG'));
         
         if (aiButton) {
             aiButton.addEventListener('click', async () => {
@@ -1582,7 +1615,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     const next1 = nextPuyoColors[0] || [0, 0];
                     showDebugLog('next1: [' + next1[0] + ',' + next1[1] + ']');
-                    showDebugLog('PuyoAI: ' + (typeof PuyoAI));
+                    showDebugLog('PuyoAI確認: ' + (typeof PuyoAI !== 'undefined' ? 'OK' : 'NG'));
 
                     if (typeof PuyoAI !== 'undefined' && PuyoAI.getBestMove) {
                         showDebugLog('AI計算開始...');
@@ -1604,9 +1637,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     } else {
                         showDebugLog('ERROR: PuyoAI未定義');
+                        alert('エラー: PuyoAIが利用できません');
                     }
                 } catch (error) {
                     showDebugLog('ERROR: ' + error.message);
+                    alert('エラー: ' + error.message);
                 } finally {
                     aiButton.disabled = false;
                     aiButton.style.backgroundColor = '#ff9800';
@@ -1616,7 +1651,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         }
-    });
+    }
 
     function showAIHintOnBoard() {
         showDebugLog('=== showAIHint開始 ===');
@@ -1732,7 +1767,20 @@ document.addEventListener('DOMContentLoaded', () => {
 (function() {
     let maxChainPuyo = null;
 
-    window.addEventListener('load', function() {
+    // DOMContentLoadedを待ってから初期化
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initMaxChain);
+    } else {
+        initMaxChain();
+    }
+
+    function initMaxChain() {
+        waitForPuyoAI(function() {
+            setupMaxChainButton();
+        });
+    }
+
+    function setupMaxChainButton() {
         const maxChainButton = document.getElementById('max-chain-button');
         if (maxChainButton) {
             maxChainButton.addEventListener('click', async () => {
@@ -1770,7 +1818,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         }
-    });
+    }
 
     function showMaxChainPuyoOnBoard() {
         if (!maxChainPuyo) return;
