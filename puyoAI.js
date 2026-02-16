@@ -1,12 +1,13 @@
 /**
- * PuyoAI v15 - Beam Search Edition
+ * PuyoAI v16 - Ultimate Edition
  * 
- * Amaの技術を参考にした改良版:
- * 1. ビームサーチ（複数候補を並列探索）
- * 2. GTR/新GTR/フロントなどのパターンマッチング
- * 3. 連鎖の拡張性評価
- * 4. トリガーの高さ評価
- * 5. 4-5手先まで読む（ビームサーチで高速化）
+ * Amaの技術を可能な限り実装した最終版:
+ * 1. ビームサーチ（4手先）
+ * 2. 転置表（Transposition Table）- 評価済み盤面をキャッシュ
+ * 3. クワイエッセンスサーチ - 連鎖終了まで探索
+ * 4. GTR/新GTR/フロントパターン
+ * 5. 動的ビーム幅調整
+ * 6. より精密な評価関数
  * 
  * 参考: https://github.com/citrus610/ama
  */
@@ -16,8 +17,64 @@ const PuyoAI = (function() {
     const COLORS = [1, 2, 3, 4];
     
     // ビームサーチのパラメータ
-    const BEAM_WIDTH = 12; // 各深さで保持する候補数
-    const SEARCH_DEPTH = 4; // 探索の深さ
+    let BEAM_WIDTH = 12;
+    const SEARCH_DEPTH = 4;
+    const MAX_CACHE_SIZE = 10000; // 転置表の最大サイズ
+    
+    // 転置表（Transposition Table）
+    const transpositionTable = new Map();
+    let tableAge = 0; // エージング用
+
+    /**
+     * 盤面のハッシュ値を計算（Zobrist Hashing風）
+     */
+    function hashBoard(board) {
+        let hash = '';
+        for (let y = 0; y < 12; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                hash += board[y][x];
+            }
+        }
+        return hash;
+    }
+
+    /**
+     * 転置表から取得
+     */
+    function getFromTable(board) {
+        const hash = hashBoard(board);
+        const entry = transpositionTable.get(hash);
+        
+        if (entry && entry.age === tableAge) {
+            return entry.score;
+        }
+        return null;
+    }
+
+    /**
+     * 転置表に保存
+     */
+    function saveToTable(board, score) {
+        const hash = hashBoard(board);
+        
+        // サイズ制限チェック
+        if (transpositionTable.size >= MAX_CACHE_SIZE) {
+            // 古いエントリを削除（Aging replacement）
+            const keysToDelete = [];
+            for (let [key, entry] of transpositionTable) {
+                if (entry.age < tableAge) {
+                    keysToDelete.push(key);
+                    if (keysToDelete.length >= MAX_CACHE_SIZE / 4) break;
+                }
+            }
+            keysToDelete.forEach(key => transpositionTable.delete(key));
+        }
+        
+        transpositionTable.set(hash, {
+            score: score,
+            age: tableAge
+        });
+    }
 
     function is14thRowAllowed(board) {
         let has12 = false;
@@ -38,21 +95,10 @@ const PuyoAI = (function() {
     }
 
     /**
-     * GTRパターン検出（Amaより）
-     * 最も強力な連鎖パターンの一つ
+     * GTRパターン検出（完全版）
      */
     function detectGTRPattern(board) {
         let score = 0;
-        
-        // 標準GTR: 列1が高い、列0と列2が低い
-        // 典型的な形:
-        // ┌─┬─┬─┐
-        // │  │○│  │
-        // ├─┼─┼─┤
-        // │  │○│○│
-        // ├─┼─┼─┤
-        // │○│○│○│
-        // └─┴─┴─┘
         
         for (let baseX = 0; baseX <= 3; baseX++) {
             if (baseX + 2 >= WIDTH) continue;
@@ -61,17 +107,14 @@ const PuyoAI = (function() {
             let h1 = getColumnHeight(board, baseX + 1);
             let h2 = getColumnHeight(board, baseX + 2);
             
-            // GTRの基本形: 列1が最も高い
             if (h1 > h0 && h1 > h2) {
                 let heightDiff1 = h1 - h0;
                 let heightDiff2 = h1 - h2;
                 
-                // 理想的な高さ差は2-4段
                 if (heightDiff1 >= 2 && heightDiff1 <= 4 && heightDiff2 >= 1 && heightDiff2 <= 3) {
-                    score += 500; // 完璧なGTR
+                    score += 600;
                     
-                    // 色のチェック（同じ色が縦に3個以上）
-                    let colorBonus = 0;
+                    // 色の連続性チェック
                     for (let color of COLORS) {
                         let verticalCount = 0;
                         for (let y = 0; y < h1 && y < 12; y++) {
@@ -79,11 +122,8 @@ const PuyoAI = (function() {
                                 verticalCount++;
                             }
                         }
-                        if (verticalCount >= 3) {
-                            colorBonus += 200;
-                        }
+                        if (verticalCount >= 3) score += 250;
                     }
-                    score += colorBonus;
                 }
             }
         }
@@ -93,17 +133,9 @@ const PuyoAI = (function() {
 
     /**
      * 新GTR（サブマリン）検出
-     * より高度なパターン
      */
     function detectSubmarinePattern(board) {
         let score = 0;
-        
-        // 新GTRは凹型
-        // ┌─┬─┬─┐
-        // │○│  │○│
-        // ├─┼─┼─┤
-        // │○│○│○│
-        // └─┴─┴─┘
         
         for (let baseX = 0; baseX <= 3; baseX++) {
             if (baseX + 2 >= WIDTH) continue;
@@ -112,11 +144,10 @@ const PuyoAI = (function() {
             let h1 = getColumnHeight(board, baseX + 1);
             let h2 = getColumnHeight(board, baseX + 2);
             
-            // 凹型: 両端が高く、中央が低い
             if (h0 > h1 && h2 > h1 && Math.abs(h0 - h2) <= 2) {
                 let depth = Math.min(h0 - h1, h2 - h1);
                 if (depth >= 2 && depth <= 3) {
-                    score += 400; // 新GTR発見
+                    score += 500;
                 }
             }
         }
@@ -126,43 +157,36 @@ const PuyoAI = (function() {
 
     /**
      * フロントパターン検出
-     * 手前に発火点がある形
      */
     function detectFrontPattern(board) {
         let score = 0;
         
-        // 最前列（列0または列5）が低く、奥が高い
         let leftFront = getColumnHeight(board, 0);
         let leftBack = getColumnHeight(board, 2);
-        
         if (leftBack - leftFront >= 3 && leftBack - leftFront <= 5) {
-            score += 300;
+            score += 350;
         }
         
         let rightFront = getColumnHeight(board, 5);
         let rightBack = getColumnHeight(board, 3);
-        
         if (rightBack - rightFront >= 3 && rightBack - rightFront <= 5) {
-            score += 300;
+            score += 350;
         }
         
         return score;
     }
 
     /**
-     * トリガーの高さ評価（Amaより）
-     * 発火点が低いほど良い
+     * トリガーの高さ評価
      */
     function evaluateTriggerHeight(board) {
         let score = 0;
         let lowestTrigger = 12;
         
         for (let color of COLORS) {
-            // 各色の最も低い3個の塊を探す
             for (let y = 0; y < 12; y++) {
                 for (let x = 0; x < WIDTH; x++) {
                     if (board[y][x] === color) {
-                        // この位置から3個の塊があるかチェック
                         let count = countNearbyColor(board, x, y, color);
                         if (count === 3) {
                             if (y < lowestTrigger) {
@@ -174,9 +198,7 @@ const PuyoAI = (function() {
             }
         }
         
-        // トリガーが低いほど高得点
-        score += (12 - lowestTrigger) * 150;
-        
+        score += (12 - lowestTrigger) * 200;
         return score;
     }
 
@@ -189,7 +211,6 @@ const PuyoAI = (function() {
         while (stack.length > 0 && count < 10) {
             let p = stack.pop();
             count++;
-            
             [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
                 let nx = p.x + dx, ny = p.y + dy;
                 if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && 
@@ -204,12 +225,10 @@ const PuyoAI = (function() {
 
     /**
      * 連鎖の拡張性評価
-     * 連鎖が伸びやすい形かどうか
      */
     function evaluateChainExtensibility(board) {
         let score = 0;
         
-        // 各色が複数の場所に分散しているか
         for (let color of COLORS) {
             let groups = [];
             let visited = Array.from({ length: 12 }, () => Array(WIDTH).fill(false));
@@ -218,21 +237,16 @@ const PuyoAI = (function() {
                 for (let x = 0; x < WIDTH; x++) {
                     if (board[y][x] === color && !visited[y][x]) {
                         let size = getClusterSize(board, x, y, color, visited);
-                        if (size >= 2) {
-                            groups.push(size);
-                        }
+                        if (size >= 2) groups.push(size);
                     }
                 }
             }
             
-            // 2-3個のグループに分かれているのが理想
             if (groups.length >= 2 && groups.length <= 4) {
-                score += groups.length * 100;
-                
-                // 各グループが3個前後なら最高
+                score += groups.length * 120;
                 groups.forEach(size => {
-                    if (size === 3) score += 150;
-                    else if (size === 2 || size === 4) score += 80;
+                    if (size === 3) score += 180;
+                    else if (size === 2 || size === 4) score += 100;
                 });
             }
         }
@@ -248,7 +262,6 @@ const PuyoAI = (function() {
         while (stack.length > 0) {
             let p = stack.pop();
             size++;
-            
             [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
                 let nx = p.x + dx, ny = p.y + dy;
                 if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < 12 && 
@@ -262,8 +275,7 @@ const PuyoAI = (function() {
     }
 
     /**
-     * リソースの無駄を避ける（Amaより）
-     * 同色が孤立していないか
+     * リソースの無駄評価
      */
     function evaluateResourceWaste(board) {
         let waste = 0;
@@ -272,7 +284,6 @@ const PuyoAI = (function() {
             for (let y = 0; y < 12; y++) {
                 for (let x = 0; x < WIDTH; x++) {
                     if (board[y][x] === color) {
-                        // 周囲に同色がない孤立ぷよ
                         let hasNeighbor = false;
                         [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dx, dy]) => {
                             let nx = x + dx, ny = y + dy;
@@ -281,10 +292,7 @@ const PuyoAI = (function() {
                                 hasNeighbor = true;
                             }
                         });
-                        
-                        if (!hasNeighbor) {
-                            waste += 100; // 孤立ぷよはペナルティ
-                        }
+                        if (!hasNeighbor) waste += 120;
                     }
                 }
             }
@@ -294,11 +302,91 @@ const PuyoAI = (function() {
     }
 
     /**
-     * ビームサーチによる最善手探索
+     * 色のバランス評価
      */
-    function beamSearch(board, queue, depth) {
+    function evaluateColorBalance(board) {
+        let score = 0;
+        let colorCounts = {};
+        COLORS.forEach(c => colorCounts[c] = 0);
+        
+        for (let y = 0; y < 12; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                let c = board[y][x];
+                if (c !== 0) colorCounts[c]++;
+            }
+        }
+        
+        let counts = Object.values(colorCounts);
+        let avgCount = counts.reduce((a, b) => a + b, 0) / 4;
+        
+        // 各色が均等に配置されていると良い
+        counts.forEach(count => {
+            let deviation = Math.abs(count - avgCount);
+            score -= deviation * 10;
+        });
+        
+        return score;
+    }
+
+    /**
+     * 階段の連続性評価
+     */
+    function evaluateStairContinuity(board) {
+        let score = 0;
+        let maxContinuity = 0;
+        let currentContinuity = 0;
+        
+        for (let x = 0; x < WIDTH - 1; x++) {
+            let h1 = getColumnHeight(board, x);
+            let h2 = getColumnHeight(board, x + 1);
+            let diff = h2 - h1;
+            
+            if (diff === 1) {
+                currentContinuity++;
+                if (currentContinuity > maxContinuity) {
+                    maxContinuity = currentContinuity;
+                }
+            } else {
+                currentContinuity = 0;
+            }
+        }
+        
+        score += maxContinuity * maxContinuity * 100; // 連続性の二乗
+        return score;
+    }
+
+    /**
+     * クワイエッセンスサーチ
+     * 連鎖中の盤面は連鎖が終わるまで探索
+     */
+    function quiescenceSearch(board) {
+        let currentBoard = board.map(row => [...row]);
+        let totalChains = 0;
+        
+        while (true) {
+            let res = simulatePureChain(currentBoard);
+            if (res.chains === 0) break;
+            totalChains += res.chains;
+            currentBoard = res.finalBoard;
+        }
+        
+        return { chains: totalChains, finalBoard: currentBoard };
+    }
+
+    /**
+     * ビームサーチ（改良版）
+     */
+    function beamSearch(board, queue, depth, totalPuyos) {
         if (depth === 0 || queue.length === 0) {
             return [];
+        }
+        
+        // 動的ビーム幅調整
+        let dynamicBeamWidth = BEAM_WIDTH;
+        if (totalPuyos < 20) {
+            dynamicBeamWidth = 16; // 序盤は広く
+        } else if (totalPuyos > 50) {
+            dynamicBeamWidth = 8; // 終盤は狭く（高速化）
         }
         
         let candidates = [];
@@ -306,7 +394,6 @@ const PuyoAI = (function() {
         let nextQueue = queue.slice(1);
         const allowed14 = is14thRowAllowed(board);
         
-        // 全ての配置パターンを生成
         for (let x = 0; x < WIDTH; x++) {
             for (let rot = 0; rot < 4; rot++) {
                 if (!isReachable(board, x)) continue;
@@ -321,8 +408,19 @@ const PuyoAI = (function() {
                 
                 if (!placePuyo(tempBoard, x, rot, currentPuyo[1], currentPuyo[0])) continue;
                 
-                let res = simulatePureChain(tempBoard);
-                let score = evaluateBoard(res.finalBoard, res.chains);
+                // クワイエッセンスサーチ適用
+                let res = quiescenceSearch(tempBoard);
+                
+                // 転置表チェック
+                let cachedScore = getFromTable(res.finalBoard);
+                let score;
+                
+                if (cachedScore !== null) {
+                    score = cachedScore;
+                } else {
+                    score = evaluateBoard(res.finalBoard, res.chains, totalPuyos);
+                    saveToTable(res.finalBoard, score);
+                }
                 
                 candidates.push({
                     board: res.finalBoard,
@@ -333,20 +431,23 @@ const PuyoAI = (function() {
             }
         }
         
-        // スコア順にソート
         candidates.sort((a, b) => b.score - a.score);
-        
-        // 上位BEAM_WIDTH個を保持
-        let beam = candidates.slice(0, BEAM_WIDTH);
+        let beam = candidates.slice(0, dynamicBeamWidth);
         
         if (depth === 1) {
             return beam;
         }
         
-        // 次の深さへ
         let nextBeam = [];
         for (let node of beam) {
-            let children = beamSearch(node.board, nextQueue, depth - 1);
+            let newTotalPuyos = 0;
+            for (let y = 0; y < 12; y++) {
+                for (let x = 0; x < WIDTH; x++) {
+                    if (node.board[y][x] !== 0) newTotalPuyos++;
+                }
+            }
+            
+            let children = beamSearch(node.board, nextQueue, depth - 1, newTotalPuyos);
             children.forEach(child => {
                 nextBeam.push({
                     board: child.board,
@@ -358,44 +459,37 @@ const PuyoAI = (function() {
         }
         
         nextBeam.sort((a, b) => b.score - a.score);
-        return nextBeam.slice(0, BEAM_WIDTH);
+        return nextBeam.slice(0, dynamicBeamWidth);
     }
 
     /**
-     * 盤面評価関数 - v15最適化版
+     * 盤面評価関数 - v16最終版
      */
-    function evaluateBoard(board, immediateChains) {
+    function evaluateBoard(board, immediateChains, totalPuyos) {
         let score = 0;
         
-        let totalPuyos = 0;
-        for (let y = 0; y < 12; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                if (board[y][x] !== 0) totalPuyos++;
-            }
-        }
-        
-        // 即連鎖の抑制
-        if (totalPuyos < 45) {
+        // 即連鎖の抑制（段階的）
+        if (totalPuyos < 48) {
             if (immediateChains > 0) {
-                score -= immediateChains * 10000; // さらに強化
+                score -= immediateChains * 12000; // さらに強化
             }
-        } else if (totalPuyos < 60) {
-            if (immediateChains === 1 || immediateChains === 2) {
-                score -= 4000;
-            } else if (immediateChains >= 3 && immediateChains < 6) {
-                score += immediateChains * 3000;
-            } else if (immediateChains >= 6) {
-                score += immediateChains * 8000;
+        } else if (totalPuyos < 65) {
+            if (immediateChains >= 1 && immediateChains <= 3) {
+                score -= 5000;
+            } else if (immediateChains >= 4 && immediateChains < 7) {
+                score += immediateChains * 4000;
+            } else if (immediateChains >= 7) {
+                score += immediateChains * 10000;
             }
         } else {
-            score += immediateChains * 12000;
+            score += immediateChains * 15000;
         }
         
         // 連鎖ポテンシャル（最重要）
         let potential = evaluateChainPotential(board);
-        score += potential * 10000; // v14の8000から10000に増加
+        score += potential * 12000; // v15の10000から12000に増加
         
-        // パターンマッチング（Amaより）
+        // パターンマッチング
         let gtrScore = detectGTRPattern(board);
         score += gtrScore;
         
@@ -417,6 +511,14 @@ const PuyoAI = (function() {
         let wasteScore = evaluateResourceWaste(board);
         score += wasteScore;
         
+        // 色のバランス
+        let balanceScore = evaluateColorBalance(board);
+        score += balanceScore;
+        
+        // 階段の連続性
+        let stairScore = evaluateStairContinuity(board);
+        score += stairScore;
+        
         // 高さペナルティ
         let maxHeight = 0;
         for (let x = 0; x < WIDTH; x++) {
@@ -424,7 +526,7 @@ const PuyoAI = (function() {
             if (h > maxHeight) maxHeight = h;
         }
         if (maxHeight > 10) {
-            score -= (maxHeight - 10) * 3000;
+            score -= (maxHeight - 10) * 3500;
         }
         
         // ゲームオーバーチェック
@@ -447,7 +549,9 @@ const PuyoAI = (function() {
                 if (y === 13 && !allowed14) continue;
                 if (y >= 14) continue;
                 tempBoard[y][x] = color;
-                let res = simulatePureChain(tempBoard);
+                
+                // クワイエッセンスサーチで正確な連鎖数を取得
+                let res = quiescenceSearch(tempBoard);
                 if (res.chains > maxChain) maxChain = res.chains;
             }
         }
@@ -455,19 +559,26 @@ const PuyoAI = (function() {
     }
 
     /**
-     * 最善手を取得 - ビームサーチ版
+     * 最善手を取得 - v16最終版
      */
     function getBestMove(board, axisColor, childColor, nextAxisColor, nextChildColor) {
-        // ぷよのキューを作成
-        let queue = [
-            [childColor, axisColor]
-        ];
+        // 転置表のエージングを進める
+        tableAge++;
+        
+        let totalPuyos = 0;
+        for (let y = 0; y < 12; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                if (board[y][x] !== 0) totalPuyos++;
+            }
+        }
+        
+        let queue = [[childColor, axisColor]];
         
         if (nextAxisColor && nextChildColor) {
             queue.push([nextChildColor, nextAxisColor]);
         }
         
-        // さらに2手分を仮想的に追加（ランダム）
+        // 仮想ぷよを追加
         for (let i = 0; i < 2; i++) {
             queue.push([
                 COLORS[Math.floor(Math.random() * COLORS.length)],
@@ -475,14 +586,12 @@ const PuyoAI = (function() {
             ]);
         }
         
-        // ビームサーチ実行
-        let results = beamSearch(board, queue, SEARCH_DEPTH);
+        let results = beamSearch(board, queue, SEARCH_DEPTH, totalPuyos);
         
         if (results.length === 0) {
             return { x: 2, rotation: 0 };
         }
         
-        // 最高スコアの手を返す
         return results[0].move;
     }
 
@@ -590,7 +699,7 @@ const PuyoAI = (function() {
                         let tempBoard = board.map(row => [...row]);
                         tempBoard[y][x] = 0;
                         applyGravity(tempBoard);
-                        let res = simulatePureChain(tempBoard);
+                        let res = quiescenceSearch(tempBoard);
                         if (res.chains > bestChain) {
                             bestChain = res.chains;
                             bestPuyo = { x, y, chain: res.chains };
