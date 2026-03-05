@@ -54,8 +54,31 @@
                     <span id="chain-wait-value" style="font-size: 1em; color: #fff; min-width: 60px;">300ms</span>
                 </div>
             </div>
-
             <p style="font-size: 0.8em; color: #888; margin-top: 10px;">※値が小さいほどアニメーションが速くなります。</p>
+            <!-- LocalStorage設定 -->
+            <div style="margin: 20px 0; text-align: left;">
+                <label style="display: block; font-size: 0.9em; color: #ccc; margin-bottom: 10px;">
+                    転置表の永続化（リロード後も保持）
+                </label>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="localstorage-toggle" onchange="toggleLocalStorage(this.checked)" style="width: 18px; height: 18px; cursor: pointer;">
+                        <span style="font-size: 0.9em; color: #fff;">転置表をLocalStorageに保存</span>
+                    </label>
+                </div>
+                <p style="font-size: 0.75em; color: #888; margin-top: 8px; line-height: 1.4;">
+                    ※ ONにすると、ページをリロードしても転置表が残ります<br>
+                    ※ 容量: 約5-10MB、速度: 少し遅くなる可能性あり
+                </p>
+                <div style="margin-top: 10px; display: flex; gap: 10px;">
+                    <button onclick="clearTranspositionTable()" style="padding: 6px 12px; background-color: #e63946; color: white; border: none; border-radius: 5px; font-size: 0.8em; cursor: pointer;">
+                        転置表をクリア
+                    </button>
+                    <span id="cache-size-display" style="font-size: 0.85em; color: #aaa; display: flex; align-items: center;">
+                        キャッシュ: 0個
+                    </span>
+                </div>
+            </div>
             <button id="setting-back-btn" onclick="toggleSettingMode()" style="background-color: #457b9d; color: white; margin-top: 20px; width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.9em; font-weight: bold; cursor: pointer;">戻る</button>
         </div>
     </div>
@@ -98,7 +121,10 @@
                     <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
                     <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
                 </div>
-                
+                <!-- auto-drop-toggle-buttonの後、reset-button-playの前に追加 -->
+                <button id="raise-puyo-button" onclick="raisePuyoOneRow()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #9b59b6; color: white; margin-top: 5px;">
+                    操作中のぷよを1段上げる ↑ (U)
+                </button>
                 <div id="play-controls" class="common-control">
                     <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
                     <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
