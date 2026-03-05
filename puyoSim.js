@@ -1722,10 +1722,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.max-chain-hint-box').forEach(el => el.remove());
     };
 })();
-// puyoSim.jsの末尾に追加するコード（安全版）
-// （既存のAI連携コードの後に追加）
-
-// ===== LocalStorage機能（安全版） =====
+// ===== LocalStorage機能 =====
 (function() {
     'use strict';
     
@@ -1832,7 +1829,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log('転置表を復元: ' + entries.length + '個');
             } catch (e) {
                 console.error('転置表の読み込みエラー:', e);
-                // エラーが発生したら破損データを削除
                 localStorage.removeItem(STORAGE_KEY);
             }
         }
@@ -1896,79 +1892,97 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        console.log('LocalStorage機能を読み込みました');
+
     } catch (e) {
         console.error('LocalStorage機能の初期化エラー:', e);
     }
 })();
 
-// ===== 操作中のぷよを1段上げる機能（安全版） =====
+// ===== 操作中のぷよを1段上げる機能（完全対応版） =====
 (function() {
     'use strict';
     
     try {
         window.raisePuyoOneRow = function() {
             try {
-                // gameStateの存在チェック
+                console.log('=== raisePuyoOneRow 実行開始 ===');
+                
                 if (typeof gameState === 'undefined') {
                     console.error('gameState が未定義です');
+                    alert('エラー: ゲーム状態を取得できません');
                     return;
                 }
+                
+                console.log('gameState:', gameState);
                 
                 if (gameState !== 'playing') {
-                    alert('プレイモード中のみ使用できます。');
+                    alert('プレイモード中のみ使用できます。\n現在の状態: ' + gameState);
                     return;
                 }
                 
-                // currentPuyoの存在チェック
                 if (typeof currentPuyo === 'undefined' || !currentPuyo) {
                     alert('操作中のぷよがありません。');
                     return;
                 }
                 
-                if (!currentPuyo.axis || !currentPuyo.child) {
-                    alert('操作中のぷよがありません。');
+                console.log('currentPuyo:', currentPuyo);
+                
+                if (typeof currentPuyo.mainX === 'undefined' || 
+                    typeof currentPuyo.mainY === 'undefined' || 
+                    typeof currentPuyo.rotation === 'undefined') {
+                    alert('操作中のぷよの構造が不正です。');
                     return;
                 }
                 
-                // boardの存在チェック
                 if (typeof board === 'undefined') {
                     console.error('board が未定義です');
+                    alert('エラー: 盤面データを取得できません');
                     return;
                 }
                 
-                // COLORSの存在チェック
                 if (typeof COLORS === 'undefined') {
                     console.error('COLORS が未定義です');
+                    alert('エラー: 色定数を取得できません');
                     return;
                 }
                 
-                // 現在のぷよの位置を取得
-                const axisPos = currentPuyo.axis;
-                const childPos = currentPuyo.child;
+                const mainX = currentPuyo.mainX;
+                const mainY = currentPuyo.mainY;
+                const rotation = currentPuyo.rotation;
                 
-                // 1段上に移動できるかチェック
-                const newAxisY = axisPos.y + 1;
-                const newChildY = childPos.y + 1;
+                let subX = mainX;
+                let subY = mainY;
                 
-                // 上限チェック（Y=13まで）
-                if (newAxisY > 13 || newChildY > 13) {
+                if (rotation === 0) subY = mainY + 1;
+                else if (rotation === 1) subX = mainX - 1;
+                else if (rotation === 2) subY = mainY - 1;
+                else if (rotation === 3) subX = mainX + 1;
+                
+                console.log('現在位置: main(' + mainX + ',' + mainY + '), sub(' + subX + ',' + subY + '), rotation=' + rotation);
+                
+                const newMainY = mainY + 1;
+                const newSubY = subY + 1;
+                
+                console.log('移動先: main(' + mainX + ',' + newMainY + '), sub(' + subX + ',' + newSubY + ')');
+                
+                if (newMainY > 13 || newSubY > 13) {
                     alert('これ以上上に移動できません。');
                     return;
                 }
                 
-                // 移動先に障害物がないかチェック
                 let canMove = true;
                 
-                // axisの移動先チェック
-                if (newAxisY < 12) {
-                    if (board[newAxisY][axisPos.x] !== COLORS.EMPTY) {
+                if (newMainY < 13) {
+                    if (board[newMainY][mainX] !== COLORS.EMPTY) {
+                        console.log('main移動先に障害物: board[' + newMainY + '][' + mainX + '] = ' + board[newMainY][mainX]);
                         canMove = false;
                     }
                 }
                 
-                // childの移動先チェック
-                if (newChildY < 12) {
-                    if (board[newChildY][childPos.x] !== COLORS.EMPTY) {
+                if (newSubY < 13) {
+                    if (board[newSubY][subX] !== COLORS.EMPTY) {
+                        console.log('sub移動先に障害物: board[' + newSubY + '][' + subX + '] = ' + board[newSubY][subX]);
                         canMove = false;
                     }
                 }
@@ -1978,26 +1992,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 
-                // 1段上に移動
-                currentPuyo.axis.y = newAxisY;
-                currentPuyo.child.y = newChildY;
+                currentPuyo.mainY = newMainY;
                 
-                // 描画を更新
+                console.log('移動完了: 新しい位置 mainY=' + newMainY);
+                
                 if (typeof renderBoard === 'function') {
                     renderBoard();
+                    console.log('renderBoard() 実行');
                 } else {
                     console.error('renderBoard 関数が未定義です');
                 }
                 
-                console.log('操作中のぷよを1段上げました: Y=' + axisPos.y + ' → ' + newAxisY);
+                console.log('=== raisePuyoOneRow 実行完了 ===');
                 
             } catch (e) {
                 console.error('ぷよを上げる処理でエラー:', e);
-                alert('エラーが発生しました: ' + e.message);
+                alert('エラーが発生しました: ' + e.message + '\n\nコンソールを確認してください（F12）');
             }
         };
 
-        // キーボードショートカット（Uキー）を追加
         document.addEventListener('keydown', function(e) {
             try {
                 if (typeof gameState !== 'undefined' && gameState === 'playing' && e.key === 'u') {
@@ -2008,9 +2021,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
+        console.log('ぷよを上げる機能（完全対応版）を読み込みました');
+        
     } catch (e) {
         console.error('ぷよを上げる機能の初期化エラー:', e);
     }
 })();
-
-console.log('puyoSim_additions_safe.js を読み込みました');
