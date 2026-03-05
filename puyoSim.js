@@ -1966,13 +1966,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 console.log('移動先: main(' + mainX + ',' + newMainY + '), sub(' + subX + ',' + newSubY + ')');
                 
-                if (newMainY > 13 || newSubY > 13) {
+                // 上限チェック: Y=14まで許可（初期位置Y=12の1個上=Y=13）
+                // rotation=0（上向き）の場合、subYがY=14になる可能性があるため、14まで許可
+                if (newMainY > 14 || newSubY > 14) {
                     alert('これ以上上に移動できません。');
                     return;
                 }
                 
                 let canMove = true;
                 
+                // 移動先チェック: Y=13以下のみチェック（Y=13,14は常に空）
                 if (newMainY < 13) {
                     if (board[newMainY][mainX] !== COLORS.EMPTY) {
                         console.log('main移動先に障害物: board[' + newMainY + '][' + mainX + '] = ' + board[newMainY][mainX]);
@@ -2021,9 +2024,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
-        console.log('ぷよを上げる機能（完全対応版）を読み込みました');
+        console.log('ぷよを上げる機能（Y=13まで対応版）を読み込みました');
         
     } catch (e) {
         console.error('ぷよを上げる機能の初期化エラー:', e);
-    }
-})();
