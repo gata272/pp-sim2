@@ -1722,3 +1722,219 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.max-chain-hint-box').forEach(el => el.remove());
     };
 })();
+// puyoSim.jsの末尾に追加するコード
+// （既存のAI連携コードの後に追加）
+
+// ===== LocalStorage機能 =====
+(function() {
+let localStorageEnabled = false;
+const STORAGE_KEY = ‘puyoAI_transpositionTable’;
+const SETTINGS_KEY = ‘puyoAI_settings’;
+
+// 設定を読み込む
+window.addEventListener('load', function() {
+    try {
+        const savedSettings = localStorage.getItem(SETTINGS_KEY);
+        if (savedSettings) {
+            const settings = JSON.parse(savedSettings);
+            localStorageEnabled = settings.localStorageEnabled || false;
+            
+            const checkbox = document.getElementById('localstorage-toggle');
+            if (checkbox) {
+                checkbox.checked = localStorageEnabled;
+            }
+            
+            if (localStorageEnabled) {
+                loadTranspositionTable();
+            }
+        }
+    } catch (e) {
+        console.error('設定の読み込みエラー:', e);
+    }
+    
+    updateCacheSizeDisplay();
+});
+
+// LocalStorageのトグル
+window.toggleLocalStorage = function(enabled) {
+    localStorageEnabled = enabled;
+    
+    // 設定を保存
+    try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+            localStorageEnabled: enabled
+        }));
+        
+        if (enabled) {
+            saveTranspositionTable();
+            showDebugLog('LocalStorage: 有効化しました');
+        } else {
+            showDebugLog('LocalStorage: 無効化しました（次回保存されません）');
+        }
+    } catch (e) {
+        alert('設定の保存に失敗しました: ' + e.message);
+    }
+};
+
+// 転置表をLocalStorageに保存
+function saveTranspositionTable() {
+    if (!localStorageEnabled) return;
+    
+    try {
+        // PuyoAIの転置表にアクセス
+        if (typeof PuyoAI !== 'undefined' && window.PuyoAI_getTranspositionTable) {
+            const table = window.PuyoAI_getTranspositionTable();
+            const entries = Array.from(table.entries());
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+            showDebugLog('転置表を保存: ' + entries.length + '個');
+        }
+    } catch (e) {
+        if (e.name === 'QuotaExceededError') {
+            alert('LocalStorageの容量が不足しています。転置表をクリアしてください。');
+            localStorageEnabled = false;
+            const checkbox = document.getElementById('localstorage-toggle');
+            if (checkbox) checkbox.checked = false;
+        } else {
+            console.error('転置表の保存エラー:', e);
+        }
+    }
+}
+
+// 転置表をLocalStorageから読み込む
+function loadTranspositionTable() {
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved && typeof PuyoAI !== 'undefined' && window.PuyoAI_setTranspositionTable) {
+            const entries = JSON.parse(saved);
+            window.PuyoAI_setTranspositionTable(new Map(entries));
+            showDebugLog('転置表を復元: ' + entries.length + '個');
+        }
+    } catch (e) {
+        console.error('転置表の読み込みエラー:', e);
+    }
+}
+
+// 転置表をクリア
+window.clearTranspositionTable = function() {
+    if (confirm('転置表をクリアしますか？\n（保存された学習データが削除されます）')) {
+        try {
+            localStorage.removeItem(STORAGE_KEY);
+            if (typeof PuyoAI !== 'undefined' && window.PuyoAI_clearTranspositionTable) {
+                window.PuyoAI_clearTranspositionTable();
+            }
+            updateCacheSizeDisplay();
+            alert('転置表をクリアしました。');
+        } catch (e) {
+            alert('クリアに失敗しました: ' + e.message);
+        }
+    }
+};
+
+// キャッシュサイズの表示を更新
+function updateCacheSizeDisplay() {
+    const display = document.getElementById('cache-size-display');
+    if (display && typeof PuyoAI !== 'undefined' && window.PuyoAI_getTableSize) {
+        const size = window.PuyoAI_getTableSize();
+        display.textContent = 'キャッシュ: ' + size + '個';
+    }
+}
+
+// 定期的に保存（30秒ごと）
+setInterval(function() {
+    if (localStorageEnabled && gameState === 'playing') {
+        saveTranspositionTable();
+        updateCacheSizeDisplay();
+    }
+}, 30000);
+
+// ゲーム終了時に保存
+window.addEventListener('beforeunload', function() {
+    if (localStorageEnabled) {
+        saveTranspositionTable();
+    }
+});
+
+// AIボタンクリック後に保存
+const originalAIButton = document.getElementById('ai-button');
+if (originalAIButton) {
+    originalAIButton.addEventListener('click', function() {
+        setTimeout(function() {
+            if (localStorageEnabled) {
+                saveTranspositionTable();
+                updateCacheSizeDisplay();
+            }
+        }, 100);
+    });
+}
+})();
+
+// ===== 操作中のぷよを1段上げる機能 =====
+window.raisePuyoOneRow = function() {
+if (gameState !== ‘playing’) {
+alert(‘プレイモード中のみ使用できます。’);
+return;
+}
+
+// 操作中のぷよがあるかチェック
+if (!currentPuyo || !currentPuyo.axis || !currentPuyo.child) {
+    alert('操作中のぷよがありません。');
+    return;
+}
+
+// 現在のぷよの位置を取得
+const axisPos = currentPuyo.axis;
+const childPos = currentPuyo.child;
+
+// 1段上に移動できるかチェック
+const newAxisY = axisPos.y + 1;
+const newChildY = childPos.y + 1;
+
+// 上限チェック（Y=13まで）
+if (newAxisY > 13 || newChildY > 13) {
+    alert('これ以上上に移動できません。');
+    return;
+}
+
+// 移動先に障害物がないかチェック
+// axis と child の新しい位置が盤面内か、または Y>=12（落下前の領域）であること
+let canMove = true;
+
+// axisの移動先チェック
+if (newAxisY < 12) {
+    if (board[newAxisY][axisPos.x] !== COLORS.EMPTY) {
+        canMove = false;
+    }
+}
+
+// childの移動先チェック
+if (newChildY < 12) {
+    if (board[newChildY][childPos.x] !== COLORS.EMPTY) {
+        canMove = false;
+    }
+}
+
+if (!canMove) {
+    alert('移動先にぷよがあるため、上に移動できません。');
+    return;
+}
+
+// 1段上に移動
+currentPuyo.axis.y = newAxisY;
+currentPuyo.child.y = newChildY;
+
+// 描画を更新
+renderBoard();
+
+// デバッグログ
+if (typeof showDebugLog === 'function') {
+    showDebugLog('操作中のぷよを1段上げました: Y=' + axisPos.y + ' → ' + newAxisY);
+}
+
+};
+
+// キーボードショートカット（Uキー）を追加
+document.addEventListener(‘keydown’, function(e) {
+if (gameState === ‘playing’ && e.key === ‘u’) {
+raisePuyoOneRow();
+}
+});
