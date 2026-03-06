@@ -510,6 +510,8 @@ function generateNewPuyo() {
         clearInterval(dropTimer); 
         updateUI();
         renderBoard();
+        // オンライン対戦中の場合、敗北を通知
+        if (window.notifyGameOver) window.notifyGameOver();
         return; 
     }
 
