@@ -6,7 +6,8 @@
     let opponentId = '';
     let isHost = false;
     let matchCount = 0;
-    let currentMatch = 0;
+    let myWins = 0;
+    let oppWins = 0;
     let isMatchActive = false;
     let peerInitialized = false;
     let peerInitializing = false;
@@ -73,6 +74,15 @@
         attemptConnection(targetId);
     };
 
+    window.surrenderMatch = function() {
+        if (isMatchActive && conn && conn.open) {
+            if (confirm('対戦を降参しますか？')) {
+                conn.send({ type: 'OPPONENT_SURRENDERED' });
+                endMatchWithWinner(true);
+            }
+        }
+    };
+
     function attemptConnection(targetId) {
         try {
             conn = peer.connect(targetId, { reliable: true });
@@ -125,6 +135,20 @@
             document.body.appendChild(proposalOverlay);
         }
 
+        // リザルトオーバーレイの作成（存在しない場合のみ）
+        if (!document.getElementById('match-result-overlay')) {
+            const resultOverlay = document.createElement('div');
+            resultOverlay.id = 'match-result-overlay';
+            resultOverlay.innerHTML = `
+                <div class="online-box">
+                    <h2 id="result-title">対戦終了</h2>
+                    <div id="result-content" style="margin: 20px 0; font-size: 1.1em;"></div>
+                    <div id="result-actions" style="margin-top: 15px;"></div>
+                </div>
+            `;
+            document.body.appendChild(resultOverlay);
+        }
+
         // 相手の盤面コンテナの作成（存在しない場合のみ）
         if (!document.getElementById('opponent-board-container')) {
             const playStatsInfo = document.getElementById('play-stats-info');
@@ -134,9 +158,23 @@
                 oppContainer.innerHTML = `
                     <h3>相手の盤面</h3>
                     <div id="opponent-board"></div>
+                    <div id="match-status" style="margin-top: 10px; font-size: 0.9em; text-align: center;"></div>
                 `;
                 playStatsInfo.appendChild(oppContainer);
                 createOpponentBoardDOM();
+            }
+        }
+
+        // 降参ボタンの作成（存在しない場合のみ）
+        if (!document.getElementById('surrender-button')) {
+            const playControls = document.getElementById('play-controls');
+            if (playControls) {
+                const surrenderBtn = document.createElement('button');
+                surrenderBtn.id = 'surrender-button';
+                surrenderBtn.onclick = window.surrenderMatch;
+                surrenderBtn.style.cssText = 'width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #d9534f; color: white; margin-top: 5px; display: none;';
+                surrenderBtn.textContent = '降参';
+                playControls.appendChild(surrenderBtn);
             }
         }
     }
@@ -273,6 +311,12 @@
             case 'SYNC_NEXT':
                 if (window.setNextPuyos) window.setNextPuyos(data.nextPuyos);
                 break;
+            case 'OPPONENT_LOST':
+                endMatchWithWinner(true);
+                break;
+            case 'OPPONENT_SURRENDERED':
+                endMatchWithWinner(true);
+                break;
         }
     }
 
@@ -317,9 +361,15 @@
 
     function startMatch(count) {
         matchCount = count;
+        myWins = 0;
+        oppWins = 0;
         isMatchActive = true;
         document.getElementById('match-proposal-overlay').style.display = 'none';
         document.body.classList.add('online-match-active');
+
+        // 降参ボタンを表示
+        const surrenderBtn = document.getElementById('surrender-button');
+        if (surrenderBtn) surrenderBtn.style.display = 'block';
 
         // シミュレーターの設定を強制
         if (window.updateGravityWait) window.updateGravityWait(300);
@@ -333,9 +383,19 @@
         // 盤面リセット
         if (window.resetGame) window.resetGame();
 
+        // マッチステータス表示
+        updateMatchStatus();
+
         // ホストならネクストを生成して同期
         if (isHost) {
             setTimeout(() => syncNextPuyos(), 500);
+        }
+    }
+
+    function updateMatchStatus() {
+        const statusDiv = document.getElementById('match-status');
+        if (statusDiv) {
+            statusDiv.textContent = `${myWins} - ${oppWins}`;
         }
     }
 
@@ -359,6 +419,13 @@
             }
         } catch (err) {
             console.error('Failed to send board data:', err);
+        }
+    };
+
+    window.notifyGameOver = function() {
+        if (isMatchActive && conn && conn.open) {
+            conn.send({ type: 'OPPONENT_LOST' });
+            endMatchWithWinner(true);
         }
     };
 
@@ -390,9 +457,56 @@
         }
     }
 
+    function endMatchWithWinner(iWon) {
+        if (iWon) {
+            myWins++;
+        } else {
+            oppWins++;
+        }
+
+        updateMatchStatus();
+
+        if (myWins >= matchCount) {
+            showMatchResult('シリーズ勝利！');
+            endMatch();
+        } else if (oppWins >= matchCount) {
+            showMatchResult('シリーズ敗北...');
+            endMatch();
+        } else {
+            // 次の試合へ
+            setTimeout(() => {
+                if (window.resetGame) window.resetGame();
+                if (isHost) {
+                    setTimeout(() => syncNextPuyos(), 500);
+                }
+            }, 2000);
+        }
+    }
+
+    function showMatchResult(message) {
+        const overlay = document.getElementById('match-result-overlay');
+        const content = document.getElementById('result-content');
+        const actions = document.getElementById('result-actions');
+        
+        if (!overlay) return;
+        
+        overlay.style.display = 'flex';
+        content.innerHTML = `
+            <p>${message}</p>
+            <p style="font-size: 1.2em; margin-top: 10px;">最終スコア: ${myWins} - ${oppWins}</p>
+        `;
+        actions.innerHTML = `
+            <button class="online-btn" onclick="location.reload()">終了</button>
+        `;
+    }
+
     function endMatch() {
         isMatchActive = false;
         document.body.classList.remove('online-match-active');
+        
+        // 降参ボタンを非表示
+        const surrenderBtn = document.getElementById('surrender-button');
+        if (surrenderBtn) surrenderBtn.style.display = 'none';
     }
 
     // puyoSim.js へのフック
