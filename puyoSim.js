@@ -1320,9 +1320,16 @@ function renderEditNextPuyos() {
 
 
 function updateUI() {
-    document.getElementById('score').textContent = score;
-    document.getElementById('chain-count').textContent = chainCount;
+    const scoreElement = document.getElementById('score');
+    const chainCountElement = document.getElementById('chain-count');
+    if (scoreElement) scoreElement.textContent = score;
+    if (chainCountElement) chainCountElement.textContent = chainCount;
     updateHistoryButtons(); 
+    
+    // オンライン対戦中なら盤面情報を送信
+    if (typeof isInMatch !== 'undefined' && isInMatch && typeof sendBoardUpdate === 'function') {
+        sendBoardUpdate();
+    }
 }
 
 // 入力処理
@@ -1475,66 +1482,23 @@ document.addEventListener('DOMContentLoaded', () => {
 })();
 
 
-// AI連携コード（ボタン状態管理付き）
+// AI連携コード
 (function() {
     let aiHint = null;
-    const PUYO_COLORS = { 
-        1: '#e63946', // 赤
-        2: '#457b9d', // 青
-        3: '#8ac926', // 緑
-        4: '#fca311', // 黄
-        5: '#ccc',    // おじゃま
-        0: 'transparent' 
-    };
+    const PUYO_COLORS = { 1: '#e63946', 2: '#457b9d', 3: '#8ac926', 4: '#fca311', 5: '#ccc', 0: 'transparent' };
 
     window.addEventListener('load', function() {
         const aiButton = document.getElementById('ai-button');
         if (aiButton) {
-            aiButton.addEventListener('click', async () => {
+            aiButton.addEventListener('click', () => {
                 if (gameState !== 'playing' || !currentPuyo) {
                     alert('プレイ中のみAIヒントを表示できます。');
                     return;
                 }
-
-                // ボタンを灰色にして無効化
-                aiButton.disabled = true;
-                aiButton.style.backgroundColor = '#999';
-                aiButton.style.cursor = 'not-allowed';
-                aiButton.textContent = '思考中...';
-
-                // 少し遅延を入れてUIを更新
-                await new Promise(resolve => setTimeout(resolve, 50));
-
-                try {
-                    // 次のぷよを取得（NEXT1とNEXT2）
-                    const next1 = nextPuyoColors[0] || [0, 0];
-                    const next2 = nextPuyoColors[1] || [0, 0];
-
-                    if (typeof PuyoAI !== 'undefined' && PuyoAI.getBestMove) {
-                        // AIに最適な場所を計算させる（3手先読み）
-                        aiHint = PuyoAI.getBestMove(
-                            board, 
-                            currentPuyo.mainColor, 
-                            currentPuyo.subColor,
-                            next1[0],  // NEXT1のメイン
-                            next1[1]   // NEXT1のサブ
-                        );
-                        
-                        console.log('AI推奨位置:', aiHint);
-                        console.log('現在のぷよ:', {main: currentPuyo.mainColor, sub: currentPuyo.subColor});
-                        console.log('NEXT1:', next1, 'NEXT2:', next2);
-                        
-                        showAIHintOnBoard();
-                    }
-                } catch (error) {
-                    console.error('AI計算エラー:', error);
-                    alert('AI計算中にエラーが発生しました。');
-                } finally {
-                    // ボタンを元の色に戻す
-                    aiButton.disabled = false;
-                    aiButton.style.backgroundColor = '#ff9800';
-                    aiButton.style.cursor = 'pointer';
-                    aiButton.textContent = 'アシスト';
+                const nextPair = nextPuyoColors[0] || [0, 0];
+                if (typeof PuyoAI !== 'undefined' && PuyoAI.getBestMove) {
+                    aiHint = PuyoAI.getBestMove(board, currentPuyo.mainColor, currentPuyo.subColor, nextPair[0], nextPair[1]);
+                    showAIHintOnBoard();
                 }
             });
         }
@@ -1542,65 +1506,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showAIHintOnBoard() {
         if (!aiHint || !currentPuyo) return;
-        
-        // 既存のヒントを削除
         document.querySelectorAll('.ai-hint-dot').forEach(el => el.remove());
-        
         const axisX = aiHint.x;
         let axisY = getDropY(axisX);
         let childX = axisX;
         let childY = axisY;
         const r = aiHint.rotation;
-        
-        // 回転に応じた子ぷよの位置を計算
-        if (r === 0) {
-            // 上
-            childY = getDropY(axisX, axisY + 1);
-        } else if (r === 1) {
-            // 右
-            childX = axisX + 1;
-            childY = getDropY(childX);
-        } else if (r === 2) {
-            // 下
-            childY = axisY;
-            axisY = getDropY(axisX, childY + 1);
-        } else if (r === 3) {
-            // 左
-            childX = axisX - 1;
-            childY = getDropY(childX);
-        }
-        
-        const axisColorCode = PUYO_COLORS[currentPuyo.mainColor] || '#fff';
-        const childColorCode = PUYO_COLORS[currentPuyo.subColor] || '#fff';
-        
-        // 13段目より下にある場合のみ表示（ゲームオーバーライン以下）
-        if (axisY < 13) {
-            createDot(axisX, axisY, axisColorCode, '軸ぷよ');
-        }
-        if (childY < 13) {
-            createDot(childX, childY, childColorCode, '子ぷよ');
-        }
+        if (r === 0) childY = getDropY(axisX, axisY + 1);
+        else if (r === 1) { childX = axisX + 1; childY = getDropY(childX); }
+        else if (r === 2) { childY = axisY; axisY = getDropY(axisX, childY + 1); }
+        else if (r === 3) { childX = axisX - 1; childY = getDropY(childX); }
+        if (axisY < 13) createDot(axisX, axisY, PUYO_COLORS[currentPuyo.mainColor]);
+        if (childY < 13) createDot(childX, childY, PUYO_COLORS[currentPuyo.subColor]);
     }
 
     function getDropY(x, startY = 0) {
         if (x < 0 || x >= WIDTH) return -1;
         let y = Math.max(0, startY);
-        while (y < HEIGHT && board[y][x] !== COLORS.EMPTY) {
-            y++;
-        }
+        while (y < HEIGHT && board[y][x] !== COLORS.EMPTY) y++;
         return y;
     }
 
-    function createDot(x, y, color, label) {
-        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return;
-        
-        const cell = document.getElementById(`cell-${x}-${y}`);
+    function createDot(x, y, color) {
+        const cell = document.getElementById('cell-' + x + '-' + y);
         if (cell) {
             const dot = document.createElement('div');
             dot.className = 'ai-hint-dot';
             dot.style.position = 'absolute';
-            dot.style.width = '20px';
-            dot.style.height = '20px';
+            dot.style.width = '18px';
+            dot.style.height = '18px';
             dot.style.backgroundColor = color;
             dot.style.borderRadius = '50%';
             dot.style.top = '50%';
@@ -1608,9 +1542,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dot.style.transform = 'translate(-50%, -50%)';
             dot.style.zIndex = '100';
             dot.style.border = '3px solid #fff';
-            dot.style.boxShadow = '0 0 10px rgba(0,0,0,0.9)';
-            dot.title = label;
-            
+            dot.style.boxShadow = '0 0 8px rgba(0,0,0,0.9)';
             cell.style.position = 'relative';
             cell.appendChild(dot);
         }
@@ -1622,49 +1554,29 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 })();
 
-// 最大連鎖数表示機能（ボタン状態管理付き）
+// 最大連鎖数表示機能
 (function() {
     let maxChainPuyo = null;
 
     window.addEventListener('load', function() {
         const maxChainButton = document.getElementById('max-chain-button');
         if (maxChainButton) {
-            maxChainButton.addEventListener('click', async () => {
+            maxChainButton.addEventListener('click', () => {
                 if (gameState !== 'playing') {
                     alert('プレイ中のみ最大連鎖数を表示できます。');
                     return;
                 }
                 
-                // ボタンを灰色にして無効化
-                maxChainButton.disabled = true;
-                maxChainButton.style.backgroundColor = '#999';
-                maxChainButton.style.cursor = 'not-allowed';
-                maxChainButton.textContent = '解析中...';
-                
-                // 少し遅延を入れてUIを更新
-                await new Promise(resolve => setTimeout(resolve, 50));
-                
-                try {
-                    const boardCopy = board.map(row => [...row]);
-                    if (typeof PuyoAI !== 'undefined' && PuyoAI.findMaxChainPuyo) {
-                        maxChainPuyo = PuyoAI.findMaxChainPuyo(boardCopy);
-                        
-                        if (maxChainPuyo) {
-                            showMaxChainPuyoOnBoard();
-                        } else {
-                            alert('連鎖が発生するぷよが見つかりません。');
-                            clearMaxChainHint();
-                        }
+                const boardCopy = board.map(row => [...row]);
+                if (typeof PuyoAI !== 'undefined' && PuyoAI.findMaxChainPuyo) {
+                    maxChainPuyo = PuyoAI.findMaxChainPuyo(boardCopy);
+                    
+                    if (maxChainPuyo) {
+                        showMaxChainPuyoOnBoard();
+                    } else {
+                        alert('連鎖が発生するぷよが見つかりません。');
+                        clearMaxChainHint();
                     }
-                } catch (error) {
-                    console.error('最大連鎖解析エラー:', error);
-                    alert('連鎖解析中にエラーが発生しました。');
-                } finally {
-                    // ボタンを元の色に戻す
-                    maxChainButton.disabled = false;
-                    maxChainButton.style.backgroundColor = '#e74c3c';
-                    maxChainButton.style.cursor = 'pointer';
-                    maxChainButton.textContent = '最大連鎖';
                 }
             });
         }
@@ -1678,11 +1590,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const y = maxChainPuyo.y;
         const chainCount = maxChainPuyo.chain;
         
-        drawRedBox(x, y, chainCount);
+        drawRedBox(x, y);
+        updateMaxChainDisplay(chainCount);
         console.log('最大連鎖: ' + chainCount + '鎖 at (' + x + ', ' + y + ')');
     }
+    
+    function updateMaxChainDisplay(chainCount) {
+        const maxChainDisplay = document.getElementById('max-chain-display');
+        if (maxChainDisplay) {
+            maxChainDisplay.textContent = chainCount;
+        }
+    }
 
-    function drawRedBox(x, y, chainCount) {
+    function drawRedBox(x, y) {
         const cell = document.getElementById('cell-' + x + '-' + y);
         if (cell) {
             const box = document.createElement('div');
@@ -1692,26 +1612,10 @@ document.addEventListener('DOMContentLoaded', () => {
             box.style.height = '100%';
             box.style.top = '0';
             box.style.left = '0';
-            box.style.border = '4px solid #e74c3c';
+            box.style.border = '3px solid #e74c3c';
             box.style.boxSizing = 'border-box';
             box.style.zIndex = '99';
             box.style.borderRadius = '4px';
-            box.style.backgroundColor = 'rgba(231, 76, 60, 0.2)';
-            
-            // 連鎖数を表示
-            const label = document.createElement('div');
-            label.textContent = chainCount + '鎖';
-            label.style.position = 'absolute';
-            label.style.top = '50%';
-            label.style.left = '50%';
-            label.style.transform = 'translate(-50%, -50%)';
-            label.style.color = '#fff';
-            label.style.fontWeight = 'bold';
-            label.style.fontSize = '14px';
-            label.style.textShadow = '0 0 4px #000, 0 0 8px #000';
-            label.style.pointerEvents = 'none';
-            
-            box.appendChild(label);
             cell.style.position = 'relative';
             cell.appendChild(box);
         }
@@ -1720,185 +1624,12 @@ document.addEventListener('DOMContentLoaded', () => {
     window.clearMaxChainHint = function() {
         maxChainPuyo = null;
         document.querySelectorAll('.max-chain-hint-box').forEach(el => el.remove());
+        const maxChainDisplay = document.getElementById('max-chain-display');
+        if (maxChainDisplay) {
+            maxChainDisplay.textContent = '-';
+        }
     };
 })();
-// ===== LocalStorage機能 =====
-(function() {
-    'use strict';
-    
-    try {
-        let localStorageEnabled = false;
-        const STORAGE_KEY = 'puyoAI_transpositionTable';
-        const SETTINGS_KEY = 'puyoAI_settings';
-
-        // 設定を読み込む
-        window.addEventListener('load', function() {
-            try {
-                const savedSettings = localStorage.getItem(SETTINGS_KEY);
-                if (savedSettings) {
-                    const settings = JSON.parse(savedSettings);
-                    localStorageEnabled = settings.localStorageEnabled || false;
-                    
-                    const checkbox = document.getElementById('localstorage-toggle');
-                    if (checkbox) {
-                        checkbox.checked = localStorageEnabled;
-                    }
-                    
-                    if (localStorageEnabled) {
-                        loadTranspositionTable();
-                    }
-                }
-            } catch (e) {
-                console.error('設定の読み込みエラー:', e);
-            }
-            
-            updateCacheSizeDisplay();
-        });
-
-        // LocalStorageのトグル
-        window.toggleLocalStorage = function(enabled) {
-            try {
-                localStorageEnabled = enabled;
-                
-                localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-                    localStorageEnabled: enabled
-                }));
-                
-                if (enabled) {
-                    saveTranspositionTable();
-                    console.log('LocalStorage: 有効化しました');
-                } else {
-                    console.log('LocalStorage: 無効化しました');
-                }
-            } catch (e) {
-                console.error('設定の保存エラー:', e);
-                alert('設定の保存に失敗しました: ' + e.message);
-            }
-        };
-
-        // 転置表をLocalStorageに保存
-        function saveTranspositionTable() {
-            if (!localStorageEnabled) return;
-            
-            try {
-                if (typeof PuyoAI === 'undefined') {
-                    console.warn('PuyoAI が未定義のため保存できません');
-                    return;
-                }
-                
-                if (typeof window.PuyoAI_getTranspositionTable !== 'function') {
-                    console.warn('PuyoAI_getTranspositionTable が未定義のため保存できません');
-                    return;
-                }
-                
-                const table = window.PuyoAI_getTranspositionTable();
-                const entries = Array.from(table.entries());
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-                console.log('転置表を保存: ' + entries.length + '個');
-            } catch (e) {
-                if (e.name === 'QuotaExceededError') {
-                    console.error('LocalStorageの容量が不足しています');
-                    alert('LocalStorageの容量が不足しています。転置表をクリアしてください。');
-                    localStorageEnabled = false;
-                    const checkbox = document.getElementById('localstorage-toggle');
-                    if (checkbox) checkbox.checked = false;
-                } else {
-                    console.error('転置表の保存エラー:', e);
-                }
-            }
-        }
-
-        // 転置表をLocalStorageから読み込む
-        function loadTranspositionTable() {
-            try {
-                const saved = localStorage.getItem(STORAGE_KEY);
-                if (!saved) return;
-                
-                if (typeof PuyoAI === 'undefined') {
-                    console.warn('PuyoAI が未定義のため読み込めません');
-                    return;
-                }
-                
-                if (typeof window.PuyoAI_setTranspositionTable !== 'function') {
-                    console.warn('PuyoAI_setTranspositionTable が未定義のため読み込めません');
-                    return;
-                }
-                
-                const entries = JSON.parse(saved);
-                window.PuyoAI_setTranspositionTable(new Map(entries));
-                console.log('転置表を復元: ' + entries.length + '個');
-            } catch (e) {
-                console.error('転置表の読み込みエラー:', e);
-                localStorage.removeItem(STORAGE_KEY);
-            }
-        }
-
-        // 転置表をクリア
-        window.clearTranspositionTable = function() {
-            try {
-                if (confirm('転置表をクリアしますか？\n（保存された学習データが削除されます）')) {
-                    localStorage.removeItem(STORAGE_KEY);
-                    
-                    if (typeof PuyoAI !== 'undefined' && typeof window.PuyoAI_clearTranspositionTable === 'function') {
-                        window.PuyoAI_clearTranspositionTable();
-                    }
-                    
-                    updateCacheSizeDisplay();
-                    alert('転置表をクリアしました。');
-                }
-            } catch (e) {
-                console.error('クリアエラー:', e);
-                alert('クリアに失敗しました: ' + e.message);
-            }
-        };
-
-        // キャッシュサイズの表示を更新
-        function updateCacheSizeDisplay() {
-            try {
-                const display = document.getElementById('cache-size-display');
-                if (!display) return;
-                
-                if (typeof PuyoAI !== 'undefined' && typeof window.PuyoAI_getTableSize === 'function') {
-                    const size = window.PuyoAI_getTableSize();
-                    display.textContent = 'キャッシュ: ' + size + '個';
-                } else {
-                    display.textContent = 'キャッシュ: 0個';
-                }
-            } catch (e) {
-                console.error('キャッシュサイズ表示エラー:', e);
-            }
-        }
-
-        // 定期的に保存（30秒ごと）
-        setInterval(function() {
-            try {
-                if (localStorageEnabled && typeof gameState !== 'undefined' && gameState === 'playing') {
-                    saveTranspositionTable();
-                    updateCacheSizeDisplay();
-                }
-            } catch (e) {
-                console.error('定期保存エラー:', e);
-            }
-        }, 30000);
-
-        // ゲーム終了時に保存
-        window.addEventListener('beforeunload', function() {
-            try {
-                if (localStorageEnabled) {
-                    saveTranspositionTable();
-                }
-            } catch (e) {
-                console.error('終了時保存エラー:', e);
-            }
-        });
-
-        console.log('LocalStorage機能を読み込みました');
-
-    } catch (e) {
-        console.error('LocalStorage機能の初期化エラー:', e);
-    }
-})();
-
 // ===== 操作中のぷよを1段上げる機能（完全対応版） =====
 (function() {
     'use strict';
