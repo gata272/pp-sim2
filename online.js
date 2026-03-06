@@ -328,7 +328,11 @@ function notifyMatchEnd() {
 }
 
 // 初期化
-window.addEventListener('load', function() {
-    // ページ読み込み時にPeerJSを初期化する準備
-    // ユーザーが「online」ボタンをクリックしたときに実際に初期化
+window.addEventListener('DOMContentLoaded', function() {
+    console.log('Online module loaded');
+    // onlineボタンのイベントリスナーを確実に登録
+    const onlineBtn = document.getElementById('online-button');
+    if (onlineBtn) {
+        onlineBtn.onclick = openOnlineOverlay;
+    }
 });
