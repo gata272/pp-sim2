@@ -16,7 +16,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     
-    <link rel="stylesheet" href="style.css"> 
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="online.css"> 
 
     <style>
         #max-chain-button { width: 100%; margin-top: 10px; padding: 10px; background-color: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 16px; }
@@ -29,51 +30,9 @@
         .edit-next-label { width: 35px; font-weight: bold; }
         .edit-next-puyos { display: flex; gap: 4px; margin-left: 10px; }
         .edit-next-puyos .puyo { width: 16px; height: 16px; border-radius: 50%; }
-        
-        /* オンライン対戦UI */
-        #online-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); z-index: 1000; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; }
-        #online-overlay.show { display: flex; }
-        .online-panel { background-color: #333; border: 1px solid #444; border-radius: 5px; padding: 20px; max-width: 400px; width: 100%; }
-        .online-panel h2 { margin-top: 0; font-size: 1.2em; margin-bottom: 15px; }
-        .online-input-group { margin: 15px 0; }
-        .online-input-group label { display: block; font-size: 0.9em; color: #ccc; margin-bottom: 5px; }
-        .online-input-group input { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #555; border-radius: 3px; background-color: #222; color: #fff; }
-        .online-button { width: 100%; padding: 8px; margin-top: 10px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; font-size: 0.9em; }
-        .online-button.primary { background-color: #457b9d; color: white; }
-        .online-button.secondary { background-color: #6c757d; color: white; }
-        .online-button.danger { background-color: #e63946; color: white; }
-        .online-status { font-size: 0.85em; color: #888; margin-top: 10px; padding: 10px; background-color: #222; border-radius: 3px; }
-        
-        /* 対戦中の相手盤面 */
-        #opponent-board-container { display: none; }
-        #opponent-board-container.show { display: flex; flex-direction: column; }
-        #opponent-board { --puyo-cell-size: 18px; display: grid; grid-template-rows: repeat(14, var(--puyo-cell-size)); grid-template-columns: repeat(6, var(--puyo-cell-size)); border: 2px solid #666; background-color: #000; width: calc(var(--puyo-cell-size) * 6); height: calc(var(--puyo-cell-size) * 14); }
-        #opponent-board > div { display: flex; justify-content: center; align-items: center; }
-        #opponent-board > div > .puyo { width: 90%; height: 90%; }
-        #opponent-board-label { font-size: 0.8em; color: #888; text-align: center; margin-bottom: 5px; }
     </style>
 </head>
 <body>
-    
-    <!-- オンライン対戦UI -->
-    <div id="online-overlay">
-        <div class="online-panel">
-            <h2 id="online-title">オンライン対戦</h2>
-            <div id="online-content">
-                <div class="online-input-group">
-                    <label for="my-room-id">あなたのID:</label>
-                    <input type="text" id="my-room-id" readonly>
-                </div>
-                <div class="online-input-group">
-                    <label for="opponent-room-id">相手のID:</label>
-                    <input type="text" id="opponent-room-id" placeholder="相手のIDを入力">
-                </div>
-                <button class="online-button primary" onclick="connectToOpponent()">接続</button>
-                <button class="online-button secondary" onclick="closeOnlineOverlay()">キャンセル</button>
-                <div class="online-status" id="online-status">待機中...</div>
-            </div>
-        </div>
-    </div>
     
     <div id="setting-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); z-index: 1000; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box;">
         <div class="info-box" style="max-width: 400px; width: 100%; padding: 20px;">
@@ -144,13 +103,6 @@
                     
                     <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
                     <button class="setting-toggle-btn" onclick="toggleSettingMode()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #6c757d; color: white; margin-top: 5px;">setting</button>
-                    <button id="online-button" class="setting-toggle-btn" onclick="openOnlineOverlay()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #27ae60; color: white; margin-top: 5px;">online</button>
-                </div>
-                
-                <!-- 対戦中の相手盤面 -->
-                <div id="opponent-board-container">
-                    <div id="opponent-board-label">相手の盤面</div>
-                    <div id="opponent-board"></div>
                 </div>
 
             </div>
@@ -210,10 +162,10 @@
     <button class="mobile-btn" id="btn-rotate-cw">B</button>
     <button class="mobile-btn" id="btn-rotate-ccw">A</button>
 </div>
-<p class="small-text">puyo-sim_ver1.0.9 by gata (Online Edition)</p>
-    <script src="https://cdn.peerjs.com/peerjs-1.5.4.min.js"></script>
+<p class="small-text">puyo-sim_ver1.0.9 by gata</p>
     <script src="puyoAI.js"></script>
     <script src="puyoSim.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="online.js"></script>
     
     <script>
