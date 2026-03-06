@@ -29,9 +29,51 @@
         .edit-next-label { width: 35px; font-weight: bold; }
         .edit-next-puyos { display: flex; gap: 4px; margin-left: 10px; }
         .edit-next-puyos .puyo { width: 16px; height: 16px; border-radius: 50%; }
+        
+        /* オンライン対戦UI */
+        #online-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); z-index: 1000; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; }
+        #online-overlay.show { display: flex; }
+        .online-panel { background-color: #333; border: 1px solid #444; border-radius: 5px; padding: 20px; max-width: 400px; width: 100%; }
+        .online-panel h2 { margin-top: 0; font-size: 1.2em; margin-bottom: 15px; }
+        .online-input-group { margin: 15px 0; }
+        .online-input-group label { display: block; font-size: 0.9em; color: #ccc; margin-bottom: 5px; }
+        .online-input-group input { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #555; border-radius: 3px; background-color: #222; color: #fff; }
+        .online-button { width: 100%; padding: 8px; margin-top: 10px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; font-size: 0.9em; }
+        .online-button.primary { background-color: #457b9d; color: white; }
+        .online-button.secondary { background-color: #6c757d; color: white; }
+        .online-button.danger { background-color: #e63946; color: white; }
+        .online-status { font-size: 0.85em; color: #888; margin-top: 10px; padding: 10px; background-color: #222; border-radius: 3px; }
+        
+        /* 対戦中の相手盤面 */
+        #opponent-board-container { display: none; }
+        #opponent-board-container.show { display: flex; flex-direction: column; }
+        #opponent-board { --puyo-cell-size: 18px; display: grid; grid-template-rows: repeat(14, var(--puyo-cell-size)); grid-template-columns: repeat(6, var(--puyo-cell-size)); border: 2px solid #666; background-color: #000; width: calc(var(--puyo-cell-size) * 6); height: calc(var(--puyo-cell-size) * 14); }
+        #opponent-board > div { display: flex; justify-content: center; align-items: center; }
+        #opponent-board > div > .puyo { width: 90%; height: 90%; }
+        #opponent-board-label { font-size: 0.8em; color: #888; text-align: center; margin-bottom: 5px; }
     </style>
 </head>
 <body>
+    
+    <!-- オンライン対戦UI -->
+    <div id="online-overlay">
+        <div class="online-panel">
+            <h2 id="online-title">オンライン対戦</h2>
+            <div id="online-content">
+                <div class="online-input-group">
+                    <label for="my-room-id">あなたのID:</label>
+                    <input type="text" id="my-room-id" readonly>
+                </div>
+                <div class="online-input-group">
+                    <label for="opponent-room-id">相手のID:</label>
+                    <input type="text" id="opponent-room-id" placeholder="相手のIDを入力">
+                </div>
+                <button class="online-button primary" onclick="connectToOpponent()">接続</button>
+                <button class="online-button secondary" onclick="closeOnlineOverlay()">キャンセル</button>
+                <div class="online-status" id="online-status">待機中...</div>
+            </div>
+        </div>
+    </div>
     
     <div id="setting-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); z-index: 1000; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box;">
         <div class="info-box" style="max-width: 400px; width: 100%; padding: 20px;">
@@ -54,31 +96,8 @@
                     <span id="chain-wait-value" style="font-size: 1em; color: #fff; min-width: 60px;">300ms</span>
                 </div>
             </div>
+
             <p style="font-size: 0.8em; color: #888; margin-top: 10px;">※値が小さいほどアニメーションが速くなります。</p>
-            <!-- LocalStorage設定 -->
-            <div style="margin: 20px 0; text-align: left;">
-                <label style="display: block; font-size: 0.9em; color: #ccc; margin-bottom: 10px;">
-                    転置表の永続化（リロード後も保持）
-                </label>
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                        <input type="checkbox" id="localstorage-toggle" onchange="toggleLocalStorage(this.checked)" style="width: 18px; height: 18px; cursor: pointer;">
-                        <span style="font-size: 0.9em; color: #fff;">転置表をLocalStorageに保存</span>
-                    </label>
-                </div>
-                <p style="font-size: 0.75em; color: #888; margin-top: 8px; line-height: 1.4;">
-                    ※ ONにすると、ページをリロードしても転置表が残ります<br>
-                    ※ 容量: 約5-10MB、速度: 少し遅くなる可能性あり
-                </p>
-                <div style="margin-top: 10px; display: flex; gap: 10px;">
-                    <button onclick="clearTranspositionTable()" style="padding: 6px 12px; background-color: #e63946; color: white; border: none; border-radius: 5px; font-size: 0.8em; cursor: pointer;">
-                        転置表をクリア
-                    </button>
-                    <span id="cache-size-display" style="font-size: 0.85em; color: #aaa; display: flex; align-items: center;">
-                        キャッシュ: 0個
-                    </span>
-                </div>
-            </div>
             <button id="setting-back-btn" onclick="toggleSettingMode()" style="background-color: #457b9d; color: white; margin-top: 20px; width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.9em; font-weight: bold; cursor: pointer;">戻る</button>
         </div>
     </div>
@@ -111,27 +130,27 @@
                         <h2>連鎖数</h2>
                         <span id="chain-count">0</span>
                     </div>
-                    <div id="max-chain-box" class="info-box">
-                        <h2>最大連鎖数</h2>
-                        <span id="max-chain-display">-</span>
-                    </div>
                 </div>
                 
                 <div id="history-controls" class="common-control">
                     <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
                     <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
                 </div>
-                <!-- auto-drop-toggle-buttonの後、reset-button-playの前に追加 -->
                 <button id="raise-puyo-button" onclick="raisePuyoOneRow()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #9b59b6; color: white; margin-top: 5px;">
                     操作中のぷよを1段上げる ↑ (U)
-                </button>
                 <div id="play-controls" class="common-control">
                     <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
                     <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
-                    <button id="max-chain-button">最大連鎖</button>
-                    <button id="ai-button">アシスト</button>
+                    
                     <button class="mode-toggle-btn" onclick="toggleMode()">edit (E)</button>
                     <button class="setting-toggle-btn" onclick="toggleSettingMode()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #6c757d; color: white; margin-top: 5px;">setting</button>
+                    <button id="online-button" class="setting-toggle-btn" onclick="openOnlineOverlay()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #27ae60; color: white; margin-top: 5px;">online</button>
+                </div>
+                
+                <!-- 対戦中の相手盤面 -->
+                <div id="opponent-board-container">
+                    <div id="opponent-board-label">相手の盤面</div>
+                    <div id="opponent-board"></div>
                 </div>
 
             </div>
@@ -191,9 +210,11 @@
     <button class="mobile-btn" id="btn-rotate-cw">B</button>
     <button class="mobile-btn" id="btn-rotate-ccw">A</button>
 </div>
-<p class="small-text">puyo-sim_ver1.0.4 by gata</p>
+<p class="small-text">puyo-sim_ver1.0.9 by gata (Online Edition)</p>
+    <script src="https://cdn.peerjs.com/peerjs-1.5.4.min.js"></script>
     <script src="puyoAI.js"></script>
     <script src="puyoSim.js"></script>
+    <script src="online.js"></script>
     
     <script>
         if ('serviceWorker' in navigator) {
