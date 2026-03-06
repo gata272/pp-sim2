@@ -9,13 +9,18 @@
     let currentMatch = 0;
     let isMatchActive = false;
     let peerInitialized = false;
+    let peerInitializing = false;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 3;
 
     // グローバル関数
     window.showOnlineOverlay = function() {
         const overlay = document.getElementById('online-overlay');
         if (overlay) {
             overlay.style.display = 'flex';
-            if (!peerInitialized) initPeer();
+            if (!peerInitialized && !peerInitializing) {
+                initPeer();
+            }
         }
     };
 
@@ -53,16 +58,38 @@
             return;
         }
         
-        if (!peer) {
+        if (!peer || !myId) {
             alert('PeerJSがまだ初期化されていません。少々お待ちください。');
             return;
         }
 
+        if (conn && conn.open) {
+            alert('既に接続済みです');
+            return;
+        }
+
         document.getElementById('online-status').textContent = '接続中...';
-        conn = peer.connect(targetId);
-        setupConnection();
-        isHost = false;
+        reconnectAttempts = 0;
+        attemptConnection(targetId);
     };
+
+    function attemptConnection(targetId) {
+        try {
+            conn = peer.connect(targetId, { reliable: true });
+            setupConnection();
+            isHost = false;
+        } catch (err) {
+            console.error('Connection attempt failed:', err);
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttempts++;
+                document.getElementById('online-status').textContent = `接続中... (再試行 ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`;
+                setTimeout(() => attemptConnection(targetId), 1000);
+            } else {
+                document.getElementById('online-status').textContent = '接続失敗。もう一度お試しください。';
+                alert('接続に失敗しました。相手のIDが正しいか確認してください。');
+            }
+        }
+    }
 
     function initOnlineUI() {
         // オーバーレイの作成（存在しない場合のみ）
@@ -132,36 +159,82 @@
     }
 
     function initPeer() {
-        if (peerInitialized) return;
+        if (peerInitialized || peerInitializing) return;
         
-        peer = new Peer();
-        peerInitialized = true;
+        peerInitializing = true;
+        
+        try {
+            peer = new Peer({
+                debug: 0,
+                config: {
+                    iceServers: [
+                        { urls: ['stun:stun.l.google.com:19302'] },
+                        { urls: ['stun:stun1.l.google.com:19302'] },
+                        { urls: ['stun:stun2.l.google.com:19302'] }
+                    ]
+                }
+            });
 
-        peer.on('open', (id) => {
-            myId = id;
-            document.getElementById('my-peer-id').textContent = id;
-            document.getElementById('online-status').textContent = '接続待機中...';
-        });
+            peer.on('open', (id) => {
+                myId = id;
+                peerInitialized = true;
+                peerInitializing = false;
+                document.getElementById('my-peer-id').textContent = id;
+                document.getElementById('online-status').textContent = '接続待機中...';
+                console.log('PeerJS initialized with ID:', id);
+            });
 
-        peer.on('connection', (connection) => {
-            if (conn) {
-                connection.close();
-                return;
-            }
-            conn = connection;
-            setupConnection();
-            isHost = true;
-            showMatchProposal();
-        });
+            peer.on('connection', (connection) => {
+                if (conn && conn.open) {
+                    connection.close();
+                    return;
+                }
+                conn = connection;
+                setupConnection();
+                isHost = true;
+                showMatchProposal();
+            });
 
-        peer.on('error', (err) => {
-            console.error('PeerJS Error:', err);
-            alert('接続エラーが発生しました: ' + err.type);
-        });
+            peer.on('error', (err) => {
+                console.error('PeerJS Error:', err);
+                peerInitializing = false;
+                
+                if (err.type === 'unavailable-id') {
+                    document.getElementById('online-status').textContent = 'IDの生成に失敗しました。ページをリロードしてください。';
+                    alert('PeerJSサーバーに接続できません。ページをリロードしてお試しください。');
+                } else if (err.type === 'disconnected') {
+                    document.getElementById('online-status').textContent = 'サーバーから切断されました。再接続中...';
+                    setTimeout(() => {
+                        if (!peerInitialized) initPeer();
+                    }, 2000);
+                } else {
+                    document.getElementById('online-status').textContent = `エラー: ${err.type}`;
+                    alert(`接続エラーが発生しました: ${err.type}`);
+                }
+            });
+
+            peer.on('disconnected', () => {
+                console.warn('Peer disconnected');
+                peerInitialized = false;
+                document.getElementById('online-status').textContent = 'サーバーから切断されました。再接続中...';
+                setTimeout(() => {
+                    if (!peerInitialized && peer) {
+                        peer.reconnect();
+                    }
+                }, 2000);
+            });
+
+        } catch (err) {
+            console.error('Failed to initialize Peer:', err);
+            peerInitializing = false;
+            document.getElementById('online-status').textContent = 'PeerJSの初期化に失敗しました。';
+            alert('PeerJSの初期化に失敗しました: ' + err.message);
+        }
     }
 
     function setupConnection() {
         conn.on('open', () => {
+            console.log('Connection established');
             window.hideOnlineOverlay();
             document.getElementById('online-status').textContent = '接続済み';
             if (isHost) {
@@ -174,6 +247,7 @@
         });
 
         conn.on('close', () => {
+            console.warn('Connection closed');
             alert('対戦相手との接続が切れました。');
             endMatch();
             conn = null;
@@ -261,7 +335,7 @@
 
         // ホストならネクストを生成して同期
         if (isHost) {
-            syncNextPuyos();
+            setTimeout(() => syncNextPuyos(), 500);
         }
     }
 
@@ -274,13 +348,17 @@
     window.sendBoardData = function() {
         if (!isMatchActive || !conn || !conn.open) return;
         
-        if (typeof board !== 'undefined') {
-            conn.send({
-                type: 'BOARD_UPDATE',
-                board: board,
-                currentPuyo: typeof currentPuyo !== 'undefined' ? currentPuyo : null,
-                gameState: typeof gameState !== 'undefined' ? gameState : 'playing'
-            });
+        try {
+            if (typeof board !== 'undefined') {
+                conn.send({
+                    type: 'BOARD_UPDATE',
+                    board: board,
+                    currentPuyo: typeof currentPuyo !== 'undefined' ? currentPuyo : null,
+                    gameState: typeof gameState !== 'undefined' ? gameState : 'playing'
+                });
+            }
+        } catch (err) {
+            console.error('Failed to send board data:', err);
         }
     };
 
@@ -290,6 +368,8 @@
                 const cell = document.getElementById(`opp-cell-${x}-${y}`);
                 if (!cell) continue;
                 const puyo = cell.firstChild;
+                if (!puyo) continue;
+                
                 let color = oppBoard[y][x];
                 
                 // 操作中のぷよの描画
@@ -323,10 +403,22 @@
         }
     };
 
+    // ページ読み込み時に自動初期化開始
+    function autoInitPeer() {
+        if (!peerInitialized && !peerInitializing) {
+            console.log('Auto-initializing PeerJS on page load');
+            initPeer();
+        }
+    }
+
     // 初期化実行
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initOnlineUI);
+        document.addEventListener('DOMContentLoaded', () => {
+            initOnlineUI();
+            autoInitPeer();
+        });
     } else {
         initOnlineUI();
+        autoInitPeer();
     }
 })();
