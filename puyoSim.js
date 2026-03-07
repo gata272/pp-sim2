@@ -506,12 +506,16 @@ function generateNewPuyo() {
 
     if (checkCollision(startingCoords) || isOverlappingTarget) {
         gameState = 'gameover';
-        alert('ゲームオーバーです！');
         clearInterval(dropTimer); 
         updateUI();
         renderBoard();
-        // オンライン対戦中の場合、敗北を通知
-        if (window.notifyGameOver) window.notifyGameOver();
+        // オンライン対戦中の場合、敗北を通知（alertは表示しない）
+        if (window.notifyGameOver) {
+            window.notifyGameOver();
+        } else {
+            // シングルプレイ時のみalertを表示
+            alert('ゲームオーバーです！');
+        }
         return; 
     }
 
@@ -941,7 +945,11 @@ function renderPlayNextPuyo() {
 function updateUI() {
     const scoreElement = document.getElementById('score');
     const chainElement = document.getElementById('chain-count');
-    if (scoreElement) scoreElement.textContent = score;
+    
+    // オンライン対戦中はスコア表示をonline.jsで管理
+    if (scoreElement && !document.body.classList.contains('online-match-active')) {
+        scoreElement.textContent = score;
+    }
     if (chainElement) chainElement.textContent = chainCount;
     updateHistoryButtons();
 }
