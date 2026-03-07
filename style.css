@@ -526,3 +526,53 @@ body.online-match-active #surrender-button {
 #match-result-overlay #result-content {
     color: #fff;
 }
+
+
+/* スコア表示の左右分割 */
+body.online-match-active #score {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    font-size: 1.5em;
+    font-weight: bold;
+}
+
+/* 相手情報の表示調整 */
+#opponent-info {
+    display: flex !important;
+    justify-content: space-around;
+    font-size: 0.85em;
+    color: #aaa;
+    margin-top: 8px;
+    padding: 5px 0;
+    border-top: 1px solid #444;
+}
+
+#opponent-info div {
+    flex: 1;
+    text-align: center;
+}
+
+/* 降参ボタンの確実な表示 */
+#surrender-button {
+    display: none !important;
+}
+
+body.online-match-active #surrender-button {
+    display: block !important;
+    width: 100%;
+    padding: 8px;
+    border: none;
+    border-radius: 5px;
+    font-size: 0.85em;
+    font-weight: bold;
+    background-color: #d9534f;
+    color: white;
+    margin-top: 5px;
+    cursor: pointer;
+}
+
+body.online-match-active #surrender-button:hover {
+    background-color: #c9302c;
+}
