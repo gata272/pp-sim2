@@ -77,7 +77,8 @@ function checkMobileControlsVisibility() {
     const mobileControls = document.getElementById('mobile-controls');
     if (!mobileControls) return;
 
-    if (gameState === 'playing' && window.innerWidth <= 650) {
+    // ゲームオーバー時も操作ボタンを表示し続けるように修正
+    if ((gameState === 'playing' || gameState === 'gameover') && window.innerWidth <= 650) {
         mobileControls.classList.add('visible');
         document.body.classList.remove('edit-mode-active');
     } else if (gameState === 'editing') {
