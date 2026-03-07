@@ -44,10 +44,10 @@
         }
     };
 
-    window.acceptMatch = function(winTarget) {
+    window.acceptMatch = function(target) {
         if (conn && conn.open) {
-            conn.send({ type: 'ACCEPT_MATCH', winTarget: winTarget });
-            startMatch(winTarget);
+            conn.send({ type: 'ACCEPT_MATCH', winTarget: target });
+            startMatch(target);
         }
     };
 
@@ -152,6 +152,22 @@
             document.body.appendChild(resultOverlay);
         }
 
+        // 勝利数枠の作成（存在しない場合のみ）
+        if (!document.getElementById('win-count-container')) {
+            const playStatsInfo = document.getElementById('play-stats-info');
+            if (playStatsInfo) {
+                const winContainer = document.createElement('div');
+                winContainer.id = 'win-count-container';
+                winContainer.className = 'stat-item';
+                winContainer.innerHTML = `
+                    <span class="stat-label">勝利数</span>
+                    <span id="win-count-display" class="stat-value">0 - 0</span>
+                `;
+                // 連鎖数表示の後に挿入
+                playStatsInfo.appendChild(winContainer);
+            }
+        }
+
         // 相手の盤面コンテナの作成（存在しない場合のみ）
         if (!document.getElementById('opponent-board-container')) {
             const playStatsInfo = document.getElementById('play-stats-info');
@@ -232,15 +248,18 @@
                 
                 if (err.type === 'unavailable-id') {
                     document.getElementById('online-status').textContent = 'IDの生成に失敗しました。ページをリロードしてください。';
-                    alert('PeerJSサーバーに接続できません。ページをリロードしてお試しください。');
+                    // alertは出さない
                 } else if (err.type === 'disconnected') {
                     document.getElementById('online-status').textContent = 'サーバーから切断されました。再接続中...';
                     setTimeout(() => {
                         if (!peerInitialized) initPeer();
                     }, 2000);
+                } else if (err.type === 'network') {
+                    document.getElementById('online-status').textContent = 'ネットワークエラーが発生しました。';
+                    // alertは出さない
                 } else {
                     document.getElementById('online-status').textContent = `エラー: ${err.type}`;
-                    alert(`接続エラーが発生しました: ${err.type}`);
+                    // alertは出さない
                 }
             });
 
@@ -259,7 +278,6 @@
             console.error('Failed to initialize Peer:', err);
             peerInitializing = false;
             document.getElementById('online-status').textContent = 'PeerJSの初期化に失敗しました。';
-            alert('PeerJSの初期化に失敗しました: ' + err.message);
         }
     }
 
@@ -345,7 +363,7 @@
         `;
     }
 
-    function showApprovalUI(winTarget) {
+    function showApprovalUI(target) {
         const overlay = document.getElementById('match-proposal-overlay');
         const content = document.getElementById('proposal-content');
         const actions = document.getElementById('proposal-actions');
@@ -354,15 +372,15 @@
         
         overlay.style.display = 'flex';
         document.getElementById('proposal-title').textContent = '対戦の誘い';
-        content.innerHTML = `<p>相手から <strong>${winTarget}本先取</strong> の対戦提案が届きました。</p>`;
+        content.innerHTML = `<p>相手から <strong>${target}本先取</strong> の対戦提案が届きました。</p>`;
         actions.innerHTML = `
-            <button class="online-btn" onclick="acceptMatch(${winTarget})">承認して開始</button>
+            <button class="online-btn" onclick="acceptMatch(${target})">承認して開始</button>
             <button class="online-btn secondary" onclick="rejectMatch()">拒否</button>
         `;
     }
 
-    function startMatch(winTarget) {
-        winTarget = winTarget;
+    function startMatch(target) {
+        winTarget = target;
         myWins = 0;
         oppWins = 0;
         oppScore = 0;
@@ -386,8 +404,8 @@
         // 盤面リセット
         if (window.resetGame) window.resetGame();
 
-        // スコア表示更新
-        updateScoreDisplay();
+        // 勝利数表示更新
+        updateWinCountDisplay();
 
         // ホストならネクストを生成して同期
         if (isHost) {
@@ -411,10 +429,10 @@
         if (surrenderBtn) surrenderBtn.style.display = 'block';
     }
 
-    function updateScoreDisplay() {
-        const scoreElement = document.getElementById('score');
-        if (scoreElement) {
-            scoreElement.textContent = `${myWins} - ${oppWins}`;
+    function updateWinCountDisplay() {
+        const winDisplay = document.getElementById('win-count-display');
+        if (winDisplay) {
+            winDisplay.textContent = `${myWins} - ${oppWins}`;
         }
     }
 
@@ -492,7 +510,7 @@
             oppWins++;
         }
 
-        updateScoreDisplay();
+        updateWinCountDisplay();
 
         if (myWins >= winTarget) {
             showMatchResult('シリーズ勝利！');
