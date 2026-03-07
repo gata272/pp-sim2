@@ -945,11 +945,7 @@ function renderPlayNextPuyo() {
 function updateUI() {
     const scoreElement = document.getElementById('score');
     const chainElement = document.getElementById('chain-count');
-    
-    // オンライン対戦中はスコア表示をonline.jsで管理
-    if (scoreElement && !document.body.classList.contains('online-match-active')) {
-        scoreElement.textContent = score;
-    }
+    if (scoreElement) scoreElement.textContent = score;
     if (chainElement) chainElement.textContent = chainCount;
     updateHistoryButtons();
 }
