@@ -315,7 +315,7 @@ function restoreState(state) {
 }
 
 window.undoMove = function() {
-    if (gameState !== 'playing') return; 
+    if (gameState !== 'playing' && gameState !== 'gameover') return; 
     if (historyStack.length <= 1) return; 
 
     const currentState = historyStack.pop(); 
@@ -328,7 +328,7 @@ window.undoMove = function() {
 }
 
 window.redoMove = function() {
-    if (gameState !== 'playing') return; 
+    if (gameState !== 'playing' && gameState !== 'gameover') return; 
     if (redoStack.length === 0) return;
 
     const nextState = redoStack.pop();
@@ -1488,21 +1488,21 @@ window.clearEditNext = function() {
                 
                 console.log('移動先: main(' + mainX + ',' + newMainY + '), sub(' + subX + ',' + newSubY + ')');
                 
-                if (newMainY > 14 || newSubY > 14) {
+                if (newMainY >= HEIGHT || newSubY >= HEIGHT) {
                     alert('これ以上上に移動できません。');
                     return;
                 }
                 
                 let canMove = true;
                 
-                if (newMainY < 13) {
+                if (newMainY >= 0 && newMainY < HEIGHT) {
                     if (board[newMainY][mainX] !== COLORS.EMPTY) {
                         console.log('main移動先に障害物: board[' + newMainY + '][' + mainX + '] = ' + board[newMainY][mainX]);
                         canMove = false;
                     }
                 }
                 
-                if (newSubY < 13) {
+                if (newSubY >= 0 && newSubY < HEIGHT) {
                     if (board[newSubY][subX] !== COLORS.EMPTY) {
                         console.log('sub移動先に障害物: board[' + newSubY + '][' + subX + '] = ' + board[newSubY][subX]);
                         canMove = false;
@@ -1551,4 +1551,8 @@ window.clearEditNext = function() {
 })();
 
 // 初期化
-initializeGame();
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeGame);
+} else {
+    initializeGame();
+}
