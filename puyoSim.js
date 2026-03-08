@@ -33,9 +33,11 @@ let gameState = 'playing'; // 'playing', 'chaining', 'gameover', 'editing'
 let currentEditColor = COLORS.EMPTY; // エディットモードで選択中の色 (デフォルトは消しゴム: 0)
 let editingNextPuyos = []; // エディットモードで使用するNEXT 50組
 
-// 履歴管理用スタック
+// 履歴管理用スタック（Undo/Redo用）
+// 設置完了後の盤面のみを保存し、可能な限り多くの履歴を保持
 let historyStack = []; // 過去の状態を保存 (Undo用)
 let redoStack = [];    // 戻した状態を保存 (Redo用)
+const MAX_HISTORY_SIZE = 10000; // 最大履歴数（メモリが許す限り保存）
 
 // 落下ループのための変数
 let dropInterval = 1000; // 1秒ごとに落下
@@ -269,22 +271,21 @@ window.loadStageCode = function() {
 }
 
 // 履歴管理関数
+// 設置完了後の盤面のみを保存（操作中のぷよは記録しない）
 function saveState(clearRedoStack = true) {
     const state = {
         board: board.map(row => [...row]),
         nextPuyoColors: nextPuyoColors.map(pair => [...pair]),
         score: score,
-        chainCount: chainCount,
-        currentPuyo: currentPuyo ? { 
-            mainColor: currentPuyo.mainColor,
-            subColor: currentPuyo.subColor,
-            mainX: currentPuyo.mainX, 
-            mainY: currentPuyo.mainY, 
-            rotation: currentPuyo.rotation
-        } : null
+        chainCount: chainCount
     };
 
     historyStack.push(state);
+
+    // 履歴サイズが上限に達した場合、最古の履歴を削除
+    if (historyStack.length > MAX_HISTORY_SIZE) {
+        historyStack.shift();
+    }
 
     if (clearRedoStack) {
         redoStack = [];
@@ -300,37 +301,21 @@ function restoreState(state) {
     score = state.score;
     chainCount = state.chainCount;
     
-    if (state.currentPuyo) {
-        currentPuyo = { ...state.currentPuyo };
-    } else {
-        currentPuyo = null;
-    }
+    // 復元後は常に新しいぷよを生成
+    currentPuyo = null;
     
     gameState = 'playing';
     clearInterval(dropTimer);
     
-    if (currentPuyo === null) {
-        generateNewPuyo(); 
-    }
-    
-    gravity(); 
-
-    const groups = findConnectedPuyos();
-
-    if (groups.length > 0) {
-        gameState = 'chaining';
-        chainCount = 0;
-        runChain();
-    } else {
-        startPuyoDropLoop();
-    }
+    generateNewPuyo(); 
+    startPuyoDropLoop();
 
     updateUI();
     renderBoard();
 }
 
 window.undoMove = function() {
-    if (gameState !== 'playing' && gameState !== 'chaining' && gameState !== 'gameover') return; 
+    if (gameState !== 'playing') return; 
     if (historyStack.length <= 1) return; 
 
     const currentState = historyStack.pop(); 
@@ -343,7 +328,7 @@ window.undoMove = function() {
 }
 
 window.redoMove = function() {
-    if (gameState !== 'playing' && gameState !== 'chaining' && gameState !== 'gameover') return; 
+    if (gameState !== 'playing') return; 
     if (redoStack.length === 0) return;
 
     const nextState = redoStack.pop();
@@ -863,6 +848,8 @@ async function runChain() {
         startPuyoDropLoop(); 
         checkMobileControlsVisibility(); 
         renderBoard();
+        // 盤面状態を保存（設置完了後）
+        saveState(true);
         return;
     }
     
@@ -891,7 +878,28 @@ async function runChain() {
     await new Promise(resolve => setTimeout(resolve, gravityWaitTime));
 
     // 6. 次の連鎖ステップへ
-    runChain();
+    gravity();
+    renderBoard();
+    const nextGroups = findConnectedPuyos();
+    if (nextGroups.length === 0) {
+        // 連鎖終了: 盤面状態を保存
+        gameState = 'playing';
+        generateNewPuyo();
+        startPuyoDropLoop();
+        checkMobileControlsVisibility();
+        renderBoard();
+        saveState(true);
+    } else {
+        // 連鎖続行
+        runChain();
+    }
+}
+
+// 連鎖終了時の盤面保存処理
+function saveStateAfterChain() {
+    if (gameState === 'playing') {
+        saveState(true);
+    }
 }
 
 function calculateScore(groups, currentChain) {
