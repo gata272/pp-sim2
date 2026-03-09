@@ -1,9 +1,5 @@
 // ぷよぷよシミュレーション（修正版：履歴上限300 / NextQueue / 連鎖安全化）
-// - 履歴は連鎖終了時のみ保存（1手＝1履歴）
-// - リセット時に履歴を消さない（initializeGameはhistoryStackをクリアしない）
-// - Next は nextQueue + queueIndex 方式に変更（未来分岐防止）
-// - 連鎖中のタイマーをキャンセルできるようにし、Undo/Redoで盤面を壊さない
-// - Editモードの NEXT 表示/編集のバグを修正（index -> idx の誤りと配列要素順の整合）
+// 修正済み完全版（Edit→Play の currentPuyo 入替、Edit NEXT 表示修正、履歴初期化の重複防止、連鎖キャンセル）
 
 // 盤面サイズ
 const WIDTH = 6;
@@ -33,10 +29,10 @@ const BONUS_TABLE = {
 const MAX_HISTORY_SIZE = 300; // 履歴上限（メモリ対策のため上限を設ける）
 
 // ゲームの状態管理
-let board = []; 
-let currentPuyo = null; 
+let board = [];
+let currentPuyo = null;
 // nextQueue / queueIndex を導入（NextQueue方式）
-let nextQueue = []; 
+let nextQueue = [];
 let queueIndex = 0;
 
 let score = 0;
@@ -77,6 +73,11 @@ function copyNextQueue(srcQueue) {
 // sleep helper that registers chainTimer so it can be cancelled
 function sleep(ms) {
     return new Promise(resolve => {
+        // clear previous timer reference (safety)
+        if (chainTimer) {
+            clearTimeout(chainTimer);
+            chainTimer = null;
+        }
         chainTimer = setTimeout(() => {
             chainTimer = null;
             resolve();
@@ -98,7 +99,8 @@ function generateInitialNextQueue() {
     nextQueue = [];
     queueIndex = 0;
     // ここでは pair の内部形式を [sub, main] とする（index0 = sub(上), index1 = main(下)）
-    for (let i = 0; i < Math.max(MAX_NEXT_PUYOS, 100); i++) {
+    const initialCount = Math.max(MAX_NEXT_PUYOS, 100);
+    for (let i = 0; i < initialCount; i++) {
         nextQueue.push(getRandomPair());
     }
 }
@@ -372,11 +374,11 @@ function saveState(clearRedoStack = true) {
         queueIndex: queueIndex,
         score: score,
         chainCount: chainCount,
-        currentPuyo: currentPuyo ? { 
+        currentPuyo: currentPuyo ? {
             mainColor: currentPuyo.mainColor,
             subColor: currentPuyo.subColor,
-            mainX: currentPuyo.mainX, 
-            mainY: currentPuyo.mainY, 
+            mainX: currentPuyo.mainX,
+            mainY: currentPuyo.mainY,
             rotation: currentPuyo.rotation
         } : null
     };
@@ -520,7 +522,7 @@ window.applyNextPuyos = function() {
     if (gameState === 'editing') {
         // editingNextPuyos は [ [sub, main], ... ] の配列になっている前提
         // nextQueue に丸ごと置き換えて queueIndex をリセットする（編集結果を即適用）
-        nextQueue = JSON.parse(JSON.stringify(editingNextPuyos));
+        nextQueue = copyNextQueue(editingNextPuyos.slice(0, Math.max(editingNextPuyos.length, 1)));
         queueIndex = 0;
         // ensure capacity after replacement
         ensureNextQueueCapacity();
@@ -565,6 +567,7 @@ function hasFourUniqueColors(pair1, pair2) {
     return s.size === 4;
 }
 
+let _initializedOnce = false;
 function initializeGame() {
     createBoardDOM();
     for (let y = 0; y < HEIGHT; y++) board[y] = Array(WIDTH).fill(COLORS.EMPTY);
@@ -574,12 +577,12 @@ function initializeGame() {
     gameState = 'playing';
 
     // NOTE: ユーザー要求により、リセット時に履歴を消さない -> historyStack / redoStack の初期化を除去
-
+    // ただし、最初の初期化時は履歴が空なら初期状態を保存する（resetで何度もpushされるのを防ぐ）
     // NextQueue 初期化
     generateInitialNextQueue();
 
     // editingNextPuyos は nextQueue をコピーして初期化
-    editingNextPuyos = JSON.parse(JSON.stringify(nextQueue.slice(0, MAX_NEXT_PUYOS)));
+    editingNextPuyos = copyNextQueue(nextQueue.slice(0, MAX_NEXT_PUYOS));
     currentEditColor = COLORS.EMPTY;
 
     const modeToggleButton = document.querySelector('.mode-toggle-btn');
@@ -599,6 +602,9 @@ function initializeGame() {
     }
 
     // 最初のぷよを生成（generateNewPuyoは nextQueue を消費する）
+    // resetのたびに現在の currentPuyo を維持しない仕様にする（明示的に初期化）
+    currentPuyo = null;
+    ensureNextQueueCapacity();
     generateNewPuyo();
     startPuyoDropLoop();
     updateUI();
@@ -640,8 +646,11 @@ function initializeGame() {
     checkMobileControlsVisibility();
     renderBoard();
 
-    // 初期状態を履歴に保存（clearRedoStack = false として履歴連携を切らない）
-    saveState(false);
+    // 初回のみ履歴に保存（リセットのたびに履歴を増やさない）
+    if (!_initializedOnce) {
+        saveState(false);
+        _initializedOnce = true;
+    }
 }
 
 function generateNewPuyo() {
@@ -972,7 +981,12 @@ async function runChain() {
 
         // 操作可能に戻す
         gameState = 'playing';
-        generateNewPuyo();
+        // NOTE: currentPuyo が null の場合 generateNewPuyo() が投入される。
+        // これにより Edit→Play 直後の Next1 が currentPuyo になる。
+        if (!currentPuyo) {
+            ensureNextQueueCapacity();
+            generateNewPuyo();
+        }
         startPuyoDropLoop();
         checkMobileControlsVisibility();
         renderBoard();
@@ -982,7 +996,7 @@ async function runChain() {
 
         return;
     }
-    
+
     // 3) 連鎖発生: 着地からの待ち時間
     await sleep(chainWaitTime);
     if (chainAbortFlag) return;
@@ -1016,7 +1030,11 @@ async function runChain() {
     if (nextGroups.length === 0) {
         // 連鎖終了
         gameState = 'playing';
-        generateNewPuyo();
+        // currentPuyo が null の場合にのみ新規投入（これを守ることで履歴復元時の不整合を防ぐ）
+        if (!currentPuyo) {
+            ensureNextQueueCapacity();
+            generateNewPuyo();
+        }
         startPuyoDropLoop();
         checkMobileControlsVisibility();
         renderBoard();
@@ -1200,6 +1218,7 @@ window.toggleMode = function() {
     const boardElement = document.getElementById('puyo-board');
 
     if (gameState === 'playing' || gameState === 'gameover') {
+        // -> editing
         clearInterval(dropTimer);
         gameState = 'editing';
         if (infoPanel) infoPanel.classList.add('edit-mode-active');
@@ -1211,12 +1230,21 @@ window.toggleMode = function() {
         renderEditNextPuyos();
         renderBoard();
     } else if (gameState === 'editing') {
+        // -> playing: ユーザー要求により、play に戻るときは Next1 を操作ぷよにしたい
         gameState = 'playing';
         if (infoPanel) infoPanel.classList.remove('edit-mode-active');
         document.body.classList.remove('edit-mode-active');
         if (modeToggleButton) modeToggleButton.textContent = 'edit';
         checkMobileControlsVisibility();
         if (boardElement) boardElement.removeEventListener('click', handleBoardClickEditMode);
+
+        // ここで currentPuyo を Next1 に「差し替える」
+        // applyNextPuyos() が呼ばれて nextQueue が編集済みで queueIndex==0 の想定
+        // 安全に動かすため currentPuyo を null にして generateNewPuyo() に委ねる
+        currentPuyo = null;
+        ensureNextQueueCapacity();
+        generateNewPuyo();
+
         if (autoDropEnabled) startPuyoDropLoop();
         renderBoard();
     }
