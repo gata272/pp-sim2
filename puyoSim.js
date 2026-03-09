@@ -943,7 +943,7 @@ async function runChain() {
     // 2) 連結を検出
     const groups = findConnectedPuyos();
 
-    if (groups.length === 0) {
+        if (groups.length === 0) {
         // 0連鎖時: 全消しボーナス
         if (checkBoardEmpty()) {
             score += 3600;
@@ -970,10 +970,13 @@ async function runChain() {
         checkMobileControlsVisibility();
         renderBoard();
 
-        // NOTE: B方式：連鎖なし（0連鎖）では履歴保存しない（1手＝連鎖終了のみ）
+        // ← ここを追加（重要）
+        // 0連鎖も「1手の終了」なので、最終盤面を履歴として保存する
+        saveState(true);
+
         return;
     }
-
+    
     // 3) 連鎖発生: 着地からの待ち時間
     await sleep(chainWaitTime);
     if (chainAbortFlag) return;
