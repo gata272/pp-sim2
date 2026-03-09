@@ -1247,9 +1247,13 @@ window.toggleMode = function() {
         // ここで currentPuyo を Next1 に「差し替える」
         // applyNextPuyos() が呼ばれて nextQueue が編集済みで queueIndex==0 の想定
         // 安全に動かすため currentPuyo を null にして generateNewPuyo() に委ねる
-        currentPuyo = null;
-        ensureNextQueueCapacity();
-        generateNewPuyo();
+        // Nextを編集して applyNextPuyos() が押された時だけ更新
+        if (nextEdited) {
+            currentPuyo = null;
+            ensureNextQueueCapacity();
+            generateNewPuyo();
+            nextEdited = false;
+        }
 
         if (autoDropEnabled) startPuyoDropLoop();
         renderBoard();
