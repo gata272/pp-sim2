@@ -3,6 +3,7 @@
 // - リセット時に履歴を消さない（initializeGameはhistoryStackをクリアしない）
 // - Next は nextQueue + queueIndex 方式に変更（未来分岐防止）
 // - 連鎖中のタイマーをキャンセルできるようにし、Undo/Redoで盤面を壊さない
+// - Editモードの NEXT 表示/編集のバグを修正（index -> idx の誤りと配列要素順の整合）
 
 // 盤面サイズ
 const WIDTH = 6;
@@ -96,6 +97,7 @@ function stopChain() {
 function generateInitialNextQueue() {
     nextQueue = [];
     queueIndex = 0;
+    // ここでは pair の内部形式を [sub, main] とする（index0 = sub(上), index1 = main(下)）
     for (let i = 0; i < Math.max(MAX_NEXT_PUYOS, 100); i++) {
         nextQueue.push(getRandomPair());
     }
@@ -117,7 +119,8 @@ function consumeNextPair() {
     const pair = nextQueue[queueIndex];
     queueIndex++;
     ensureNextQueueCapacity();
-    return [pair[0], pair[1]]; // return [subColor, mainColor] style handled by caller
+    // pair の順は [sub, main]（上, 下）
+    return [pair[0], pair[1]];
 }
 
 // ---------- DOM 初期化 / 描画 ----------
@@ -274,10 +277,10 @@ window.copyStageCode = function() {
             dataArray.push(board[y][x]);
         }
     }
-    // editingNextPuyos は編集用 NEXT
+    // editingNextPuyos は編集用 NEXT（pair = [sub, main]）
     editingNextPuyos.forEach(pair => {
-        dataArray.push(pair[0]);
-        dataArray.push(pair[1]);
+        dataArray.push(pair[0]); // sub
+        dataArray.push(pair[1]); // main
     });
 
     // 3bit -> バイナリ -> バイト列 -> Base64
@@ -343,7 +346,7 @@ window.loadStageCode = function() {
             }
         }
 
-                editingNextPuyos = [];
+        editingNextPuyos = [];
         for (let i = 0; i < MAX_NEXT_PUYOS; i++) {
             // dataArray に push した順序に合わせて、ここでは sub, main の順で復元する
             const subColor = dataArray[idx++];   // 上のぷよ
@@ -519,6 +522,8 @@ window.applyNextPuyos = function() {
         // nextQueue に丸ごと置き換えて queueIndex をリセットする（編集結果を即適用）
         nextQueue = JSON.parse(JSON.stringify(editingNextPuyos));
         queueIndex = 0;
+        // ensure capacity after replacement
+        ensureNextQueueCapacity();
         alert('ネクストぷよの設定を保存しました。プレイモードで適用されます。');
     }
 };
@@ -550,6 +555,7 @@ function getRandomColor() {
 }
 
 function getRandomPair() {
+    // returns [sub, main]
     return [getRandomColor(), getRandomColor()];
 }
 
@@ -944,7 +950,7 @@ async function runChain() {
     // 2) 連結を検出
     const groups = findConnectedPuyos();
 
-        if (groups.length === 0) {
+    if (groups.length === 0) {
         // 0連鎖時: 全消しボーナス
         if (checkBoardEmpty()) {
             score += 3600;
@@ -971,7 +977,6 @@ async function runChain() {
         checkMobileControlsVisibility();
         renderBoard();
 
-        // ← ここを追加（重要）
         // 0連鎖も「1手の終了」なので、最終盤面を履歴として保存する
         saveState(true);
 
@@ -1118,6 +1123,7 @@ function renderEditNextPuyos() {
             ev.stopPropagation();
             if (gameState !== 'editing') return;
             if (editingNextPuyos.length > listIndex) {
+                // puyoIndex: 0 = main(下), 1 = sub(上)
                 editingNextPuyos[listIndex][puyoIndex] = currentEditColor;
                 renderEditNextPuyos();
             }
@@ -1125,16 +1131,20 @@ function renderEditNextPuyos() {
         return puyo;
     };
 
+    // ----- visible slots (NEXT1, NEXT2) -----
     visibleSlots.forEach((slot, idx) => {
         slot.innerHTML = '';
+
         if (editingNextPuyos.length > idx) {
             // ペアは [sub, main]（index 0 = sub / 上、index 1 = main / 下）
-            const [c_sub, c_main] = editingNextPuyos[index];
-            slot.appendChild(createEditablePuyo(c_sub, index, 1)); // 上 (sub)
-            slot.appendChild(createEditablePuyo(c_main, index, 0)); // 下 (main)
+            const [c_sub, c_main] = editingNextPuyos[idx];
+            // 上（sub）は puyoIndex = 1、下（main）は puyoIndex = 0 として扱う（既存仕様に合わせる）
+            slot.appendChild(createEditablePuyo(c_sub, idx, 1)); // 上 (sub)
+            slot.appendChild(createEditablePuyo(c_main, idx, 0)); // 下 (main)
         }
     });
 
+    // ----- full list -----
     listContainer.innerHTML = '';
     for (let i = NUM_VISIBLE_NEXT_PUYOS; i < MAX_NEXT_PUYOS; i++) {
         if (editingNextPuyos.length <= i) break;
@@ -1145,9 +1155,9 @@ function renderEditNextPuyos() {
         pairContainer.appendChild(countSpan);
         const puyoRow = document.createElement('div');
         puyoRow.className = 'next-puyo-row';
-        const [c_main, c_sub] = editingNextPuyos[i];
-        puyoRow.appendChild(createEditablePuyo(c_sub, i, 1));
-        puyoRow.appendChild(createEditablePuyo(c_main, i, 0));
+        const [c_sub, c_main] = editingNextPuyos[i]; // fixed: [sub, main]
+        puyoRow.appendChild(createEditablePuyo(c_sub, i, 1)); // 上 (sub)
+        puyoRow.appendChild(createEditablePuyo(c_main, i, 0)); // 下 (main)
         pairContainer.appendChild(puyoRow);
         listContainer.appendChild(pairContainer);
     }
