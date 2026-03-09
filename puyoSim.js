@@ -40,6 +40,7 @@ let chainCount = 0;
 let gameState = 'playing'; // 'playing', 'chaining', 'gameover', 'editing', 'setting'
 let currentEditColor = COLORS.EMPTY; // エディットモードで選択中の色
 let editingNextPuyos = []; // エディットモード用 NEXT リスト
+let nextEdited = false;
 
 // 履歴スタック（Undo / Redo）
 let historyStack = [];
@@ -523,6 +524,7 @@ window.applyNextPuyos = function() {
         // editingNextPuyos は [ [sub, main], ... ] の配列になっている前提
         // nextQueue に丸ごと置き換えて queueIndex をリセットする（編集結果を即適用）
         nextQueue = copyNextQueue(editingNextPuyos.slice(0, Math.max(editingNextPuyos.length, 1)));
+        nextEdited = true;
         queueIndex = 0;
         // ensure capacity after replacement
         ensureNextQueueCapacity();
@@ -603,9 +605,12 @@ function initializeGame() {
 
     // 最初のぷよを生成（generateNewPuyoは nextQueue を消費する）
     // resetのたびに現在の currentPuyo を維持しない仕様にする（明示的に初期化）
-    currentPuyo = null;
-    ensureNextQueueCapacity();
-    generateNewPuyo();
+    if (nextEdited) {
+        currentPuyo = null;
+        ensureNextQueueCapacity();
+        generateNewPuyo();
+        nextEdited = false;
+    }
     startPuyoDropLoop();
     updateUI();
 
@@ -1143,6 +1148,7 @@ function renderEditNextPuyos() {
             if (editingNextPuyos.length > listIndex) {
                 // puyoIndex: 0 = main(下), 1 = sub(上)
                 editingNextPuyos[listIndex][puyoIndex] = currentEditColor;
+                nextEdited = true;
                 renderEditNextPuyos();
             }
         });
