@@ -251,8 +251,8 @@ function renderPlayNextPuyo() {
         const pair = pairs[idx];
         if (pair) {
             // pair is [sub, main] by construction earlier; show sub (top) then main (bottom)
-            slot.appendChild(createPuyo(pair[0]));
             slot.appendChild(createPuyo(pair[1]));
+            slot.appendChild(createPuyo(pair[0]));
         }
     });
 }
@@ -658,7 +658,7 @@ function generateNewPuyo() {
 
     // nextQueue からペアを取得（consumeNextPairは queueIndex を進める）
     ensureNextQueueCapacity();
-    const [sub, main] = consumeNextPair(); // returns [sub, main]
+    const [main, sub] = consumeNextPair(); // returns [sub, main]
 
     // currentPuyo の mainColor/subColor の表記は既存仕様に合わせる
     currentPuyo = {
@@ -1155,10 +1155,10 @@ function renderEditNextPuyos() {
 
         if (editingNextPuyos.length > idx) {
             // ペアは [sub, main]（index 0 = sub / 上、index 1 = main / 下）
-            const [c_sub, c_main] = editingNextPuyos[idx];
-            // 上（sub）は puyoIndex = 1、下（main）は puyoIndex = 0 として扱う（既存仕様に合わせる）
-            slot.appendChild(createEditablePuyo(c_sub, idx, 1)); // 上 (sub)
-            slot.appendChild(createEditablePuyo(c_main, idx, 0)); // 下 (main)
+            const [c_main, c_sub] = editingNextPuyos[idx];
+            
+            slot.appendChild(createEditablePuyo(c_sub, idx, 1)); // 上
+            slot.appendChild(createEditablePuyo(c_main, idx, 0)); // 下
         }
     });
 
