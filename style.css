@@ -139,7 +139,7 @@ body {
 }
 
 #score, #chain-count {
-    font-size: 1.25em;
+    font-size: 1em;
     font-weight: bold;
     color: #e63946;
 }
