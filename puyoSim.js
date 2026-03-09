@@ -605,12 +605,12 @@ function initializeGame() {
 
     // 最初のぷよを生成（generateNewPuyoは nextQueue を消費する）
     // resetのたびに現在の currentPuyo を維持しない仕様にする（明示的に初期化）
-    if (nextEdited) {
-        currentPuyo = null;
+    // 初回ロードまたは操作ぷよが存在しない場合は生成
+    if (!currentPuyo) {
         ensureNextQueueCapacity();
         generateNewPuyo();
-        nextEdited = false;
     }
+    
     startPuyoDropLoop();
     updateUI();
 
@@ -1247,12 +1247,9 @@ window.toggleMode = function() {
         // ここで currentPuyo を Next1 に「差し替える」
         // applyNextPuyos() が呼ばれて nextQueue が編集済みで queueIndex==0 の想定
         // 安全に動かすため currentPuyo を null にして generateNewPuyo() に委ねる
-        if (nextEdited) {
-            currentPuyo = null;
-            ensureNextQueueCapacity();
-            generateNewPuyo();
-            nextEdited = false;
-        }
+        currentPuyo = null;
+        ensureNextQueueCapacity();
+        generateNewPuyo();
 
         if (autoDropEnabled) startPuyoDropLoop();
         renderBoard();
