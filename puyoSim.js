@@ -1128,9 +1128,10 @@ function renderEditNextPuyos() {
     visibleSlots.forEach((slot, idx) => {
         slot.innerHTML = '';
         if (editingNextPuyos.length > idx) {
-            const [c_main, c_sub] = editingNextPuyos[idx];
-            slot.appendChild(createEditablePuyo(c_sub, idx, 1));
-            slot.appendChild(createEditablePuyo(c_main, idx, 0));
+            // ペアは [sub, main]（index 0 = sub / 上、index 1 = main / 下）
+            const [c_sub, c_main] = editingNextPuyos[index];
+            slot.appendChild(createEditablePuyo(c_sub, index, 1)); // 上 (sub)
+            slot.appendChild(createEditablePuyo(c_main, index, 0)); // 下 (main)
         }
     });
 
