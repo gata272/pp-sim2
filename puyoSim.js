@@ -1,7 +1,8 @@
-// ぷよぷよシミュレーション（修正版）
-// - 新仕様: lockPuyo(), 隠し行除外の連結検出, 全消しボーナス / ゲームオーバー判定位置を維持
-// - 改善: 関数一意化、履歴上限復活（MAX_HISTORY_SIZE）、境界チェックの統一、コメント追加
-// - AI 関連コードは削除済み
+// ぷよぷよシミュレーション（修正版：履歴上限300 / NextQueue / 連鎖安全化）
+// - 履歴は連鎖終了時のみ保存（1手＝1履歴）
+// - リセット時に履歴を消さない（initializeGameはhistoryStackをクリアしない）
+// - Next は nextQueue + queueIndex 方式に変更（未来分岐防止）
+// - 連鎖中のタイマーをキャンセルできるようにし、Undo/Redoで盤面を壊さない
 
 // 盤面サイズ
 const WIDTH = 6;
@@ -27,13 +28,16 @@ const BONUS_TABLE = {
     COLOR: [0, 0, 3, 6, 12]
 };
 
-// 履歴管理パラメータ
-const MAX_HISTORY_SIZE = 1000; // 履歴上限（メモリ対策のため上限を設ける）
+// 履歴管理パラメータ（変更：300）
+const MAX_HISTORY_SIZE = 300; // 履歴上限（メモリ対策のため上限を設ける）
 
 // ゲームの状態管理
 let board = []; 
 let currentPuyo = null; 
-let nextPuyoColors = []; 
+// nextQueue / queueIndex を導入（NextQueue方式）
+let nextQueue = []; 
+let queueIndex = 0;
+
 let score = 0;
 let chainCount = 0;
 let gameState = 'playing'; // 'playing', 'chaining', 'gameover', 'editing', 'setting'
@@ -56,6 +60,65 @@ let chainWaitTime = 300;
 // クイックターン
 let lastFailedRotation = { type: null, timestamp: 0 };
 const QUICK_TURN_WINDOW = 300; // ms
+
+// 連鎖非同期制御（追加）
+let chainTimer = null;
+let chainAbortFlag = false;
+
+// ---------- ユーティリティ関数 ----------
+function copyBoard(srcBoard) {
+    return srcBoard.map(row => row.slice());
+}
+function copyNextQueue(srcQueue) {
+    return srcQueue.map(pair => pair.slice());
+}
+
+// sleep helper that registers chainTimer so it can be cancelled
+function sleep(ms) {
+    return new Promise(resolve => {
+        chainTimer = setTimeout(() => {
+            chainTimer = null;
+            resolve();
+        }, ms);
+    });
+}
+
+function stopChain() {
+    // 連鎖中タイマーをキャンセルし、フラグを立てる
+    if (chainTimer) {
+        clearTimeout(chainTimer);
+        chainTimer = null;
+    }
+    chainAbortFlag = true;
+}
+
+// ---------- NextQueue 管理 ----------
+function generateInitialNextQueue() {
+    nextQueue = [];
+    queueIndex = 0;
+    for (let i = 0; i < Math.max(MAX_NEXT_PUYOS, 100); i++) {
+        nextQueue.push(getRandomPair());
+    }
+}
+function ensureNextQueueCapacity() {
+    // queueIndex が末尾に近づいたら補充
+    const threshold = 40; // 残り少なくなったら補充（調整可）
+    if (nextQueue.length - queueIndex < threshold) {
+        for (let i = 0; i < 100; i++) {
+            nextQueue.push(getRandomPair());
+        }
+    }
+}
+function consumeNextPair() {
+    if (queueIndex >= nextQueue.length) {
+        // もし何らかの理由で尽きたら補充
+        for (let i = 0; i < 100; i++) nextQueue.push(getRandomPair());
+    }
+    const pair = nextQueue[queueIndex];
+    queueIndex++;
+    ensureNextQueueCapacity();
+    return [pair[0], pair[1]]; // return [subColor, mainColor] style handled by caller
+}
 
 // ---------- DOM 初期化 / 描画 ----------
 function createBoardDOM() {
@@ -161,7 +224,7 @@ function renderCurrentPuyo() {
 }
 
 function renderPlayNextPuyo() {
-    // 一意化した renderPlayNextPuyo（重複定義は削除）
+    // NextQueue方式に合わせる（queueIndex を基準に表示）
     const next1Element = document.getElementById('next-puyo-1');
     const next2Element = document.getElementById('next-puyo-2');
     if (!next1Element || !next2Element) return;
@@ -172,13 +235,19 @@ function renderPlayNextPuyo() {
         return el;
     };
 
-    const slots = [next1Element, next2Element];
-    slots.forEach((slot, idx) => {
+    // show next at queueIndex (NEXT1) and queueIndex+1 (NEXT2)
+    const pairs = [
+        nextQueue[queueIndex] || [COLORS.EMPTY, COLORS.EMPTY],
+        nextQueue[queueIndex + 1] || [COLORS.EMPTY, COLORS.EMPTY]
+    ];
+
+    [next1Element, next2Element].forEach((slot, idx) => {
         slot.innerHTML = '';
-        if (nextPuyoColors.length > idx) {
-            const [c_main, c_sub] = nextPuyoColors[idx];
-            slot.appendChild(createPuyo(c_sub));
-            slot.appendChild(createPuyo(c_main));
+        const pair = pairs[idx];
+        if (pair) {
+            // pair is [sub, main] by construction earlier; show sub (top) then main (bottom)
+            slot.appendChild(createPuyo(pair[0]));
+            slot.appendChild(createPuyo(pair[1]));
         }
     });
 }
@@ -190,7 +259,6 @@ function updateUI() {
     if (scoreElement) scoreElement.textContent = score;
     if (chainElement) chainElement.textContent = chainCount;
     updateHistoryButtons();
-    // renderBoard は必要な場合外部から呼ぶ（ここでは呼ばないことで過剰描画を避けられる）
 }
 
 // ---------- ステージコード化 / 復元 ----------
@@ -292,10 +360,12 @@ window.loadStageCode = function() {
 };
 
 // ---------- 履歴（Undo / Redo） ----------
+// saveState: 連鎖終了時のみ呼ぶことで「1手=1履歴」を実現する設計
 function saveState(clearRedoStack = true) {
     const state = {
-        board: board.map(row => [...row]),
-        nextPuyoColors: nextPuyoColors.map(pair => [...pair]),
+        board: copyBoard(board),
+        nextQueue: copyNextQueue(nextQueue),
+        queueIndex: queueIndex,
         score: score,
         chainCount: chainCount,
         currentPuyo: currentPuyo ? { 
@@ -321,8 +391,12 @@ function saveState(clearRedoStack = true) {
 function restoreState(state) {
     if (!state) return;
 
-    board = state.board.map(row => [...row]);
-    nextPuyoColors = state.nextPuyoColors.map(pair => [...pair]);
+    // stop any running chain
+    stopChain();
+
+    board = copyBoard(state.board);
+    nextQueue = copyNextQueue(state.nextQueue);
+    queueIndex = state.queueIndex;
     score = state.score;
     chainCount = state.chainCount;
 
@@ -335,12 +409,8 @@ function restoreState(state) {
     gameState = 'playing';
     clearInterval(dropTimer);
 
-    // 現在Puyoが null の場合は新しいぷよを生成
-    if (currentPuyo === null) {
-        generateNewPuyo();
-    }
-
-    // 復元後は gravity を適用してから連鎖チェック（安定化）
+    // NOTE: 重要 — ここで generateNewPuyo() を自動呼び出ししない（履歴復元時の不整合対策）
+    // 代わりに、復元後は盤面を安定化して連鎖判定を行う
     gravity();
 
     const groups = findConnectedPuyos();
@@ -360,6 +430,9 @@ window.undoMove = function() {
     if (gameState !== 'playing' && gameState !== 'chaining' && gameState !== 'gameover') return;
     if (historyStack.length <= 1) return;
 
+    // 連鎖中タイマーを止めておく
+    stopChain();
+
     const currentState = historyStack.pop();
     redoStack.push(currentState);
     const previousState = historyStack[historyStack.length - 1];
@@ -370,6 +443,9 @@ window.undoMove = function() {
 window.redoMove = function() {
     if (gameState !== 'playing' && gameState !== 'chaining' && gameState !== 'gameover') return;
     if (redoStack.length === 0) return;
+
+    // 連鎖中タイマーを止めておく
+    stopChain();
 
     const nextState = redoStack.pop();
     historyStack.push(nextState);
@@ -438,7 +514,10 @@ function handleBoardClickEditMode(event) {
 
 window.applyNextPuyos = function() {
     if (gameState === 'editing') {
-        nextPuyoColors = JSON.parse(JSON.stringify(editingNextPuyos));
+        // editingNextPuyos は [ [sub, main], ... ] の配列になっている前提
+        // nextQueue に丸ごと置き換えて queueIndex をリセットする（編集結果を即適用）
+        nextQueue = JSON.parse(JSON.stringify(editingNextPuyos));
+        queueIndex = 0;
         alert('ネクストぷよの設定を保存しました。プレイモードで適用されます。');
     }
 };
@@ -486,25 +565,14 @@ function initializeGame() {
     score = 0;
     chainCount = 0;
     gameState = 'playing';
-    historyStack = [];
-    redoStack = [];
-    nextPuyoColors = [];
-    nextPuyoColors.push(getRandomPair());
-    for (let i = 1; i < MAX_NEXT_PUYOS; i++) {
-        let newPair, retries = 0;
-        const MAX_RETRIES = 100;
-        do {
-            newPair = getRandomPair();
-            retries++;
-            if (retries > MAX_RETRIES) {
-                console.warn("initializeGame: Max retries reached.");
-                break;
-            }
-        } while (hasFourUniqueColors(nextPuyoColors[i-1], newPair));
-        nextPuyoColors.push(newPair);
-    }
 
-    editingNextPuyos = JSON.parse(JSON.stringify(nextPuyoColors));
+    // NOTE: ユーザー要求により、リセット時に履歴を消さない -> historyStack / redoStack の初期化を除去
+
+    // NextQueue 初期化
+    generateInitialNextQueue();
+
+    // editingNextPuyos は nextQueue をコピーして初期化
+    editingNextPuyos = JSON.parse(JSON.stringify(nextQueue.slice(0, MAX_NEXT_PUYOS)));
     currentEditColor = COLORS.EMPTY;
 
     const modeToggleButton = document.querySelector('.mode-toggle-btn');
@@ -523,6 +591,7 @@ function initializeGame() {
         }
     }
 
+    // 最初のぷよを生成（generateNewPuyoは nextQueue を消費する）
     generateNewPuyo();
     startPuyoDropLoop();
     updateUI();
@@ -563,16 +632,26 @@ function initializeGame() {
 
     checkMobileControlsVisibility();
     renderBoard();
+
+    // 初期状態を履歴に保存（clearRedoStack = false として履歴連携を切らない）
     saveState(false);
 }
 
 function generateNewPuyo() {
     if (gameState !== 'playing') return;
-    while (nextPuyoColors.length < MAX_NEXT_PUYOS) nextPuyoColors.push(getRandomPair());
 
-    const [c1, c2] = nextPuyoColors.shift();
-    // mainColor = 下 / subColor = 上（この表現は既存仕様に合わせる）
-    currentPuyo = { mainColor: c2, subColor: c1, mainX: 2, mainY: HEIGHT - 2, rotation: 0 };
+    // nextQueue からペアを取得（consumeNextPairは queueIndex を進める）
+    ensureNextQueueCapacity();
+    const [sub, main] = consumeNextPair(); // returns [sub, main]
+
+    // currentPuyo の mainColor/subColor の表記は既存仕様に合わせる
+    currentPuyo = {
+        mainColor: main,
+        subColor: sub,
+        mainX: 2,
+        mainY: HEIGHT - 2,
+        rotation: 0
+    };
 
     const startingCoords = getCoordsFromState(currentPuyo);
     const isOverlappingTarget = startingCoords.some(p => p.x === 2 && p.y === (HEIGHT - 3) && board[p.y][p.x] !== COLORS.EMPTY);
@@ -585,8 +664,6 @@ function generateNewPuyo() {
         renderBoard();
         return;
     }
-
-    nextPuyoColors.push(getRandomPair());
 }
 
 function getCoordsFromState(puyoState) {
@@ -761,7 +838,7 @@ function hardDrop() {
     lockPuyo();
 }
 
-// lockPuyo: 設置 -> gravity -> 上端行クリア -> 保存 -> 連鎖開始（新仕様を継承）
+// lockPuyo: 設置 -> gravity -> 上端行クリア -> 連鎖開始（設置直後の履歴保存は削除）
 function lockPuyo() {
     if (gameState !== 'playing' || !currentPuyo) return;
     const coords = getPuyoCoords();
@@ -776,29 +853,20 @@ function lockPuyo() {
     // 自由落下（設置後に重力を適用）
     gravity();
 
-    // 上端（最上行）ではなく、仕様どおり "14行目"（Y = HEIGHT-1）ではなく、
-    // 新仕様に合わせて上から HIDDEN_ROWS 行をクリアするのではなく、
-    // (旧/新差分を保つため) ここでは Y = HEIGHT-1（最上行）をクリアする代わりに
-    // 以前の新コードに合わせて Y = HEIGHT-1 を空にするのではなく、
-    // 「14行目（Y=13）をクリア」という意図を HIDDEN_ROWS を使って説明する:
-    // ここでは上から1行（インゲーム上の“見えない行”扱い）を安全に初期化する。
+    // 最上端行をクリア（既存仕様に合わせる）
     for (let x = 0; x < WIDTH; x++) {
-        // 明示的に最上端行をクリアするのが旧仕様の意図に近いため、
-        // ここでは HEIGHT - 1 をクリアする実装を残す。
         board[HEIGHT - 1][x] = COLORS.EMPTY;
     }
 
     renderBoard();
     updateUI();
 
-    // 設置直後の盤面を保存（undo 用）
-    saveState(true);
+    // NOTE: 設置直後の履歴保存は削除（B方式：連鎖終了時のみ保存）
 
     // 連鎖判定へ
     gameState = 'chaining';
     chainCount = 0;
     runChain();
-    // AI 関連は削除済みのため clearAIHint 等は呼びません
 }
 
 // ---------- 連結検出（上部 HIDDEN_ROWS を除外） ----------
@@ -863,9 +931,11 @@ function clearGarbagePuyos(erasedCoords) {
 }
 
 // 連鎖処理（async）
-// - 新仕様: 全消しボーナス / ゲームオーバー判定 Y = HEIGHT - 3 を維持
-// - 改善: 連鎖終了後に saveState(true) を行う（履歴として最終盤面を残す）
+// - 連鎖終了時に履歴を保存（saveState()）
 async function runChain() {
+    // reset abort flag for this run
+    chainAbortFlag = false;
+
     // 1) まず重力をかけて安定化
     gravity();
     renderBoard();
@@ -900,13 +970,13 @@ async function runChain() {
         checkMobileControlsVisibility();
         renderBoard();
 
-        // 連鎖なしで設置完了状態（履歴に保存）
-        saveState(true);
+        // NOTE: B方式：連鎖なし（0連鎖）では履歴保存しない（1手＝連鎖終了のみ）
         return;
     }
 
     // 3) 連鎖発生: 着地からの待ち時間
-    await new Promise(r => setTimeout(r, chainWaitTime));
+    await sleep(chainWaitTime);
+    if (chainAbortFlag) return;
 
     // 4) 消滅処理
     chainCount++;
@@ -926,7 +996,8 @@ async function runChain() {
     updateUI();
 
     // 5) 消滅後の待機（重力待ち）
-    await new Promise(r => setTimeout(r, gravityWaitTime));
+    await sleep(gravityWaitTime);
+    if (chainAbortFlag) return;
 
     // 6) 次段へ（重力・再判定）
     gravity();
@@ -941,7 +1012,7 @@ async function runChain() {
         checkMobileControlsVisibility();
         renderBoard();
 
-        // 連鎖が終わった最終盤面を保存（改善: ここで保存）
+        // 連鎖が終わった最終盤面を保存（ここで保存） — 1手 = 1履歴
         saveState(true);
     } else {
         // 続ける（await して順序を保証）
