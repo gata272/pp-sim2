@@ -251,8 +251,8 @@ function renderPlayNextPuyo() {
         const pair = pairs[idx];
         if (pair) {
             // pair is [sub, main] by construction earlier; show sub (top) then main (bottom)
-            slot.appendChild(createPuyo(pair[0]));
             slot.appendChild(createPuyo(pair[1]));
+            slot.appendChild(createPuyo(pair[0]));
         }
     });
 }
