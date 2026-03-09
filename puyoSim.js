@@ -343,11 +343,12 @@ window.loadStageCode = function() {
             }
         }
 
-        editingNextPuyos = [];
+                editingNextPuyos = [];
         for (let i = 0; i < MAX_NEXT_PUYOS; i++) {
-            const mainColor = dataArray[idx++];
-            const subColor = dataArray[idx++];
-            editingNextPuyos.push([mainColor, subColor]);
+            // dataArray に push した順序に合わせて、ここでは sub, main の順で復元する
+            const subColor = dataArray[idx++];   // 上のぷよ
+            const mainColor = dataArray[idx++];  // 下のぷよ
+            editingNextPuyos.push([subColor, mainColor]); // [sub, main]
         }
 
         renderBoard();
