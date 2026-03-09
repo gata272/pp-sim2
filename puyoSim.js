@@ -1173,7 +1173,7 @@ function renderEditNextPuyos() {
         pairContainer.appendChild(countSpan);
         const puyoRow = document.createElement('div');
         puyoRow.className = 'next-puyo-row';
-        const [c_sub, c_main] = editingNextPuyos[i]; // fixed: [sub, main]
+        const [c_main, c_sub] = editingNextPuyos[i]; // fixed: [sub, main]
         puyoRow.appendChild(createEditablePuyo(c_sub, i, 1)); // 上 (sub)
         puyoRow.appendChild(createEditablePuyo(c_main, i, 0)); // 下 (main)
         pairContainer.appendChild(puyoRow);
