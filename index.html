@@ -95,9 +95,7 @@
                     <button id="undo-button" onclick="undoMove()" disabled>一手戻す (U)</button>
                     <button id="redo-button" onclick="redoMove()" disabled>一手やり直す (Y)</button>
                 </div>
-                <button id="raise-puyo-button" onclick="raisePuyoOneRow()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #9b59b6; color: white; margin-top: 5px;">
-                    操作中のぷよを1段上げる ↑ (U)
-                </button>
+                <button id="raise-puyo-button" onclick="raisePuyoOneRow()" style="width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #9b59b6; color: white; margin-top: 5px;">1段上げる ↑ (U)</button>
                 <div id="play-controls" class="common-control">
                     <button id="auto-drop-toggle-button" onclick="toggleAutoDrop()">自動落下: ON</button>
                     <button id="reset-button-play" onclick="resetGame()">盤面リセット (R)</button>
@@ -164,7 +162,7 @@
     <button class="mobile-btn" id="btn-rotate-cw">B</button>
     <button class="mobile-btn" id="btn-rotate-ccw">A</button>
 </div>
-<p class="small-text">puyo-sim_ver1.0.9 by gata</p>
+<p class="small-text">puyo-sim_ver1.1.2 by gata</p>
     <script src="puyoAI.js"></script>
     <script src="puyoSim.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
