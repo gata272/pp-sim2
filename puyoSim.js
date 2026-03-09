@@ -251,8 +251,8 @@ function renderPlayNextPuyo() {
         const pair = pairs[idx];
         if (pair) {
             // pair is [sub, main] by construction earlier; show sub (top) then main (bottom)
-            slot.appendChild(createPuyo(pair[1]));
             slot.appendChild(createPuyo(pair[0]));
+            slot.appendChild(createPuyo(pair[1]));
         }
     });
 }
@@ -658,7 +658,7 @@ function generateNewPuyo() {
 
     // nextQueue からペアを取得（consumeNextPairは queueIndex を進める）
     ensureNextQueueCapacity();
-    const [main, sub] = consumeNextPair(); // returns [sub, main]
+    const [sub, main] = consumeNextPair(); // returns [sub, main]
 
     // currentPuyo の mainColor/subColor の表記は既存仕様に合わせる
     currentPuyo = {
