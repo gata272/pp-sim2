@@ -1326,7 +1326,7 @@ function getDropY(x, startY = 0) {
                 const newSubY = subY + 1;
 
                 // 範囲超過判定（HEIGHT を基準）
-                if (newMainY >= HEIGHT || newSubY >= HEIGHT) {
+                if (newMainY >= HEIGHT + 1 || newSubY >= HEIGHT + 1) {
                     alert('これ以上上に移動できません。');
                     return;
                 }
