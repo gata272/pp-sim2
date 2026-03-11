@@ -1,4 +1,4 @@
-/* online.js (v6: 既存UI完全保護・レイアウト崩れ修正・おじゃまぷよ対応) */
+/* online.js (v7: 既存UI完全保護・CSS干渉排除) */
 (function() {
     let peer = null;
     let conn = null;
@@ -61,20 +61,19 @@
         if (infoPanel && !document.getElementById('online-stats-container')) {
             const statsContainer = document.createElement('div');
             statsContainer.id = 'online-stats-container';
-            // 重要：既存のレイアウトを壊さないよう、margin/paddingに配慮
-            statsContainer.style.cssText = 'margin-top: 10px; padding: 10px; background: #1a1a1a; border-radius: 8px; border: 1px solid #333; display: none; width: 100%; box-sizing: border-box;'; 
+            statsContainer.style.cssText = 'margin-top: 10px; padding: 10px; background: #1a1a1a; border-radius: 8px; border: 1px solid #333; display: none; width: 100%; box-sizing: border-box; clear: both;'; 
             statsContainer.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
                     <span style="font-size: 0.8em; color: #aaa;">勝利数</span>
                     <span id="win-count-display" style="font-weight: bold; color: #f1c40f; font-size: 1.1em;">0 - 0</span>
                 </div>
-                <div style="text-align: center; margin-bottom: 10px;">
+                <div id="my-garbage-info" style="text-align: center; margin-bottom: 10px;">
                     <div style="font-size: 0.75em; color: #888; margin-bottom: 2px;">自分のおじゃま</div>
-                    <div id="my-garbage-stack" style="font-weight: bold; color: #e74c3c; font-size: 1.2em; font-family: monospace;">0</div>
+                    <div id="my-garbage-stack-val" style="font-weight: bold; color: #e74c3c; font-size: 1.2em; font-family: monospace;">0</div>
                 </div>
                 <div id="opponent-section" style="border-top: 1px solid #333; padding-top: 10px;">
                     <h3 style="font-size: 0.8em; color: #aaa; margin: 0 0 8px 0; text-align: center;">相手の盤面</h3>
-                    <div id="opponent-board" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: #000; border: 1px solid #444; width: 100px; height: 233px; margin: 0 auto;"></div>
+                    <div id="opponent-board" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: #000; border: 1px solid #444; width: 90px; height: 210px; margin: 0 auto;"></div>
                     <div style="text-align: center; margin-top: 8px;">
                         <div style="font-size: 0.75em; color: #888; margin-bottom: 2px;">相手のおじゃま</div>
                         <div id="opp-garbage-stack" style="font-weight: bold; color: #e74c3c; font-size: 1.1em; font-family: monospace;">0</div>
