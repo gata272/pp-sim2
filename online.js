@@ -1,4 +1,4 @@
-/* online.js (最終修正版: 既存UI完全保護・おじゃまぷよ・相殺・自動移行対応) */
+/* online.js (v3: 既存UI完全保護・おじゃまぷよ・相殺・自動移行対応) */
 (function() {
     let peer = null;
     let conn = null;
@@ -10,10 +10,9 @@
     let isMatchActive = false;
     let peerInitialized = false;
     
-    // 相手のおじゃまぷよスタック
     let oppGarbageStack = 0;
 
-    // UI初期化：既存のHTMLを一切破壊せず、必要な要素のみを追加する
+    // UI初期化：既存のHTMLを一切破壊せず、必要な要素のみを「追加」する
     function initOnlineUI() {
         // オーバーレイ（オンライン設定用）
         if (!document.getElementById('online-overlay')) {
@@ -48,12 +47,12 @@
             document.body.appendChild(proposalOverlay);
         }
 
-        // 情報パネルへのおじゃま表示追加
+        // 情報パネルへのおじゃま表示追加（既存のパネル末尾に追加）
         const infoPanel = document.getElementById('info-panel');
         if (infoPanel && !document.getElementById('online-stats-container')) {
             const statsContainer = document.createElement('div');
             statsContainer.id = 'online-stats-container';
-            statsContainer.style.cssText = 'margin-top: 15px; padding-top: 15px; border-top: 1px solid #444;';
+            statsContainer.style.cssText = 'margin-top: 15px; padding-top: 15px; border-top: 1px solid #444; display: none;'; // 最初は隠す
             statsContainer.innerHTML = `
                 <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
                     <span style="font-size: 0.8em; color: #aaa;">勝利数</span>
@@ -95,8 +94,8 @@
         }
     }
 
-    // イベント登録
-    function setupEventListeners() {
+    // イベント登録：既存の online-toggle-btn の動作を定義
+    function setupToggleBtn() {
         const btn = document.getElementById('online-toggle-btn');
         if (btn) {
             btn.onclick = window.showOnlineOverlay;
@@ -166,8 +165,7 @@
     function checkSeriesWinner() {
         if (myWins >= winTarget) {
             alert('シリーズ勝利！');
-            isMatchActive = false;
-            location.reload();
+            endMatch();
         } else {
             setTimeout(() => { if (window.resetGame) window.resetGame(); }, 1000);
         }
@@ -180,13 +178,19 @@
             updateWinCountDisplay();
             if (oppWins >= winTarget) {
                 alert('シリーズ敗北...');
-                isMatchActive = false;
-                location.reload();
+                endMatch();
             } else {
                 setTimeout(() => { if (window.resetGame) window.resetGame(); }, 1000);
             }
         }
     };
+
+    function endMatch() {
+        isMatchActive = false;
+        const stats = document.getElementById('online-stats-container');
+        if (stats) stats.style.display = 'none';
+        location.reload();
+    }
 
     function updateOpponentBoard(oppBoard, oppCurrentPuyo, oppGameState) {
         const boardEl = document.getElementById('opponent-board');
@@ -204,7 +208,6 @@
                     if (x === mainX && y === mainY) color = mainColor;
                     if (x === subX && y === subY) color = subColor;
                 }
-                // 背景色でぷよの色を表現（簡易版）
                 const colors = ['transparent', '#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#888'];
                 puyo.style.backgroundColor = colors[color] || 'transparent';
             }
@@ -281,6 +284,8 @@
         myWins = 0; oppWins = 0;
         isMatchActive = true;
         document.getElementById('match-proposal-overlay').style.display = 'none';
+        const stats = document.getElementById('online-stats-container');
+        if (stats) stats.style.display = 'block'; // 対戦開始時に表示
         updateWinCountDisplay();
         if (window.resetGame) window.resetGame();
     }
@@ -293,9 +298,9 @@
         isHost = false;
     };
 
-    // 初期化
+    // 初期化実行
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => { initOnlineUI(); setupEventListeners(); });
+        document.addEventListener('DOMContentLoaded', () => { initOnlineUI(); setupToggleBtn(); });
     } else {
         initOnlineUI(); setupEventListeners();
     }
