@@ -1,4 +1,4 @@
-// ぷよぷよシミュレーションシステム (v4: 操作ボタン表示修正・おじゃまぷよ・相殺)
+// ぷよぷよシミュレーションシステム (v5: UI完全修正・おじゃまぷよ・相殺)
 
 // 盤面サイズ
 const WIDTH = 6;
@@ -34,8 +34,6 @@ let queueIndex = 0;
 let score = 0;
 let chainCount = 0;
 let gameState = 'playing'; 
-let currentEditColor = COLORS.EMPTY;
-let editingNextPuyos = [];
 
 // おじゃまぷよスタック
 let myGarbageStack = 0;
@@ -70,8 +68,8 @@ function initializeGame() {
     updateUI();
     renderBoard();
     
-    // 操作ボタンの表示を確実にする
-    checkMobileControlsVisibility();
+    // モバイルコントロールのイベントリスナーを設定（バックアップの仕組みを再現）
+    setupMobileControls();
 }
 
 function generateInitialNextQueue() {
@@ -136,7 +134,6 @@ function generateNewPuyo() {
     }
     
     gameState = 'playing';
-    checkMobileControlsVisibility();
 }
 
 function dropGarbage() {
@@ -270,16 +267,27 @@ function updateUI() {
     updateHistoryButtons();
 }
 
-// 操作ボタンの表示制御
-function checkMobileControlsVisibility() {
-    const controls = document.getElementById('mobile-controls');
-    if (!controls) return;
-    // シミュレーション中またはゲームオーバー時は常に表示
-    if (gameState === 'playing' || gameState === 'gameover' || gameState === 'chaining') {
-        controls.style.display = 'grid';
-    } else {
-        controls.style.display = 'none';
-    }
+// モバイルコントロールのセットアップ（バックアップの仕組みを再現）
+function setupMobileControls() {
+    const addListener = (id, fn) => {
+        const el = document.getElementById(id);
+        if (el) {
+            // 既存のリスナーを削除するためにクローンを作成
+            const newEl = el.cloneNode(true);
+            el.parentNode.replaceChild(newEl, el);
+            newEl.addEventListener('click', (e) => {
+                e.preventDefault();
+                fn();
+            });
+        }
+    };
+
+    addListener('btn-left', () => movePuyo(-1, 0));
+    addListener('btn-right', () => movePuyo(1, 0));
+    addListener('btn-soft-drop', () => movePuyo(0, -1));
+    addListener('btn-hard-drop', () => hardDrop());
+    addListener('btn-rotate-cw', () => rotatePuyoCW());
+    addListener('btn-rotate-ccw', () => rotatePuyoCCW());
 }
 
 // --- 既存機能の維持 ---
@@ -325,10 +333,19 @@ function placePuyo() {
     const coords = getPuyoCoords();
     coords.forEach(p => { if (p.y >= 0 && p.y < HEIGHT) board[p.y][p.x] = p.color; });
     currentPuyo = null; gameState = 'chaining'; clearInterval(dropTimer);
-    checkMobileControlsVisibility();
     chainCount = 0; runChain();
 }
 function hardDrop() { while (movePuyo(0, -1)); placePuyo(); }
+
+window.raisePuyoOneRow = function() {
+    if (gameState !== 'playing' || !currentPuyo) return;
+    const testPuyo = { ...currentPuyo, mainY: currentPuyo.mainY + 1 };
+    if (!checkCollision(getCoordsFromState(testPuyo))) {
+        currentPuyo = testPuyo;
+        renderBoard();
+    }
+};
+
 function handleInput(e) {
     if (gameState !== 'playing') return;
     if (e.key === 'ArrowLeft') movePuyo(-1, 0);
@@ -337,7 +354,11 @@ function handleInput(e) {
     else if (e.key === 'z') rotatePuyoCW();
     else if (e.key === 'x') rotatePuyoCCW();
     else if (e.key === ' ') hardDrop();
+    else if (e.key === 'u') window.undoMove();
+    else if (e.key === 'y') window.redoMove();
+    else if (e.key === 'r') window.resetGame();
 }
+
 function findConnectedPuyos() {
     let visited = Array(HEIGHT).fill().map(() => Array(WIDTH).fill(false));
     let groups = [];
@@ -396,14 +417,6 @@ window.resetGame = function() { clearInterval(dropTimer); initializeGame(); };
 function startPuyoDropLoop() { clearInterval(dropTimer); dropTimer = setInterval(() => { if (gameState === 'playing' && autoDropEnabled) { if (!movePuyo(0, -1)) placePuyo(); } }, dropInterval); }
 
 window.receiveGarbage = function(amount) { myGarbageStack += amount; updateUI(); };
-
-// モバイル操作用グローバル関数
-window.moveLeft = () => movePuyo(-1, 0);
-window.moveRight = () => movePuyo(1, 0);
-window.moveDown = () => movePuyo(0, -1);
-window.rotateCW = () => rotatePuyoCW();
-window.rotateCCW = () => rotatePuyoCCW();
-window.doHardDrop = () => hardDrop();
 
 document.addEventListener('keydown', handleInput);
 window.addEventListener('load', initializeGame);
