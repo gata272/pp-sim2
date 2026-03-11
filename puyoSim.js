@@ -1,4 +1,4 @@
-// ぷよぷよシミュレーションシステム (v3: おじゃまぷよ・相殺・テトリス2準拠)
+// ぷよぷよシミュレーションシステム (v4: 操作ボタン表示修正・おじゃまぷよ・相殺)
 
 // 盤面サイズ
 const WIDTH = 6;
@@ -53,10 +53,6 @@ let autoDropEnabled = false;
 let gravityWaitTime = 300;
 let chainWaitTime = 300;
 
-// クイックターン
-let lastFailedRotation = { type: null, timestamp: 0 };
-const QUICK_TURN_WINDOW = 300;
-
 // 初期化
 function initializeGame() {
     board = Array(HEIGHT).fill().map(() => Array(WIDTH).fill(COLORS.EMPTY));
@@ -73,6 +69,9 @@ function initializeGame() {
     generateNewPuyo();
     updateUI();
     renderBoard();
+    
+    // 操作ボタンの表示を確実にする
+    checkMobileControlsVisibility();
 }
 
 function generateInitialNextQueue() {
@@ -103,7 +102,7 @@ function createBoardDOM() {
 }
 
 function generateNewPuyo() {
-    if (gameState !== 'playing') return;
+    if (gameState !== 'playing' && gameState !== 'gameover') return;
 
     // おじゃまぷよ落下
     if (myGarbageStack > 0) {
@@ -119,8 +118,8 @@ function generateNewPuyo() {
     
     const pair = nextQueue[queueIndex++];
     currentPuyo = {
-        mainColor: pair[1], // main
-        subColor: pair[0],  // sub
+        mainColor: pair[1],
+        subColor: pair[0],
         mainX: 2,
         mainY: 12,
         rotation: 0
@@ -135,6 +134,9 @@ function generateNewPuyo() {
         else alert('ゲームオーバー！');
         return;
     }
+    
+    gameState = 'playing';
+    checkMobileControlsVisibility();
 }
 
 function dropGarbage() {
@@ -169,7 +171,6 @@ async function runChain() {
 
     const groups = findConnectedPuyos();
     if (groups.length === 0) {
-        // 連鎖終了
         if (pendingGarbageToOpponent > 0) {
             if (window.sendGarbage) window.sendGarbage(pendingGarbageToOpponent);
             pendingGarbageToOpponent = 0;
@@ -189,7 +190,6 @@ async function runChain() {
     let chainScore = calculateScore(groups, chainCount);
     score += chainScore;
 
-    // おじゃま・相殺
     let generated = Math.floor(chainScore / GARBAGE_RATE);
     if (myGarbageStack > 0) {
         let offset = Math.min(myGarbageStack, generated);
@@ -270,6 +270,18 @@ function updateUI() {
     updateHistoryButtons();
 }
 
+// 操作ボタンの表示制御
+function checkMobileControlsVisibility() {
+    const controls = document.getElementById('mobile-controls');
+    if (!controls) return;
+    // シミュレーション中またはゲームオーバー時は常に表示
+    if (gameState === 'playing' || gameState === 'gameover' || gameState === 'chaining') {
+        controls.style.display = 'grid';
+    } else {
+        controls.style.display = 'none';
+    }
+}
+
 // --- 既存機能の維持 ---
 function getCoordsFromState(p) {
     let { mainX, mainY, rotation } = p;
@@ -313,6 +325,7 @@ function placePuyo() {
     const coords = getPuyoCoords();
     coords.forEach(p => { if (p.y >= 0 && p.y < HEIGHT) board[p.y][p.x] = p.color; });
     currentPuyo = null; gameState = 'chaining'; clearInterval(dropTimer);
+    checkMobileControlsVisibility();
     chainCount = 0; runChain();
 }
 function hardDrop() { while (movePuyo(0, -1)); placePuyo(); }
@@ -383,6 +396,14 @@ window.resetGame = function() { clearInterval(dropTimer); initializeGame(); };
 function startPuyoDropLoop() { clearInterval(dropTimer); dropTimer = setInterval(() => { if (gameState === 'playing' && autoDropEnabled) { if (!movePuyo(0, -1)) placePuyo(); } }, dropInterval); }
 
 window.receiveGarbage = function(amount) { myGarbageStack += amount; updateUI(); };
+
+// モバイル操作用グローバル関数
+window.moveLeft = () => movePuyo(-1, 0);
+window.moveRight = () => movePuyo(1, 0);
+window.moveDown = () => movePuyo(0, -1);
+window.rotateCW = () => rotatePuyoCW();
+window.rotateCCW = () => rotatePuyoCCW();
+window.doHardDrop = () => hardDrop();
 
 document.addEventListener('keydown', handleInput);
 window.addEventListener('load', initializeGame);
