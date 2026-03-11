@@ -1,4 +1,4 @@
-/* online.js (v3: 既存UI完全保護・おじゃまぷよ・相殺・自動移行対応) */
+/* online.js (v4: 既存UI完全保護・スタイル干渉排除・おじゃまぷよ対応) */
 (function() {
     let peer = null;
     let conn = null;
@@ -52,7 +52,8 @@
         if (infoPanel && !document.getElementById('online-stats-container')) {
             const statsContainer = document.createElement('div');
             statsContainer.id = 'online-stats-container';
-            statsContainer.style.cssText = 'margin-top: 15px; padding-top: 15px; border-top: 1px solid #444; display: none;'; // 最初は隠す
+            // 重要：既存のレイアウトを崩さないよう、absolute配置やマージンに注意
+            statsContainer.style.cssText = 'margin-top: 15px; padding-top: 15px; border-top: 1px solid #444; display: none; width: 100%;'; 
             statsContainer.innerHTML = `
                 <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
                     <span style="font-size: 0.8em; color: #aaa;">勝利数</span>
@@ -94,7 +95,6 @@
         }
     }
 
-    // イベント登録：既存の online-toggle-btn の動作を定義
     function setupToggleBtn() {
         const btn = document.getElementById('online-toggle-btn');
         if (btn) {
@@ -115,14 +115,12 @@
         if (overlay) overlay.style.display = 'none';
     };
 
-    // おじゃまぷよ送信
     window.sendGarbage = function(amount) {
         if (conn && conn.open) {
             conn.send({ type: 'RECEIVE_GARBAGE', amount: amount });
         }
     };
 
-    // 盤面データ送信
     window.sendBoardData = function() {
         if (!isMatchActive || !conn || !conn.open) return;
         if (typeof board !== 'undefined') {
@@ -285,7 +283,7 @@
         isMatchActive = true;
         document.getElementById('match-proposal-overlay').style.display = 'none';
         const stats = document.getElementById('online-stats-container');
-        if (stats) stats.style.display = 'block'; // 対戦開始時に表示
+        if (stats) stats.style.display = 'block'; 
         updateWinCountDisplay();
         if (window.resetGame) window.resetGame();
     }
@@ -298,10 +296,9 @@
         isHost = false;
     };
 
-    // 初期化実行
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => { initOnlineUI(); setupToggleBtn(); });
     } else {
-        initOnlineUI(); setupEventListeners();
+        initOnlineUI(); setupToggleBtn();
     }
 })();
