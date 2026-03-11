@@ -569,6 +569,14 @@ function hasFourUniqueColors(pair1, pair2) {
 }
 
 let _initializedOnce = false;
+window.resetGame = function() {
+    window.initializeGame();
+};
+
+window.resetGame = function() {
+    window.initializeGame();
+};
+
 window.initializeGame = function() {
     createBoardDOM();
     for (let y = 0; y < HEIGHT; y++) board[y] = Array(WIDTH).fill(COLORS.EMPTY);
@@ -604,11 +612,10 @@ window.initializeGame = function() {
 
     // 最初のぷよを生成（generateNewPuyoは nextQueue を消費する）
     // resetのたびに現在の currentPuyo を維持しない仕様にする（明示的に初期化）
-    // 初回ロードまたは操作ぷよが存在しない場合は生成
-    if (!currentPuyo) {
-        ensureNextQueueCapacity();
-        generateNewPuyo();
-    }
+    // 常に新しいぷよを生成する
+    currentPuyo = null; // 明示的にnullに設定
+    ensureNextQueueCapacity();
+    generateNewPuyo();
     
     startPuyoDropLoop();
     updateUI();
@@ -1366,12 +1373,10 @@ function getDropY(x, startY = 0) {
         });
 
     } catch (e) {
-        console.error('raisePuyoOneRow init error:', e);
+        console.error(\'raisePuyoOneRow init error:\', e);
     }
 })();
 
 // 初期化
-document.addEventListener('DOMContentLoaded', () => {
-    initializeGame();
-    window.addEventListener('resize', checkMobileControlsVisibility);
-});
+document.addEventListener(\'DOMContentLoaded\', window.initializeGame);
+window.addEventListener(\'resize\', checkMobileControlsVisibility);
