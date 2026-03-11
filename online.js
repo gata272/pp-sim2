@@ -1,4 +1,4 @@
-/* online.js (v4: 既存UI完全保護・スタイル干渉排除・おじゃまぷよ対応) */
+/* online.js (v5: 既存UI完全保護・レイアウト崩れ修正・おじゃまぷよ対応) */
 (function() {
     let peer = null;
     let conn = null;
@@ -25,11 +25,13 @@
                     <div id="online-status" style="margin-bottom: 10px; font-size: 0.9em; color: #aaa;">PeerJSを初期化中...</div>
                     <div id="my-id-display" style="margin-bottom: 15px; font-size: 0.8em; color: #888;">あなたのID: <span id="my-peer-id" style="color: #fff; font-weight: bold;">----</span></div>
                     <input type="text" id="opponent-id-input" placeholder="相手のIDを入力" style="width: 100%; padding: 8px; margin-bottom: 10px; background: #333; color: white; border: 1px solid #555; border-radius: 4px;">
-                    <button onclick="connectToOpponent()" style="width: 100%; padding: 10px; margin-bottom: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">接続する</button>
-                    <button onclick="hideOnlineOverlay()" style="width: 100%; padding: 10px; background: #444; color: white; border: none; border-radius: 4px; cursor: pointer;">キャンセル</button>
+                    <button id="btn-connect" style="width: 100%; padding: 10px; margin-bottom: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">接続する</button>
+                    <button id="btn-cancel" style="width: 100%; padding: 10px; background: #444; color: white; border: none; border-radius: 4px; cursor: pointer;">キャンセル</button>
                 </div>
             `;
             document.body.appendChild(overlay);
+            document.getElementById('btn-connect').onclick = window.connectToOpponent;
+            document.getElementById('btn-cancel').onclick = window.hideOnlineOverlay;
         }
 
         // 試合提案オーバーレイ
@@ -47,7 +49,7 @@
             document.body.appendChild(proposalOverlay);
         }
 
-        // 情報パネルへのおじゃま表示追加（既存のパネル末尾に追加）
+        // 情報パネルへのおじゃま表示追加
         const infoPanel = document.getElementById('info-panel');
         if (infoPanel && !document.getElementById('online-stats-container')) {
             const statsContainer = document.createElement('div');
@@ -58,10 +60,6 @@
                 <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
                     <span style="font-size: 0.8em; color: #aaa;">勝利数</span>
                     <span id="win-count-display" style="font-weight: bold; color: #f1c40f;">0 - 0</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
-                    <span style="font-size: 0.8em; color: #aaa;">おじゃま</span>
-                    <span id="my-garbage-stack" style="font-weight: bold; color: #e74c3c;">0</span>
                 </div>
                 <div id="opponent-section">
                     <h3 style="font-size: 0.8em; color: #aaa; margin-bottom: 5px; text-align: center;">相手の盤面</h3>
@@ -248,7 +246,8 @@
                 <option value="5">5本先取</option>
             </select>
         `;
-        document.getElementById('proposal-actions').innerHTML = `<button onclick="proposeMatch()" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">提案を送る</button>`;
+        document.getElementById('proposal-actions').innerHTML = `<button id="btn-propose" style="width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">提案を送る</button>`;
+        document.getElementById('btn-propose').onclick = window.proposeMatch;
     }
 
     window.proposeMatch = function() {
@@ -263,9 +262,11 @@
         overlay.style.display = 'flex';
         document.getElementById('proposal-content').innerHTML = `<p>相手から ${target}本先取 の対戦提案が届きました。</p>`;
         document.getElementById('proposal-actions').innerHTML = `
-            <button onclick="acceptMatch(${target})" style="width: 48%; padding: 10px; background: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer;">承認</button>
-            <button onclick="rejectMatch()" style="width: 48%; padding: 10px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer;">拒否</button>
+            <button id="btn-accept" style="width: 48%; padding: 10px; background: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer;">承認</button>
+            <button id="btn-reject" style="width: 48%; padding: 10px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer;">拒否</button>
         `;
+        document.getElementById('btn-accept').onclick = () => window.acceptMatch(target);
+        document.getElementById('btn-reject').onclick = window.rejectMatch;
     }
 
     window.acceptMatch = function(target) {
