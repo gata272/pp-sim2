@@ -313,7 +313,10 @@
                 ${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}">${n}本先取</option>`).join('')}
             </select>
         `;
-        actions.innerHTML = `<button class="online-btn" onclick="proposeMatch()">提案を送る</button>`;
+        actions.innerHTML = `
+            <button class="online-btn" onclick="proposeMatch()">提案を送る</button>
+            <button class="online-btn secondary" onclick="hideOnlineOverlay()">キャンセル</button>
+        `;
     }
 
     function showApprovalUI(target) {
