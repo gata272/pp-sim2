@@ -1,4 +1,4 @@
-// ぷよぷよシミュレーター (v7: バックアップ完全復元 + おじゃま・相殺システム)
+// ぷよぷよシミュレーションシステム (バックアップ完全復元版 + おじゃまスタック用変数)
 
 // 盤面サイズ
 const WIDTH = 6;
@@ -14,17 +14,8 @@ const COLORS = {
     BLUE: 2,
     GREEN: 3,
     YELLOW: 4,
-    GARBAGE: 5 // おじゃまぷよ
+    GARBAGE: 5
 };
-
-// スコア計算（テトリス2準拠）
-const BONUS_TABLE = {
-    CHAIN: [0, 0, 8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512],
-    GROUP: [0, 0, 0, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-    COLOR: [0, 0, 3, 6, 12, 24]
-};
-
-const GARBAGE_RATE = 70; // スコア70点につきおじゃま1個
 
 // 状態管理
 let board = [];
@@ -38,9 +29,8 @@ let currentEditColor = COLORS.EMPTY;
 let editingNextPuyos = [];
 let nextEdited = false;
 
-// おじゃまぷよスタック
+// おじゃまぷよスタック (追加分)
 let myGarbageStack = 0;
-let pendingGarbageToOpponent = 0;
 
 // 履歴管理
 let historyStack = [];
@@ -166,7 +156,6 @@ function renderPlayNextPuyo() {
 }
 
 function renderEditNextPuyos() {
-    // 編集モード用のネクスト表示
     for (let i = 1; i <= 2; i++) {
         const el = document.getElementById(`edit-next-${i}`);
         if (!el) continue;
@@ -188,7 +177,6 @@ function initializeGame() {
     score = 0;
     chainCount = 0;
     myGarbageStack = 0;
-    pendingGarbageToOpponent = 0;
     gameState = 'playing';
     
     generateInitialNextQueue();
@@ -209,15 +197,6 @@ function initializeGame() {
 
 function generateNewPuyo() {
     if (gameState !== 'playing') return;
-
-    // おじゃまぷよ落下
-    if (myGarbageStack > 0) {
-        dropGarbage();
-        myGarbageStack = 0;
-        updateUI();
-        renderBoard();
-    }
-
     const pair = consumeNextPair();
     currentPuyo = {
         mainColor: pair[1],
@@ -236,20 +215,6 @@ function generateNewPuyo() {
         else alert('ゲームオーバー！');
         return;
     }
-}
-
-function dropGarbage() {
-    let amount = Math.min(myGarbageStack, 30);
-    for (let i = 0; i < amount; i++) {
-        let x = i % WIDTH;
-        for (let y = HEIGHT - 1; y >= 0; y--) {
-            if (board[y][x] === COLORS.EMPTY) {
-                board[y][x] = COLORS.GARBAGE;
-                break;
-            }
-        }
-    }
-    gravity();
 }
 
 function gravity() {
@@ -271,11 +236,6 @@ async function runChain() {
 
     const groups = findConnectedPuyos();
     if (groups.length === 0) {
-        // 連鎖終了時におじゃまを送信
-        if (pendingGarbageToOpponent > 0) {
-            if (window.sendGarbage) window.sendGarbage(pendingGarbageToOpponent);
-            pendingGarbageToOpponent = 0;
-        }
         gameState = 'playing';
         generateNewPuyo();
         if (autoDropEnabled) startPuyoDropLoop();
@@ -286,28 +246,15 @@ async function runChain() {
     }
 
     await sleep(chainWaitTime);
-
     chainCount++;
-    let chainScore = calculateScore(groups, chainCount);
-    score += chainScore;
+    // バックアップの得点計算 (簡易)
+    score += (10 * groups.reduce((acc, g) => acc + g.group.length, 0)) * chainCount;
 
-    // おじゃま生成と相殺
-    let generated = Math.floor(chainScore / GARBAGE_RATE);
-    if (myGarbageStack > 0) {
-        let offset = Math.min(myGarbageStack, generated);
-        myGarbageStack -= offset;
-        generated -= offset;
-    }
-    pendingGarbageToOpponent += generated;
-
-    let erased = [];
     groups.forEach(({ group }) => {
         group.forEach(({ x, y }) => {
             board[y][x] = COLORS.EMPTY;
-            erased.push({ x, y });
         });
     });
-    clearGarbagePuyos(erased);
     
     renderBoard();
     updateUI();
@@ -316,22 +263,11 @@ async function runChain() {
     runChain();
 }
 
-function calculateScore(groups, chain) {
-    let puyos = 0, colors = new Set(), bonus = 0;
-    groups.forEach(({ group, color }) => {
-        puyos += group.length;
-        colors.add(color);
-        bonus += BONUS_TABLE.GROUP[Math.min(group.length, 15)] || 0;
-    });
-    bonus += BONUS_TABLE.CHAIN[Math.min(chain, 19)] || 0;
-    bonus += BONUS_TABLE.COLOR[Math.min(colors.size, 5)] || 0;
-    return (10 * puyos) * Math.max(1, bonus);
-}
-
 function updateUI() {
     const s = document.getElementById('score'), c = document.getElementById('chain-count');
     if (s) s.textContent = score;
     if (c) c.textContent = chainCount;
+    // スタック数値表示用 (online.js側で作成された要素を更新)
     const g = document.getElementById('my-garbage-stack-val');
     if (g) g.textContent = myGarbageStack;
     updateHistoryButtons();
@@ -341,11 +277,7 @@ function updateUI() {
 function checkMobileControlsVisibility() {
     const mobileControls = document.getElementById('mobile-controls');
     if (!mobileControls) return;
-    if (gameState === 'playing') {
-        mobileControls.style.display = 'flex';
-    } else {
-        mobileControls.style.display = 'none';
-    }
+    mobileControls.style.display = (gameState === 'playing') ? 'flex' : 'none';
 }
 
 // ---------- 入力・操作 ----------
@@ -452,32 +384,24 @@ function findConnectedPuyos() {
     }
     return groups;
 }
-function clearGarbagePuyos(erased) {
-    erased.forEach(c => {
-        [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}].forEach(d => {
-            let nx = c.x+d.x, ny = c.y+d.y;
-            if (nx>=0 && nx<WIDTH && ny>=0 && ny<HEIGHT && board[ny][nx]===COLORS.GARBAGE) board[ny][nx]=COLORS.EMPTY;
-        });
-    });
-}
 
 // 履歴・リセット
 window.undoMove = function() {
     if (historyStack.length <= 1) return;
     redoStack.push(historyStack.pop());
     const s = historyStack[historyStack.length - 1];
-    board = s.board.map(r=>[...r]); score = s.score; myGarbageStack = s.myGarbageStack; queueIndex = s.queueIndex;
+    board = s.board.map(r=>[...r]); score = s.score; queueIndex = s.queueIndex;
     gameState = 'playing'; generateNewPuyo(); renderBoard(); updateUI();
 };
 window.redoMove = function() {
     if (redoStack.length === 0) return;
     const s = redoStack.pop(); historyStack.push(s);
-    board = s.board.map(r=>[...r]); score = s.score; myGarbageStack = s.myGarbageStack; queueIndex = s.queueIndex;
+    board = s.board.map(r=>[...r]); score = s.score; queueIndex = s.queueIndex;
     gameState = 'playing'; generateNewPuyo(); renderBoard(); updateUI();
 };
 window.resetGame = function() { stopChain(); initializeGame(); };
 function saveState(c) {
-    historyStack.push({board: board.map(r=>[...r]), score, myGarbageStack, queueIndex});
+    historyStack.push({board: board.map(r=>[...r]), score, queueIndex});
     if (historyStack.length > MAX_HISTORY_SIZE) historyStack.shift();
     if (c) redoStack = [];
 }
@@ -490,9 +414,6 @@ function startPuyoDropLoop() { clearInterval(dropTimer); dropTimer = setInterval
 window.toggleAutoDrop = function() { autoDropEnabled = !autoDropEnabled; startPuyoDropLoop(); updateUI(); };
 window.raisePuyoOneRow = function() { if (gameState === 'playing' && movePuyo(0, 1)) renderBoard(); };
 
-window.receiveGarbage = function(amount) { myGarbageStack += amount; updateUI(); };
-
-// エディットモード簡易対応
 window.toggleMode = function() {
     gameState = (gameState === 'editing') ? 'playing' : 'editing';
     const panel = document.getElementById('info-panel');
