@@ -1,4 +1,4 @@
-// ぷよぷよシミュレーションシステム (v6: おじゃまぷよ・相殺・テトリス2準拠)
+// ぷよぷよシミュレーター (v7: バックアップ完全復元 + おじゃま・相殺システム)
 
 // 盤面サイズ
 const WIDTH = 6;
@@ -50,7 +50,7 @@ const MAX_HISTORY_SIZE = 300;
 // 落下・連鎖設定
 let dropInterval = 1000;
 let dropTimer = null;
-let autoDropEnabled = false;
+let autoDropEnabled = true;
 let gravityWaitTime = 300;
 let chainWaitTime = 300;
 
@@ -92,7 +92,7 @@ function consumeNextPair() {
     return nextQueue[queueIndex++];
 }
 
-// ---------- DOM 初期化 / 描画 ----------
+// ---------- DOM 初期化 / 描画 (バックアップ完全復元) ----------
 function createBoardDOM() {
     const boardElement = document.getElementById('puyo-board');
     if (!boardElement) return;
@@ -163,6 +163,23 @@ function renderPlayNextPuyo() {
     };
     draw(n1, nextQueue[queueIndex]);
     draw(n2, nextQueue[queueIndex+1]);
+}
+
+function renderEditNextPuyos() {
+    // 編集モード用のネクスト表示
+    for (let i = 1; i <= 2; i++) {
+        const el = document.getElementById(`edit-next-${i}`);
+        if (!el) continue;
+        el.innerHTML = '';
+        const pair = editingNextPuyos[i-1];
+        if (pair) {
+            [pair[1], pair[0]].forEach(c => {
+                const p = document.createElement('div');
+                p.className = `puyo puyo-${c}`;
+                el.appendChild(p);
+            });
+        }
+    }
 }
 
 // ---------- ゲームロジック ----------
@@ -315,9 +332,20 @@ function updateUI() {
     const s = document.getElementById('score'), c = document.getElementById('chain-count');
     if (s) s.textContent = score;
     if (c) c.textContent = chainCount;
-    const g = document.getElementById('my-garbage-stack');
+    const g = document.getElementById('my-garbage-stack-val');
     if (g) g.textContent = myGarbageStack;
     updateHistoryButtons();
+    checkMobileControlsVisibility();
+}
+
+function checkMobileControlsVisibility() {
+    const mobileControls = document.getElementById('mobile-controls');
+    if (!mobileControls) return;
+    if (gameState === 'playing') {
+        mobileControls.style.display = 'flex';
+    } else {
+        mobileControls.style.display = 'none';
+    }
 }
 
 // ---------- 入力・操作 ----------
@@ -474,3 +502,5 @@ window.toggleMode = function() {
 };
 
 window.addEventListener('load', initializeGame);
+function getRandomColor() { return Math.floor(Math.random() * 4) + 1; }
+function getRandomPair() { return [getRandomColor(), getRandomColor()]; }
