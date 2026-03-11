@@ -1,4 +1,4 @@
-/* online.js (v7: 既存UI完全保護・CSS干渉排除) */
+/* online.js (バックアップ復元版 + おじゃまスタック表示欄のみ追加) */
 (function() {
     let peer = null;
     let conn = null;
@@ -13,13 +13,12 @@
     
     let oppScore = 0;
     let oppChainCount = 0;
-    let oppGarbageStack = 0;
+    let oppGarbageStack = 0; // 追加
 
     let monitorInterval = null;
     let lastBoardJson = "";
     let lastGameState = "";
 
-    // UI初期化：既存のHTMLを一切破壊せず、必要な要素のみを「追加」する
     function initOnlineUI() {
         // 1. オーバーレイ（オンライン設定用）
         if (!document.getElementById('online-overlay')) {
@@ -56,7 +55,7 @@
             document.body.appendChild(proposalOverlay);
         }
 
-        // 3. 情報パネルへのおじゃま・対戦情報追加
+        // 3. 情報パネルへの対戦情報・おじゃまスタック欄の追加
         const infoPanel = document.getElementById('info-panel');
         if (infoPanel && !document.getElementById('online-stats-container')) {
             const statsContainer = document.createElement('div');
@@ -67,6 +66,7 @@
                     <span style="font-size: 0.8em; color: #aaa;">勝利数</span>
                     <span id="win-count-display" style="font-weight: bold; color: #f1c40f; font-size: 1.1em;">0 - 0</span>
                 </div>
+                <!-- 自分のおじゃまスタック表示欄 -->
                 <div id="my-garbage-info" style="text-align: center; margin-bottom: 10px;">
                     <div style="font-size: 0.75em; color: #888; margin-bottom: 2px;">自分のおじゃま</div>
                     <div id="my-garbage-stack-val" style="font-weight: bold; color: #e74c3c; font-size: 1.2em; font-family: monospace;">0</div>
@@ -74,6 +74,7 @@
                 <div id="opponent-section" style="border-top: 1px solid #333; padding-top: 10px;">
                     <h3 style="font-size: 0.8em; color: #aaa; margin: 0 0 8px 0; text-align: center;">相手の盤面</h3>
                     <div id="opponent-board" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: #000; border: 1px solid #444; width: 90px; height: 210px; margin: 0 auto;"></div>
+                    <!-- 相手のおじゃまスタック表示欄 -->
                     <div style="text-align: center; margin-top: 8px;">
                         <div style="font-size: 0.75em; color: #888; margin-bottom: 2px;">相手のおじゃま</div>
                         <div id="opp-garbage-stack" style="font-weight: bold; color: #e74c3c; font-size: 1.1em; font-family: monospace;">0</div>
@@ -165,12 +166,10 @@
             case 'ACCEPT_MATCH': startMatch(data.winTarget); break;
             case 'BOARD_UPDATE':
                 updateOpponentBoard(data.board, data.currentPuyo, data.gameState);
+                // 相手のおじゃまスタック数値を受信
                 oppGarbageStack = data.garbageStack || 0;
                 const oppStackEl = document.getElementById('opp-garbage-stack');
                 if (oppStackEl) oppStackEl.textContent = oppGarbageStack;
-                break;
-            case 'RECEIVE_GARBAGE':
-                if (window.receiveGarbage) window.receiveGarbage(data.amount);
                 break;
             case 'SYNC_NEXT':
                 if (typeof nextQueue !== 'undefined') {
@@ -256,6 +255,7 @@
             if (typeof board !== 'undefined') {
                 const currentBoardJson = JSON.stringify(board);
                 const currentPuyoJson = typeof currentPuyo !== 'undefined' ? JSON.stringify(currentPuyo) : "null";
+                // おじゃまスタックも監視対象に含める
                 const currentGarbage = typeof myGarbageStack !== 'undefined' ? myGarbageStack : 0;
                 const currentState = typeof gameState !== 'undefined' ? gameState : 'playing';
 
@@ -280,14 +280,9 @@
             board: board,
             currentPuyo: typeof currentPuyo !== 'undefined' ? currentPuyo : null,
             gameState: typeof gameState !== 'undefined' ? gameState : 'playing',
+            // 自分のおじゃまスタック数値を送信
             garbageStack: typeof myGarbageStack !== 'undefined' ? myGarbageStack : 0
         });
-    };
-
-    window.sendGarbage = function(amount) {
-        if (isMatchActive && conn && conn.open) {
-            conn.send({ type: 'RECEIVE_GARBAGE', amount: amount });
-        }
     };
 
     window.notifyGameOver = function() {
