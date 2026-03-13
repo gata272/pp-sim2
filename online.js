@@ -358,6 +358,16 @@
         
         // 盤面監視を開始
         startMonitoring();
+        window.alert = function(message) {
+            if (window.isMatchActive) {
+                console.log("オンライン対戦中のアラートを抑制: " + message);
+            } else {
+                // 対戦中でなければ通常のアラートを出す（念のため）
+                const originalAlert = window.originalAlert || alert;
+                originalAlert(message);
+            }
+        };
+
     }
 
     // --- 盤面監視ロジック (puyoSim.js を変更しないための追加) ---
