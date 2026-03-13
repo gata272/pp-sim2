@@ -976,7 +976,14 @@ async function runChain() {
         const isGameOver = board[gameOverLineY][checkX] !== COLORS.EMPTY;
         if (isGameOver) {
             gameState = 'gameover';
-            alert('ゲームオーバーです！');
+            if (window.isMatchActive) {
+                console.log('オンライン対戦中のゲームオーバーを検知しました。');
+                if (typeof window.notifyGameOverToOpponent === 'function') {
+                    window.notifyGameOverToOpponent();
+                }
+            } else {
+                alert('ゲームオーバーです！');
+            }
             clearInterval(dropTimer);
             updateUI();
             renderBoard();
