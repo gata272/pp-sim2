@@ -536,6 +536,10 @@
         document.body.classList.remove('online-match-active');
         const surrenderBtn = document.getElementById('surrender-button');
         if (surrenderBtn) surrenderBtn.style.display = 'none';
+        if (window.originalAlert) {
+            window.alert = window.originalAlert;
+        }
+
     }
 
     // puyoSim.js から呼ばれることを期待されている関数の代替実装
