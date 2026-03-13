@@ -1,15 +1,13 @@
-// online.js
+/* online.js (新バージョン puyoSim.js 対応版) */
 (function() {
     let peer = null;
     let conn = null;
-    let myId = "";
+    let myId = '';
     let isHost = false;
     let winTarget = 0;  // 何本先取か
     let myWins = 0;
     let oppWins = 0;
     let isMatchActive = false;
-    let originalAlert = window.alert; // 元のalert関数を保存
-
     let peerInitialized = false;
     let peerInitializing = false;
     let reconnectAttempts = 0;
@@ -24,18 +22,7 @@
     let lastGameState = "";
     let monitorInterval = null;
 
-    // puyoSim.js から参照されるグローバル変数
-    window.isMatchActive = false; 
-
-    // ゲームオーバー時にpuyoSim.jsから呼び出される関数
-    window.notifyGameOverToOpponent = function() {
-        if (conn && conn.open && window.isMatchActive) {
-            conn.send({ type: 'GAME_OVER' });
-            console.log('自分：ゲームオーバーを相手に通知しました。');
-            endRound(false); // 自分がゲームオーバーなので敗北
-        }
-    };
-
+    // グローバル関数
     window.showOnlineOverlay = function() {
         const overlay = document.getElementById('online-overlay');
         if (overlay) {
@@ -270,228 +257,242 @@
             window.hideOnlineOverlay();
             document.getElementById('online-status').textContent = '接続済み';
             if (isHost) showMatchProposal();
-            // 対戦中の盤面状態を監視し、相手に送信
-            startMonitor();
+            // 対戦中であれば監視を開始
+            startMonitoring();
         });
-        conn.on('data', (data) => {
-            handleReceivedData(data);
-        });
+        conn.on('data', (data) => { handleReceivedData(data); });
         conn.on('close', () => {
-            console.log('相手との接続が切れました。');
-            document.getElementById('online-status').textContent = '切断されました';
-            stopMonitor();
-            if (isMatchActive) {
-                showMatchResult('相手が切断しました。');
-                endMatch();
-            }
+            alert('対戦相手との接続が切れました。');
+            endMatch();
         });
         conn.on('error', (err) => {
-            console.error('Connection Error:', err);
-            document.getElementById('online-status').textContent = `接続エラー: ${err.type}`;
-            stopMonitor();
-            if (isMatchActive) {
-                showMatchResult('接続エラーが発生しました。');
-                endMatch();
-            }
+            alert('接続エラーが発生しました: ' + err.type);
         });
-    }
-
-    function startMonitor() {
-        if (monitorInterval) clearInterval(monitorInterval);
-        monitorInterval = setInterval(() => {
-            if (conn && conn.open && window.isMatchActive) {
-                // puyoSim.js の現在の盤面と状態を取得
-                // puyoSim.js の変数がグローバルスコープにあることを前提とする
-                const currentBoard = window.board; 
-                const currentNextQueue = window.nextQueue; 
-                const currentQueueIndex = window.queueIndex; 
-                const currentScore = window.score; 
-                const currentChainCount = window.chainCount; 
-                const currentGameState = window.gameState; 
-
-                const boardJson = JSON.stringify(currentBoard);
-                // gameStateがplayingまたはchainingの場合のみ送信
-                if (boardJson !== lastBoardJson || currentGameState !== lastGameState) {
-                    conn.send({
-                        type: 'BOARD_UPDATE',
-                        board: currentBoard,
-                        nextQueue: currentNextQueue,
-                        queueIndex: currentQueueIndex,
-                        score: currentScore,
-                        chainCount: currentChainCount,
-                        gameState: currentGameState
-                    });
-                    lastBoardJson = boardJson;
-                    lastGameState = currentGameState;
-                }
-            }
-        }, 100); // 100msごとに監視
-    }
-
-    function stopMonitor() {
-        if (monitorInterval) {
-            clearInterval(monitorInterval);
-            monitorInterval = null;
-        }
     }
 
     function handleReceivedData(data) {
-        switch (data.type) {
+        switch(data.type) {
+            case 'PROPOSE_MATCH': showApprovalUI(data.winTarget); break;
+            case 'ACCEPT_MATCH': startMatch(data.winTarget); break;
             case 'BOARD_UPDATE':
-                renderOpponentBoard(data.board);
-                oppScore = data.score;
-                oppChainCount = data.chainCount;
-                updateOpponentUI();
+                updateOpponentBoard(data.board, data.currentPuyo, data.gameState);
+                oppScore = data.score || 0;
+                oppChainCount = data.chainCount || 0;
+                updateOpponentInfo();
                 break;
-            case 'PROPOSE_MATCH':
-                showMatchProposal(data.winTarget, conn.peer);
+            case 'SYNC_NEXT': 
+                if (window.setNextPuyos) {
+                    window.setNextPuyos(data.nextPuyos);
+                } else if (typeof nextQueue !== 'undefined') {
+                    // puyoSim.js に setNextPuyos がない場合の直接更新
+                    nextQueue = JSON.parse(JSON.stringify(data.nextPuyos));
+                    queueIndex = 0;
+                    if (window.renderBoard) window.renderBoard();
+                }
                 break;
-            case 'ACCEPT_MATCH':
-                startMatch(data.winTarget);
-                break;
-            case 'GAME_OVER':
-                console.log('相手：ゲームオーバーを通知されました。');
-                endRound(true); // 相手がゲームオーバーなので勝利
+            case 'OPPONENT_LOST':
+                endMatchWithWinner(true);
                 break;
             case 'OPPONENT_SURRENDERED':
-                showMatchResult('相手が降参しました！');
+                showMatchResult('シリーズ勝利！');
                 endMatch();
                 break;
-            case 'ROUND_START':
-                console.log('相手からラウンド開始通知を受信しました。');
-                // puyoSim.js の初期化関数を呼び出す
-                if (typeof window.initializeGame === 'function') window.initializeGame();
-                if (typeof window.generateNewPuyo === 'function') window.generateNewPuyo();
-                if (typeof window.startPuyoDropLoop === 'function') window.startPuyoDropLoop();
-                break;
         }
     }
 
-    function renderOpponentBoard(boardData) {
-        for (let y = 0; y < 14; y++) {
-            for (let x = 0; x < 6; x++) {
-                const cellElement = document.getElementById(`opp-cell-${x}-${y}`);
-                if (cellElement) {
-                    const puyoElement = cellElement.firstChild;
-                    const color = boardData[y][x];
-                    puyoElement.className = 'puyo puyo-' + color;
-                }
-            }
-        }
-    }
-
-    function updateOpponentUI() {
-        document.getElementById('opp-score').textContent = oppScore;
-        document.getElementById('opp-chain').textContent = oppChainCount;
-    }
-
-    function showMatchProposal(winTarget = 0, opponentId = '') {
+    function showMatchProposal() {
         const overlay = document.getElementById('match-proposal-overlay');
-        if (overlay) {
-            overlay.style.display = 'flex';
-            if (winTarget > 0) {
-                // 相手からの提案
-                document.getElementById('proposal-title').textContent = '対戦の提案';
-                document.getElementById('proposal-content').innerHTML = `<p>相手 (${opponentId}) から ${winTarget}本先取の対戦が提案されました。</p>`;
-                document.getElementById('proposal-actions').innerHTML = `
-                    <button class="online-btn" onclick="acceptMatch(${winTarget})">承認</button>
-                    <button class="online-btn secondary" onclick="rejectMatch()">拒否</button>
-                `;
-            } else {
-                // 自分の提案UI
-                document.getElementById('proposal-title').textContent = '対戦を提案';
-                document.getElementById('proposal-content').innerHTML = `
-                    <p>何本先取にしますか？</p>
-                    <select id="match-win-target-select">
-                        <option value="1">1本先取</option>
-                        <option value="3">3本先取</option>
-                        <option value="5">5本先取</option>
-                    </select>
-                `;
-                document.getElementById('proposal-actions').innerHTML = `
-                    <button class="online-btn" onclick="proposeMatch()">提案する</button>
-                    <button class="online-btn secondary" onclick="rejectMatch()">キャンセル</button>
-                `;
-            }
-        }
+        const content = document.getElementById('proposal-content');
+        const actions = document.getElementById('proposal-actions');
+        if (!overlay) return;
+        overlay.style.display = 'flex';
+        document.getElementById('proposal-title').textContent = '対戦設定';
+        content.innerHTML = `
+            <p>何本先取にしますか？</p>
+            <select id="match-win-target-select" style="width: 100%; padding: 10px; margin-bottom: 10px; background: #222; color: white; border: 1px solid #444; border-radius: 5px;">
+                ${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}">${n}本先取</option>`).join('')}
+            </select>
+        `;
+        actions.innerHTML = `
+            <button class="online-btn" onclick="proposeMatch()">提案を送る</button>
+            <button class="online-btn secondary" onclick="hideOnlineOverlay()">キャンセル</button>
+        `;
     }
 
-    function showMatchResult(message) {
-        const overlay = document.getElementById('match-result-overlay');
-        if (overlay) {
-            overlay.style.display = 'flex';
-            document.getElementById('result-title').textContent = '対戦結果';
-            document.getElementById('result-content').textContent = message;
-            document.getElementById('result-actions').innerHTML = `
-                <button class="online-btn" onclick="hideMatchResult()">閉じる</button>
-            `;
-        }
-    }
-
-    window.hideMatchResult = function() {
-        const overlay = document.getElementById('match-result-overlay');
-        if (overlay) overlay.style.display = 'none';
-    };
-
-    function updateWinCountDisplay() {
-        document.getElementById('win-count-display').textContent = `${myWins} - ${oppWins}`;
+    function showApprovalUI(target) {
+        const overlay = document.getElementById('match-proposal-overlay');
+        const content = document.getElementById('proposal-content');
+        const actions = document.getElementById('proposal-actions');
+        if (!overlay) return;
+        overlay.style.display = 'flex';
+        document.getElementById('proposal-title').textContent = '対戦の誘い';
+        content.innerHTML = `<p>相手から <strong>${target}本先取</strong> の対戦提案が届きました。</p>`;
+        actions.innerHTML = `
+            <button class="online-btn" onclick="acceptMatch(${target})">承認して開始</button>
+            <button class="online-btn secondary" onclick="rejectMatch()">拒否</button>
+        `;
     }
 
     function startMatch(target) {
         winTarget = target;
         myWins = 0;
         oppWins = 0;
+        oppScore = 0;
+        oppChainCount = 0;
         isMatchActive = true;
-        window.isMatchActive = true; // puyoSim.js から参照されるグローバル変数
+        const proposalOverlay = document.getElementById('match-proposal-overlay');
+        if (proposalOverlay) proposalOverlay.style.display = 'none';
+        document.body.classList.add('online-match-active');
+        ensureSurrenderButton();
+        
+        // puyoSim.js の関数呼び出し（存在する場合のみ）
+        if (window.updateGravityWait) window.updateGravityWait(300);
+        if (window.updateChainWait) window.updateChainWait(300);
+        if (typeof autoDropEnabled !== 'undefined' && !autoDropEnabled) {
+            if (window.toggleAutoDrop) window.toggleAutoDrop();
+        }
+        if (window.resetGame) window.resetGame();
+        
         updateWinCountDisplay();
-        document.getElementById("match-proposal-overlay").style.display = "none";
-        document.getElementById("online-toggle-btn").textContent = "対戦中";
-        document.getElementById("online-toggle-btn").disabled = true;
-        document.getElementById("surrender-button").style.display = "block";
+        if (isHost) setTimeout(() => syncNextPuyos(), 500);
+        
+        // 盤面監視を開始
+        startMonitoring();
+    }
 
-        // puyoSim.js のゲームを初期化
-        if (typeof window.initializeGame === 'function') window.initializeGame();
-        if (typeof window.generateNewPuyo === 'function') window.generateNewPuyo();
-        if (typeof window.startPuyoDropLoop === 'function') window.startPuyoDropLoop();
+    // --- 盤面監視ロジック (puyoSim.js を変更しないための追加) ---
+    function startMonitoring() {
+        if (monitorInterval) clearInterval(monitorInterval);
+        lastBoardJson = "";
+        lastGameState = "";
+        monitorInterval = setInterval(() => {
+            if (!isMatchActive || !conn || !conn.open) {
+                clearInterval(monitorInterval);
+                return;
+            }
 
-        // online.js 側の初期化
-        if (isHost) {
-            setTimeout(() => syncNextPuyos(), 500); // ホストがNEXTを同期
+            // 1. 盤面データの変化を監視して送信
+            if (typeof board !== 'undefined') {
+                const currentBoardJson = JSON.stringify(board);
+                const currentPuyoJson = typeof currentPuyo !== 'undefined' ? JSON.stringify(currentPuyo) : "null";
+                const currentScore = typeof score !== 'undefined' ? score : 0;
+                const currentChain = typeof chainCount !== 'undefined' ? chainCount : 0;
+                const currentState = typeof gameState !== 'undefined' ? gameState : 'playing';
+
+                // 盤面、操作ぷよ、スコア、連鎖、状態のいずれかが変わったら送信
+                const combinedState = currentBoardJson + currentPuyoJson + currentScore + currentChain + currentState;
+                
+                if (combinedState !== lastBoardJson) {
+                    window.sendBoardData();
+                    lastBoardJson = combinedState;
+                }
+
+                // 2. ゲームオーバーを検知して通知
+                if (currentState === 'gameover' && lastGameState !== 'gameover') {
+                    window.notifyGameOver();
+                }
+                lastGameState = currentState;
+            }
+        }, 100); // 100ms ごとにチェック
+    }
+
+    function ensureSurrenderButton() {
+        let surrenderBtn = document.getElementById('surrender-button');
+        if (!surrenderBtn) {
+            const playControls = document.getElementById('play-controls');
+            if (playControls) {
+                surrenderBtn = document.createElement('button');
+                surrenderBtn.id = 'surrender-button';
+                surrenderBtn.onclick = window.surrenderMatch;
+                surrenderBtn.style.cssText = 'width: 100%; padding: 8px; border: none; border-radius: 5px; font-size: 0.85em; font-weight: bold; background-color: #d9534f; color: white; margin-top: 5px; display: none;';
+                surrenderBtn.textContent = '降参';
+                playControls.appendChild(surrenderBtn);
+            }
+        }
+        if (surrenderBtn) surrenderBtn.style.display = 'block';
+    }
+
+    function updateWinCountDisplay() {
+        const winDisplay = document.getElementById('win-count-display');
+        if (winDisplay) {
+            winDisplay.textContent = `${myWins} - ${oppWins}`;
+        }
+    }
+
+    function syncNextPuyos() {
+        // 新バージョンの nextQueue を優先的に参照
+        let currentNext = null;
+        if (typeof nextQueue !== 'undefined') {
+            currentNext = nextQueue;
+        } else if (typeof nextPuyoColors !== 'undefined') {
+            currentNext = nextPuyoColors;
         }
 
-        // online.js 側のUI更新
-        document.getElementById("online-status").textContent = "対戦中";
+        if (currentNext && conn && conn.open) {
+            conn.send({ type: 'SYNC_NEXT', nextPuyos: currentNext });
+        }
+    }
 
-        // alertを一時的に上書き
-        window.alert = function(message) {
-            if (window.isMatchActive) {
-                console.log("オンライン対戦中のアラートを抑制: " + message);
-                // ここでアラートの代わりに、ゲーム内メッセージ表示などの処理を追加することも可能
-            } else {
-                originalAlert(message);
+    window.sendBoardData = function() {
+        if (!isMatchActive || !conn || !conn.open) return;
+        try {
+            if (typeof board !== 'undefined') {
+                conn.send({
+                    type: 'BOARD_UPDATE',
+                    board: board,
+                    currentPuyo: typeof currentPuyo !== 'undefined' ? currentPuyo : null,
+                    gameState: typeof gameState !== 'undefined' ? gameState : 'playing',
+                    score: typeof score !== 'undefined' ? score : 0,
+                    chainCount: typeof chainCount !== 'undefined' ? chainCount : 0
+                });
             }
-        };
+        } catch (err) { console.error('Failed to send board data:', err); }
+    };
+
+    window.notifyGameOver = function() {
+        if (isMatchActive && conn && conn.open) {
+            conn.send({ type: 'OPPONENT_LOST' });
+            endMatchWithWinner(false);
+        }
+    };
+
+    function updateOpponentBoard(oppBoard, oppCurrentPuyo, oppGameState) {
+        for (let y = 0; y < 14; y++) {
+            for (let x = 0; x < 6; x++) {
+                const cell = document.getElementById(`opp-cell-${x}-${y}`);
+                if (!cell) continue;
+                const puyo = cell.firstChild;
+                if (!puyo) continue;
+                let color = oppBoard[y][x];
+                if (oppGameState === 'playing' && oppCurrentPuyo) {
+                    const { mainX, mainY, rotation, mainColor, subColor } = oppCurrentPuyo;
+                    let subX = mainX, subY = mainY;
+                    if (rotation === 0) subY = mainY + 1;
+                    if (rotation === 1) subX = mainX - 1;
+                    if (rotation === 2) subY = mainY - 1;
+                    if (rotation === 3) subX = mainX + 1;
+                    if ((x === mainX && y === mainY)) color = mainColor;
+                    if ((x === subX && y === subY)) color = subColor;
+                }
+                puyo.className = `puyo puyo-${color}`;
+            }
+        }
     }
 
-    function endMatch() {
-        isMatchActive = false;
-        window.isMatchActive = false;
-        document.getElementById("online-toggle-btn").textContent = "対戦";
-        document.getElementById("online-toggle-btn").disabled = false;
-        document.getElementById("surrender-button").style.display = "none";
-        stopMonitor();
-        // alertを元に戻す
-        window.alert = originalAlert;
+    function updateOpponentInfo() {
+        const scoreSpan = document.getElementById('opp-score');
+        const chainSpan = document.getElementById('opp-chain');
+        if (scoreSpan) scoreSpan.textContent = oppScore;
+        if (chainSpan) chainSpan.textContent = oppChainCount;
     }
 
-    function endRound(isWinner) {
-        if (isWinner) {
+    function endMatchWithWinner(iWon) {
+        if (iWon) {
             myWins++;
         } else {
             oppWins++;
         }
         updateWinCountDisplay();
-
         if (myWins >= winTarget) {
             showMatchResult('シリーズ勝利！');
             endMatch();
@@ -499,22 +500,53 @@
             showMatchResult('シリーズ敗北...');
             endMatch();
         } else {
-            // 次のラウンドへ
-            console.log('次のラウンドを開始します。');
-            // puyoSim.js の初期化関数を呼び出す
-            if (typeof window.initializeGame === 'function') window.initializeGame();
-            if (typeof window.generateNewPuyo === 'function') window.generateNewPuyo();
-            if (typeof window.startPuyoDropLoop === 'function') window.startPuyoDropLoop();
-            // 必要に応じて、オンライン対戦用の初期化処理を追加
-            if (conn && conn.open) {
-                conn.send({ type: 'ROUND_START' });
-            }
+            setTimeout(() => {
+                if (window.resetGame) window.resetGame();
+                if (isHost) setTimeout(() => syncNextPuyos(), 500);
+            }, 2000);
         }
     }
 
-    // DOMContentLoadedでUI初期化
-    document.addEventListener('DOMContentLoaded', () => {
-        initOnlineUI();
-    });
+    function showMatchResult(message) {
+        const overlay = document.getElementById('match-result-overlay');
+        const content = document.getElementById('result-content');
+        const actions = document.getElementById('result-actions');
+        if (!overlay) return;
+        overlay.style.display = 'flex';
+        content.innerHTML = `
+            <p>${message}</p>
+            <p style="font-size: 1.2em; margin-top: 10px;">最終スコア: ${myWins} - ${oppWins}</p>
+        `;
+        actions.innerHTML = `<button class="online-btn" onclick="location.reload()">終了</button>`;
+    }
 
+    function endMatch() {
+        isMatchActive = false;
+        if (monitorInterval) clearInterval(monitorInterval);
+        document.body.classList.remove('online-match-active');
+        const surrenderBtn = document.getElementById('surrender-button');
+        if (surrenderBtn) surrenderBtn.style.display = 'none';
+    }
+
+    // puyoSim.js から呼ばれることを期待されている関数の代替実装
+    window.setNextPuyos = function(newNext) {
+        if (typeof nextQueue !== 'undefined') {
+            nextQueue = JSON.parse(JSON.stringify(newNext));
+            queueIndex = 0;
+            if (window.renderBoard) window.renderBoard();
+        } else if (typeof nextPuyoColors !== 'undefined') {
+            nextPuyoColors = JSON.parse(JSON.stringify(newNext));
+            if (window.renderBoard) window.renderBoard();
+        }
+    };
+
+    function autoInitPeer() {
+        if (!peerInitialized && !peerInitializing) initPeer();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => { initOnlineUI(); autoInitPeer(); });
+    } else {
+        initOnlineUI(); autoInitPeer();
+    }
 })();
