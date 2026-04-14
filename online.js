@@ -4,20 +4,25 @@
     let conn = null;
     let myId = '';
     let isHost = false;
-    let winTarget = 0;  // 何本先取か
+
+    let winTarget = 0;
     let myWins = 0;
     let oppWins = 0;
     let isMatchActive = false;
+
     let peerInitialized = false;
     let peerInitializing = false;
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 3;
-    
-    // 相手の情報
+
     let oppScore = 0;
     let oppChainCount = 0;
+    let oppOjamaPending = 0;
 
-    // グローバル関数
+    let boardSyncTimer = null;
+    const BOARD_SYNC_INTERVAL = 100;
+
+    // ---------- UI ----------
     window.showOnlineOverlay = function() {
         const overlay = document.getElementById('online-overlay');
         if (overlay) {
@@ -36,11 +41,17 @@
     };
 
     window.proposeMatch = function() {
-        const count = parseInt(document.getElementById('match-win-target-select').value);
+        const select = document.getElementById('match-win-target-select');
+        const count = parseInt(select ? select.value : '1', 10);
+
         if (conn && conn.open) {
             conn.send({ type: 'PROPOSE_MATCH', winTarget: count });
-            document.getElementById('proposal-content').innerHTML = `<p>${count}本先取の提案を送信しました。相手の承認を待っています...</p>`;
-            document.getElementById('proposal-actions').innerHTML = '';
+            const content = document.getElementById('proposal-content');
+            const actions = document.getElementById('proposal-actions');
+            if (content) {
+                content.innerHTML = `<p>${count}本先取の提案を送信しました。相手の承認を待っています...</p>`;
+            }
+            if (actions) actions.innerHTML = '';
         }
     };
 
@@ -52,16 +63,19 @@
     };
 
     window.rejectMatch = function() {
-        document.getElementById('match-proposal-overlay').style.display = 'none';
+        const overlay = document.getElementById('match-proposal-overlay');
+        if (overlay) overlay.style.display = 'none';
     };
 
     window.connectToOpponent = function() {
-        const targetId = document.getElementById('opponent-id-input').value.trim();
+        const input = document.getElementById('opponent-id-input');
+        const targetId = input ? input.value.trim() : '';
+
         if (!targetId) {
             alert('相手のIDを入力してください');
             return;
         }
-        
+
         if (!peer || !myId) {
             alert('PeerJSがまだ初期化されていません。少々お待ちください。');
             return;
@@ -72,7 +86,9 @@
             return;
         }
 
-        document.getElementById('online-status').textContent = '接続中...';
+        const status = document.getElementById('online-status');
+        if (status) status.textContent = '接続中...';
+
         reconnectAttempts = 0;
         attemptConnection(targetId);
     };
@@ -81,31 +97,13 @@
         if (isMatchActive && conn && conn.open) {
             if (confirm('対戦を降参しますか？（シリーズ敗北となります）')) {
                 conn.send({ type: 'OPPONENT_SURRENDERED' });
-                // 降参した側は即座にシリーズ敗北
                 showMatchResult('シリーズ敗北...');
                 endMatch();
             }
         }
     };
 
-    function attemptConnection(targetId) {
-        try {
-            conn = peer.connect(targetId, { reliable: true });
-            setupConnection();
-            isHost = false;
-        } catch (err) {
-            console.error('Connection attempt failed:', err);
-            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                reconnectAttempts++;
-                document.getElementById('online-status').textContent = `接続中... (再試行 ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`;
-                setTimeout(() => attemptConnection(targetId), 1000);
-            } else {
-                document.getElementById('online-status').textContent = '接続失敗。もう一度お試しください。';
-                alert('接続に失敗しました。相手のIDが正しいか確認してください。');
-            }
-        }
-    }
-
+    // ---------- DOM ----------
     function initOnlineUI() {
         if (!document.getElementById('online-overlay')) {
             const overlay = document.createElement('div');
@@ -176,6 +174,7 @@
                     <div id="opponent-info" style="margin-top: 8px; display: flex; justify-content: space-around; font-size: 0.85em; color: #aaa;">
                         <div>スコア: <span id="opp-score">0</span></div>
                         <div>連鎖: <span id="opp-chain">0</span></div>
+                        <div>おじゃま: <span id="opp-ojama">0</span></div>
                     </div>
                 `;
                 playStatsInfo.appendChild(oppContainer);
@@ -200,9 +199,11 @@
         }
     }
 
+    // ---------- Peer ----------
     function initPeer() {
         if (peerInitialized || peerInitializing) return;
         peerInitializing = true;
+
         try {
             peer = new Peer({
                 debug: 0,
@@ -214,41 +215,55 @@
                     ]
                 }
             });
+
             peer.on('open', (id) => {
                 myId = id;
                 peerInitialized = true;
                 peerInitializing = false;
-                document.getElementById('my-peer-id').textContent = id;
-                document.getElementById('online-status').textContent = '接続待機中...';
+
+                const idEl = document.getElementById('my-peer-id');
+                if (idEl) idEl.textContent = id;
+
+                const status = document.getElementById('online-status');
+                if (status) status.textContent = '接続待機中...';
             });
+
             peer.on('connection', (connection) => {
                 if (conn && conn.open) {
                     connection.close();
                     return;
                 }
+
                 conn = connection;
                 setupConnection();
                 isHost = true;
                 showMatchProposal();
             });
+
             peer.on('error', (err) => {
                 console.error('PeerJS Error:', err);
                 peerInitializing = false;
+
+                const status = document.getElementById('online-status');
                 if (err.type === 'unavailable-id') {
-                    document.getElementById('online-status').textContent = 'IDの生成に失敗しました。';
+                    if (status) status.textContent = 'IDの生成に失敗しました。';
                 } else if (err.type === 'disconnected') {
-                    document.getElementById('online-status').textContent = 'サーバーから切断されました。再接続中...';
+                    if (status) status.textContent = 'サーバーから切断されました。再接続中...';
                     setTimeout(() => { if (!peerInitialized) initPeer(); }, 2000);
                 } else if (err.type === 'network') {
-                    document.getElementById('online-status').textContent = 'ネットワークエラーが発生しました。';
+                    if (status) status.textContent = 'ネットワークエラーが発生しました。';
                 } else {
-                    document.getElementById('online-status').textContent = `エラー: ${err.type}`;
+                    if (status) status.textContent = `エラー: ${err.type}`;
                 }
             });
+
             peer.on('disconnected', () => {
                 peerInitialized = false;
-                document.getElementById('online-status').textContent = 'サーバーから切断されました。再接続中...';
-                setTimeout(() => { if (!peerInitialized && peer) peer.reconnect(); }, 2000);
+                const status = document.getElementById('online-status');
+                if (status) status.textContent = 'サーバーから切断されました。再接続中...';
+                setTimeout(() => {
+                    if (!peerInitialized && peer) peer.reconnect();
+                }, 2000);
             });
         } catch (err) {
             console.error('Failed to initialize Peer:', err);
@@ -256,53 +271,107 @@
         }
     }
 
+    function attemptConnection(targetId) {
+        try {
+            conn = peer.connect(targetId, { reliable: true });
+            setupConnection();
+            isHost = false;
+        } catch (err) {
+            console.error('Connection attempt failed:', err);
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttempts++;
+                const status = document.getElementById('online-status');
+                if (status) {
+                    status.textContent = `接続中... (再試行 ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`;
+                }
+                setTimeout(() => attemptConnection(targetId), 1000);
+            } else {
+                const status = document.getElementById('online-status');
+                if (status) status.textContent = '接続失敗。もう一度お試しください。';
+                alert('接続に失敗しました。相手のIDが正しいか確認してください。');
+            }
+        }
+    }
+
     function setupConnection() {
         conn.on('open', () => {
             window.hideOnlineOverlay();
-            document.getElementById('online-status').textContent = '接続済み';
+
+            const status = document.getElementById('online-status');
+            if (status) status.textContent = '接続済み';
+
             if (isHost) showMatchProposal();
         });
-        conn.on('data', (data) => { handleReceivedData(data); });
+
+        conn.on('data', (data) => {
+            handleReceivedData(data);
+        });
+
         conn.on('close', () => {
             alert('対戦相手との接続が切れました。');
             endMatch();
             conn = null;
         });
+
         conn.on('error', (err) => {
             alert('接続エラーが発生しました: ' + err.type);
         });
     }
 
     function handleReceivedData(data) {
-        switch(data.type) {
-            case 'PROPOSE_MATCH': showApprovalUI(data.winTarget); break;
-            case 'ACCEPT_MATCH': startMatch(data.winTarget); break;
+        switch (data.type) {
+            case 'PROPOSE_MATCH':
+                showApprovalUI(data.winTarget);
+                break;
+
+            case 'ACCEPT_MATCH':
+                startMatch(data.winTarget);
+                break;
+
             case 'BOARD_UPDATE':
                 updateOpponentBoard(data.board, data.currentPuyo, data.gameState);
                 oppScore = data.score || 0;
                 oppChainCount = data.chainCount || 0;
+                oppOjamaPending = data.ojamaPending || 0;
                 updateOpponentInfo();
                 break;
-            case 'SYNC_NEXT': if (window.setNextPuyos) window.setNextPuyos(data.nextPuyos); break;
+
+            case 'SYNC_NEXT':
+                if (window.setNextQueue) {
+                    window.setNextQueue(data.nextPuyos);
+                }
+                break;
+
+            case 'OJAMA':
+                if (window.addIncomingOjama) {
+                    window.addIncomingOjama(data.amount);
+                } else if (window.receiveOjama) {
+                    window.receiveOjama(data.amount);
+                }
+                break;
+
             case 'OPPONENT_LOST':
-                // 相手が負けた = 自分が勝った
                 endMatchWithWinner(true);
                 break;
+
             case 'OPPONENT_SURRENDERED':
-                // 相手が降参した = 自分がシリーズ勝利
                 showMatchResult('シリーズ勝利！');
                 endMatch();
                 break;
         }
     }
 
+    // ---------- 対戦UI ----------
     function showMatchProposal() {
         const overlay = document.getElementById('match-proposal-overlay');
         const content = document.getElementById('proposal-content');
         const actions = document.getElementById('proposal-actions');
-        if (!overlay) return;
+        const title = document.getElementById('proposal-title');
+
+        if (!overlay || !content || !actions || !title) return;
+
         overlay.style.display = 'flex';
-        document.getElementById('proposal-title').textContent = '対戦設定';
+        title.textContent = '対戦設定';
         content.innerHTML = `
             <p>何本先取にしますか？</p>
             <select id="match-win-target-select" style="width: 100%; padding: 10px; margin-bottom: 10px; background: #222; color: white; border: 1px solid #444; border-radius: 5px;">
@@ -316,9 +385,12 @@
         const overlay = document.getElementById('match-proposal-overlay');
         const content = document.getElementById('proposal-content');
         const actions = document.getElementById('proposal-actions');
-        if (!overlay) return;
+        const title = document.getElementById('proposal-title');
+
+        if (!overlay || !content || !actions || !title) return;
+
         overlay.style.display = 'flex';
-        document.getElementById('proposal-title').textContent = '対戦の誘い';
+        title.textContent = '対戦の誘い';
         content.innerHTML = `<p>相手から <strong>${target}本先取</strong> の対戦提案が届きました。</p>`;
         actions.innerHTML = `
             <button class="online-btn" onclick="acceptMatch(${target})">承認して開始</button>
@@ -332,18 +404,30 @@
         oppWins = 0;
         oppScore = 0;
         oppChainCount = 0;
+        oppOjamaPending = 0;
         isMatchActive = true;
-        document.getElementById('match-proposal-overlay').style.display = 'none';
+
+        const overlay = document.getElementById('match-proposal-overlay');
+        if (overlay) overlay.style.display = 'none';
+
         document.body.classList.add('online-match-active');
         ensureSurrenderButton();
+
         if (window.updateGravityWait) window.updateGravityWait(300);
         if (window.updateChainWait) window.updateChainWait(300);
+
         if (typeof autoDropEnabled !== 'undefined' && !autoDropEnabled) {
             if (window.toggleAutoDrop) window.toggleAutoDrop();
         }
+
         if (window.resetGame) window.resetGame();
+
         updateWinCountDisplay();
-        if (isHost) setTimeout(() => syncNextPuyos(), 500);
+        startBoardSync();
+
+        if (isHost) {
+            setTimeout(() => syncNextPuyos(), 500);
+        }
     }
 
     function ensureSurrenderButton() {
@@ -369,54 +453,31 @@
         }
     }
 
-    function syncNextPuyos() {
-        if (typeof nextPuyoColors !== 'undefined' && conn && conn.open) {
-            conn.send({ type: 'SYNC_NEXT', nextPuyos: nextPuyoColors });
-        }
-    }
-
-    window.sendBoardData = function() {
-        if (!isMatchActive || !conn || !conn.open) return;
-        try {
-            if (typeof board !== 'undefined') {
-                conn.send({
-                    type: 'BOARD_UPDATE',
-                    board: board,
-                    currentPuyo: typeof currentPuyo !== 'undefined' ? currentPuyo : null,
-                    gameState: typeof gameState !== 'undefined' ? gameState : 'playing',
-                    score: typeof score !== 'undefined' ? score : 0,
-                    chainCount: typeof chainCount !== 'undefined' ? chainCount : 0
-                });
-            }
-        } catch (err) { console.error('Failed to send board data:', err); }
-    };
-
-    window.notifyGameOver = function() {
-        if (isMatchActive && conn && conn.open) {
-            conn.send({ type: 'OPPONENT_LOST' });
-            // 自分が負けた = 相手の勝利数を増やす
-            endMatchWithWinner(false);
-        }
-    };
-
     function updateOpponentBoard(oppBoard, oppCurrentPuyo, oppGameState) {
+        if (!oppBoard) return;
+
         for (let y = 0; y < 14; y++) {
             for (let x = 0; x < 6; x++) {
                 const cell = document.getElementById(`opp-cell-${x}-${y}`);
                 if (!cell) continue;
                 const puyo = cell.firstChild;
                 if (!puyo) continue;
-                let color = oppBoard[y][x];
+
+                let color = oppBoard[y] ? oppBoard[y][x] : 0;
+
                 if (oppGameState === 'playing' && oppCurrentPuyo) {
                     const { mainX, mainY, rotation, mainColor, subColor } = oppCurrentPuyo;
                     let subX = mainX, subY = mainY;
+
                     if (rotation === 0) subY = mainY + 1;
                     if (rotation === 1) subX = mainX - 1;
                     if (rotation === 2) subY = mainY - 1;
                     if (rotation === 3) subX = mainX + 1;
-                    if ((x === mainX && y === mainY)) color = mainColor;
-                    if ((x === subX && y === subY)) color = subColor;
+
+                    if (x === mainX && y === mainY) color = mainColor;
+                    if (x === subX && y === subY) color = subColor;
                 }
+
                 puyo.className = `puyo puyo-${color}`;
             }
         }
@@ -425,9 +486,74 @@
     function updateOpponentInfo() {
         const scoreSpan = document.getElementById('opp-score');
         const chainSpan = document.getElementById('opp-chain');
+        const ojamaSpan = document.getElementById('opp-ojama');
+
         if (scoreSpan) scoreSpan.textContent = oppScore;
         if (chainSpan) chainSpan.textContent = oppChainCount;
+        if (ojamaSpan) ojamaSpan.textContent = oppOjamaPending;
     }
+
+    function sendBoardData() {
+        if (!isMatchActive || !conn || !conn.open) return;
+
+        try {
+            if (typeof board !== 'undefined') {
+                conn.send({
+                    type: 'BOARD_UPDATE',
+                    board: board,
+                    currentPuyo: typeof currentPuyo !== 'undefined' ? currentPuyo : null,
+                    gameState: typeof gameState !== 'undefined' ? gameState : 'playing',
+                    score: typeof score !== 'undefined' ? score : 0,
+                    chainCount: typeof chainCount !== 'undefined' ? chainCount : 0,
+                    ojamaPending: typeof pendingOjama !== 'undefined' ? pendingOjama : 0
+                });
+            }
+        } catch (err) {
+            console.error('Failed to send board data:', err);
+        }
+    }
+
+    function startBoardSync() {
+        stopBoardSync();
+        boardSyncTimer = setInterval(sendBoardData, BOARD_SYNC_INTERVAL);
+    }
+
+    function stopBoardSync() {
+        if (boardSyncTimer) {
+            clearInterval(boardSyncTimer);
+            boardSyncTimer = null;
+        }
+    }
+
+    function syncNextPuyos() {
+        if (window.getNextQueue && conn && conn.open) {
+            conn.send({
+                type: 'SYNC_NEXT',
+                nextPuyos: window.getNextQueue()
+            });
+        }
+    }
+
+    window.sendOjama = function(amount) {
+        const n = Math.max(0, Math.floor(Number(amount) || 0));
+        if (!n) return;
+
+        if (conn && conn.open) {
+            conn.send({
+                type: 'OJAMA',
+                amount: n
+            });
+        }
+    };
+
+    window.sendBoardData = sendBoardData;
+
+    window.notifyGameOver = function() {
+        if (isMatchActive && conn && conn.open) {
+            conn.send({ type: 'OPPONENT_LOST' });
+            endMatchWithWinner(false);
+        }
+    };
 
     function endMatchWithWinner(iWon) {
         if (iWon) {
@@ -435,7 +561,9 @@
         } else {
             oppWins++;
         }
+
         updateWinCountDisplay();
+
         if (myWins >= winTarget) {
             showMatchResult('シリーズ勝利！');
             endMatch();
@@ -454,7 +582,8 @@
         const overlay = document.getElementById('match-result-overlay');
         const content = document.getElementById('result-content');
         const actions = document.getElementById('result-actions');
-        if (!overlay) return;
+        if (!overlay || !content || !actions) return;
+
         overlay.style.display = 'flex';
         content.innerHTML = `
             <p>${message}</p>
@@ -466,24 +595,32 @@
     function endMatch() {
         isMatchActive = false;
         document.body.classList.remove('online-match-active');
+        stopBoardSync();
+
         const surrenderBtn = document.getElementById('surrender-button');
         if (surrenderBtn) surrenderBtn.style.display = 'none';
     }
 
-    window.setNextPuyos = function(newNext) {
-        if (typeof nextPuyoColors !== 'undefined') {
-            nextPuyoColors = JSON.parse(JSON.stringify(newNext));
+    window.setNextQueue = function(newNext) {
+        if (typeof newNext !== 'undefined') {
+            nextQueue = JSON.parse(JSON.stringify(newNext));
+            queueIndex = 0;
             if (window.renderBoard) window.renderBoard();
         }
     };
 
+    // ---------- 起動 ----------
     function autoInitPeer() {
         if (!peerInitialized && !peerInitializing) initPeer();
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => { initOnlineUI(); autoInitPeer(); });
+        document.addEventListener('DOMContentLoaded', () => {
+            initOnlineUI();
+            autoInitPeer();
+        });
     } else {
-        initOnlineUI(); autoInitPeer();
+        initOnlineUI();
+        autoInitPeer();
     }
 })();
