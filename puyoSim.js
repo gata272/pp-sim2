@@ -1,4 +1,5 @@
-// シュミレーションシステム
+// ぷよぷよシミュレーション（修正版：履歴上限300 / NextQueue / 連鎖安全化）
+// 修正済み完全版（Edit→Play の currentPuyo 入替、Edit NEXT 表示修正、履歴初期化の重複防止、連鎖キャンセル）
 
 // 盤面サイズ
 const WIDTH = 6;
@@ -1326,7 +1327,7 @@ function getDropY(x, startY = 0) {
                 const newSubY = subY + 1;
 
                 // 範囲超過判定（HEIGHT を基準）
-                if (newMainY >= HEIGHT + 1 || newSubY >= HEIGHT + 1) {
+                if (newMainY >= HEIGHT || newSubY >= HEIGHT) {
                     alert('これ以上上に移動できません。');
                     return;
                 }
