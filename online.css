@@ -1,0 +1,165 @@
+#online-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 2000;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.online-box {
+    background: #333;
+    padding: 20px;
+    border-radius: 10px;
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+    border: 1px solid #555;
+}
+
+.online-box h2 {
+    margin-top: 0;
+    color: #457b9d;
+}
+
+.online-box input {
+    width: 100%;
+    padding: 10px;
+    margin: 10px 0;
+    background: #222;
+    border: 1px solid #444;
+    color: white;
+    border-radius: 5px;
+    box-sizing: border-box;
+}
+
+.online-btn {
+    width: 100%;
+    padding: 10px;
+    margin: 5px 0;
+    border: none;
+    border-radius: 5px;
+    font-weight: bold;
+    cursor: pointer;
+    background: #457b9d;
+    color: white;
+}
+
+.online-btn.secondary {
+    background: #6c757d;
+}
+
+/* 相手の盤面表示用 */
+#opponent-board-container {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 10px;
+    padding: 5px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 5px;
+    border: 1px solid #444;
+}
+
+#opponent-board-container h3 {
+    margin: 0 0 5px 0;
+    font-size: 0.7em;
+    color: #aaa;
+}
+
+#opponent-board {
+    --opp-cell-size: 18px;
+    display: grid;
+    grid-template-rows: repeat(14, var(--opp-cell-size));
+    grid-template-columns: repeat(6, var(--opp-cell-size));
+    background: #000;
+    border: 1px solid #666;
+    width: calc(var(--opp-cell-size) * 6);
+    height: calc(var(--opp-cell-size) * 14);
+}
+
+#opponent-board .puyo {
+    width: 90%;
+    height: 90%;
+    margin: auto;
+}
+
+/* 勝利数枠のスタイル */
+#win-count-container {
+    display: none;
+}
+
+body.online-match-active #win-count-container {
+    display: flex;
+}
+
+/* 相手情報の表示調整 */
+#opponent-info {
+    display: none;
+}
+
+body.online-match-active #opponent-info {
+    display: flex !important;
+    justify-content: space-around;
+    font-size: 0.85em;
+    color: #aaa;
+    margin-top: 8px;
+    padding: 5px 0;
+    border-top: 1px solid #444;
+}
+
+/* 対戦中のUI調整 */
+body.online-match-active #history-controls,
+body.online-match-active #raise-puyo-button,
+body.online-match-active .mode-toggle-btn,
+body.online-match-active .setting-toggle-btn,
+body.online-match-active #auto-drop-toggle-button,
+body.online-match-active #reset-button-play,
+body.online-match-active #online-toggle-btn {
+    display: none !important;
+}
+
+body.online-match-active #opponent-board-container {
+    display: flex;
+}
+
+/* 降参ボタン */
+#surrender-button {
+    display: none !important;
+}
+
+body.online-match-active #surrender-button {
+    display: block !important;
+    width: 100%;
+    padding: 8px;
+    border: none;
+    border-radius: 5px;
+    font-size: 0.85em;
+    font-weight: bold;
+    background-color: #d9534f;
+    color: white;
+    margin-top: 5px;
+    cursor: pointer;
+}
+
+/* マッチ提案・リザルト */
+#match-proposal-overlay, #match-result-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 2100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
