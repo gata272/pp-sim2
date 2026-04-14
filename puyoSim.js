@@ -467,7 +467,7 @@ function updateHistoryButtons() {
 }
 
 // ---------- ゲームループ / 落下 ----------
-window.startPuyoDropLoop = function() {
+function startPuyoDropLoop() {
     if (dropTimer) clearInterval(dropTimer);
     if (gameState === 'playing' && autoDropEnabled) {
         dropTimer = setInterval(dropPuyo, dropInterval);
@@ -569,7 +569,7 @@ function hasFourUniqueColors(pair1, pair2) {
 }
 
 let _initializedOnce = false;
-window.initializeGame = function() {
+function initializeGame() {
     createBoardDOM();
     for (let y = 0; y < HEIGHT; y++) board[y] = Array(WIDTH).fill(COLORS.EMPTY);
 
@@ -657,7 +657,7 @@ window.initializeGame = function() {
     }
 }
 
-window.generateNewPuyo = function() {
+function generateNewPuyo() {
     if (gameState !== 'playing') return;
 
     // nextQueue からペアを取得（consumeNextPairは queueIndex を進める）
@@ -976,11 +976,8 @@ async function runChain() {
         const isGameOver = board[gameOverLineY][checkX] !== COLORS.EMPTY;
         if (isGameOver) {
             gameState = 'gameover';
-           if (!window.isMatchActive) { alert(\'ゲームオーバーです！\'); }
-           clearInterval(dropTimer);
-           if (window.isMatchActive && window.notifyGameOverToOpponent) {
-               window.notifyGameOverToOpponent();
-           }
+            alert('ゲームオーバーです！');
+            clearInterval(dropTimer);
             updateUI();
             renderBoard();
             return;
