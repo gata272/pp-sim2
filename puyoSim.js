@@ -14,10 +14,10 @@ const COLORS = {
     BLUE: 2,
     GREEN: 3,
     YELLOW: 4,
-    GARBAGE: 5
+    GARBAGE: 5 // おじゃまぷよ
 };
 
-// スコア計算の値
+// スコア計算の値（ボーナステーブル）
 const BONUS_TABLE = {
     CHAIN: [0, 8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512],
     GROUP: [0, 0, 0, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
@@ -36,16 +36,16 @@ let queueIndex = 0;
 let score = 0;
 let chainCount = 0;
 let gameState = 'playing'; // 'playing', 'chaining', 'gameover', 'editing', 'setting'
-let currentEditColor = COLORS.EMPTY;
-let editingNextPuyos = [];
+let currentEditColor = COLORS.EMPTY; // エディットモードで選択中の色
+let editingNextPuyos = []; // エディットモード用 NEXT リスト
 let nextEdited = false;
 
-// 履歴スタック
+// 履歴スタック（Undo / Redo）
 let historyStack = [];
 let redoStack = [];
 
 // 落下ループ
-let dropInterval = 1000;
+let dropInterval = 1000; // ms
 let dropTimer = null;
 let autoDropEnabled = false;
 
@@ -55,7 +55,7 @@ let chainWaitTime = 300;
 
 // クイックターン
 let lastFailedRotation = { type: null, timestamp: 0 };
-const QUICK_TURN_WINDOW = 300;
+const QUICK_TURN_WINDOW = 300; // ms
 
 // 連鎖非同期制御
 let chainTimer = null;
@@ -78,7 +78,7 @@ function hashSeed(input) {
         return (input >>> 0) || 1;
     }
     const str = String(input ?? '');
-    let h = 2166136261 >>> 0; // FNV-1a
+    let h = 2166136261 >>> 0;
     for (let i = 0; i < str.length; i++) {
         h ^= str.charCodeAt(i);
         h = Math.imul(h, 16777619);
@@ -99,13 +99,11 @@ function setGameSeed(seed) {
     currentSeed = seed;
     rng = mulberry32(hashSeed(seed));
 }
-
 function clearGameSeed() {
     currentSeed = null;
     rng = Math.random;
 }
 
-// online.js 互換
 window.initGameWithSeed = function(seed) {
     setGameSeed(seed);
     initializeGame();
@@ -120,6 +118,7 @@ function dispatchOnlineInput(action) {
     }
 }
 
+// sleep helper that registers chainTimer so it can be cancelled
 function sleep(ms) {
     return new Promise(resolve => {
         if (chainTimer) {
@@ -483,7 +482,6 @@ function updateHistoryButtons() {
 // ---------- Next 互換（online.js 用） ----------
 window.setNextPuyos = function(newNext) {
     if (!Array.isArray(newNext) || newNext.length === 0) return;
-
     const normalized = newNext.map(pair => Array.isArray(pair) ? pair.slice(0, 2) : [COLORS.EMPTY, COLORS.EMPTY]);
     nextQueue = normalized;
     queueIndex = 0;
@@ -541,7 +539,7 @@ function handleBoardClickEditMode(event) {
         board[y][x] = currentEditColor;
         renderBoard();
     }
-};
+}
 
 window.applyNextPuyos = function() {
     if (gameState === 'editing') {
@@ -590,14 +588,6 @@ function hasFourUniqueColors(pair1, pair2) {
     if (!pair1 || !pair2) return false;
     const s = new Set([...pair1, ...pair2]);
     return s.size === 4;
-}
-
-function checkSpawnCollision(coords) {
-    for (const puyo of coords) {
-        if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0 || puyo.y >= HEIGHT) return true;
-        if (board[puyo.y][puyo.x] !== COLORS.EMPTY) return true;
-    }
-    return false;
 }
 
 function initializeGame() {
@@ -682,7 +672,7 @@ function initializeGame() {
         });
         if (btnSoftDrop) btnSoftDrop.addEventListener('click', () => {
             dispatchOnlineInput('DOWN');
-            softDrop();
+            window.softDrop();
         });
 
         setupEditModeListeners();
@@ -696,6 +686,14 @@ function initializeGame() {
         saveState(false);
         _initializedOnce = true;
     }
+}
+
+function checkSpawnCollision(coords) {
+    for (const puyo of coords) {
+        if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0) return true;
+        if (puyo.y < HEIGHT - HIDDEN_ROWS && board[puyo.y][puyo.x] !== COLORS.EMPTY) return true;
+    }
+    return false;
 }
 
 function generateNewPuyo() {
@@ -942,10 +940,9 @@ function lockPuyo() {
 
     gravity();
 
-    for (let y = HEIGHT - HIDDEN_ROWS; y < HEIGHT; y++) {
-        for (let x = 0; x < WIDTH; x++) {
-            board[y][x] = COLORS.EMPTY;
-        }
+    // Y=13 は置いたら消える
+    for (let x = 0; x < WIDTH; x++) {
+        board[HEIGHT - 1][x] = COLORS.EMPTY;
     }
 
     renderBoard();
@@ -958,7 +955,8 @@ function lockPuyo() {
 
 // ---------- 連結検出 ----------
 function findConnectedPuyos() {
-    const MAX_SEARCH_Y = HEIGHT - HIDDEN_ROWS;
+    // Y=12 は消えないように、探索対象から外す
+    const MAX_SEARCH_Y = HEIGHT - HIDDEN_ROWS - 1; // 0..10
     let visited = Array(HEIGHT).fill(0).map(() => Array(WIDTH).fill(false));
     let groups = [];
 
@@ -1029,6 +1027,24 @@ async function runChain() {
         if (checkBoardEmpty()) {
             score += 3600;
             updateUI();
+        }
+
+        const gameOverLineY = HEIGHT - 3; // 11
+        const checkX = 2;
+        const isGameOver = board[gameOverLineY][checkX] !== COLORS.EMPTY;
+        if (isGameOver) {
+            gameState = 'gameover';
+            if (window.isMatchActive) {
+                if (typeof window.notifyGameOverToOpponent === 'function') {
+                    window.notifyGameOverToOpponent();
+                }
+            } else {
+                alert('ゲームオーバーです！');
+            }
+            clearInterval(dropTimer);
+            updateUI();
+            renderBoard();
+            return;
         }
 
         gameState = 'playing';
@@ -1329,6 +1345,7 @@ window.toggleAutoDrop = function() {
 // リセット
 window.resetGame = function() {
     clearInterval(dropTimer);
+    clearGameSeed();
     initializeGame();
 };
 
@@ -1403,7 +1420,7 @@ function getDropY(x, startY = 0) {
     }
 })();
 
-// 互換: 受信側が使うことがあるので公開
+// 互換
 window.sendBoardData = function() {};
 window.notifyGameOver = function() {
     if (typeof window.onLocalGameOver === 'function') {
