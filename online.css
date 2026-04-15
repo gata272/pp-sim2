@@ -57,6 +57,39 @@
     background: #6c757d;
 }
 
+/* IDコピー */
+.copy-id-btn {
+    margin-top: 8px;
+    padding: 6px 10px;
+    font-size: 0.85em;
+}
+
+.mini-copy-btn {
+    padding: 4px 8px;
+    font-size: 0.72em;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #6c757d;
+    color: white;
+    white-space: nowrap;
+}
+
+#win-count-container {
+    display: none;
+    align-items: center;
+    gap: 6px;
+}
+
+#win-count-display {
+    flex: 1;
+    text-align: center;
+}
+
+body.online-match-active #win-count-container {
+    display: flex;
+}
+
 /* 相手の盤面表示用 */
 #opponent-board-container {
     display: none;
@@ -90,15 +123,6 @@
     width: 90%;
     height: 90%;
     margin: auto;
-}
-
-/* 勝利数枠のスタイル */
-#win-count-container {
-    display: none;
-}
-
-body.online-match-active #win-count-container {
-    display: flex;
 }
 
 /* 相手情報の表示調整 */
@@ -162,4 +186,76 @@ body.online-match-active #surrender-button {
     display: none;
     align-items: center;
     justify-content: center;
+}
+
+/* スマホ圧縮 */
+@media (max-width: 650px) {
+    #online-overlay {
+        padding: 10px;
+    }
+
+    .online-box {
+        max-width: none;
+        padding: 12px;
+    }
+
+    .online-box h2 {
+        font-size: 1.05em;
+        margin-bottom: 8px;
+    }
+
+    .online-box input {
+        padding: 8px;
+        margin: 8px 0;
+        font-size: 0.95em;
+    }
+
+    .online-btn {
+        padding: 8px;
+        margin: 4px 0;
+        font-size: 0.9em;
+    }
+
+    .copy-id-btn {
+        padding: 5px 8px;
+        font-size: 0.78em;
+        margin-top: 6px;
+    }
+
+    .mini-copy-btn {
+        padding: 4px 6px;
+        font-size: 0.65em;
+    }
+
+    #opponent-board-container {
+        margin-top: 6px;
+        padding: 4px;
+    }
+
+    #opponent-board-container h3 {
+        font-size: 0.62em;
+        margin-bottom: 3px;
+    }
+
+    #opponent-board {
+        --opp-cell-size: 12px;
+    }
+
+    body.online-match-active #opponent-info {
+        margin-top: 4px;
+        padding: 4px 0;
+        font-size: 0.7em;
+    }
+
+    body.online-match-active #surrender-button {
+        margin-top: 4px;
+        padding: 6px;
+        font-size: 0.8em;
+    }
+
+    #match-proposal-overlay .online-box,
+    #match-result-overlay .online-box {
+        max-width: none;
+        padding: 12px;
+    }
 }
