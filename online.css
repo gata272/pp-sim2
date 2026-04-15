@@ -163,3 +163,36 @@ body.online-match-active #surrender-button {
     align-items: center;
     justify-content: center;
 }
+
+/* IDコピー */
+.copy-id-btn {
+    margin-top: 8px;
+    padding: 6px 10px;
+    font-size: 0.85em;
+}
+
+.mini-copy-btn {
+    padding: 4px 8px;
+    font-size: 0.72em;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #6c757d;
+    color: white;
+    white-space: nowrap;
+}
+
+#win-count-container {
+    display: none;
+    align-items: center;
+    gap: 6px;
+}
+
+#win-count-display {
+    flex: 1;
+    text-align: center;
+}
+
+body.online-match-active #win-count-container {
+    display: flex;
+}
