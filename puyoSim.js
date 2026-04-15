@@ -33,8 +33,8 @@ const BONUS_TABLE = {
 // 履歴管理パラメータ
 const MAX_HISTORY_SIZE = 300;
 
-// おじゃまボーナス
-const ALL_CLEAR_BONUS_OJAMA = 30;
+// おじゃまボーナス（全消しは raw score として足す）
+const ALL_CLEAR_SCORE_BONUS = 3600;
 
 // ゲームの状態管理
 let board = [];
@@ -50,8 +50,8 @@ let editingNextPuyos = [];
 let nextEdited = false;
 
 // おじゃま管理
-let pendingOjama = 0;      // 受け取って待機中のおじゃま
-let chainOjamaBuffer = 0;  // 現在の連鎖で発生した攻撃量
+let pendingOjama = 0; // 受け取って待機中のおじゃま（個数）
+let chainAttackScoreBuffer = 0; // 現在の連鎖で発生した攻撃の raw score
 
 // 履歴スタック（Undo / Redo）
 let historyStack = [];
@@ -111,7 +111,7 @@ function stopChain() {
         chainTimer = null;
     }
     chainAbortFlag = true;
-    chainOjamaBuffer = 0;
+    chainAttackScoreBuffer = 0;
 }
 
 function updateOjamaUI() {
@@ -119,9 +119,9 @@ function updateOjamaUI() {
     if (el) el.textContent = pendingOjama;
 }
 
-// おじゃま 70点 = 1個 の簡易換算
-function scoreToOjama(scoreDelta) {
-    return Math.floor(Math.max(0, scoreDelta) / 70);
+// score をおじゃま個数へ換算
+function scoreToOjama(scoreValue) {
+    return Math.floor(Math.max(0, scoreValue) / 70);
 }
 
 // online.js から受け取る入口
@@ -134,8 +134,9 @@ window.addIncomingOjama = function(amount) {
 // 互換用
 window.receiveOjama = window.addIncomingOjama;
 
-function cancelPendingOjama(attackAmount) {
-    const attack = Math.max(0, Math.floor(Number(attackAmount) || 0));
+// おじゃま攻撃分を自分の保留おじゃまで相殺して、残りを返す
+function consumeOjamaForAttack(attackOjama) {
+    const attack = Math.max(0, Math.floor(Number(attackOjama) || 0));
     const canceled = Math.min(pendingOjama, attack);
     pendingOjama -= canceled;
     updateOjamaUI();
@@ -531,7 +532,7 @@ function restoreState(state) {
     if (groups.length > 0) {
         gameState = 'chaining';
         chainCount = 0;
-        chainOjamaBuffer = 0;
+        chainAttackScoreBuffer = 0;
         runChain();
     } else {
         startPuyoDropLoop();
@@ -623,7 +624,7 @@ function handleBoardClickEditMode(event) {
         board[y][x] = currentEditColor;
         renderBoard();
     }
-}
+};
 
 window.applyNextPuyos = function() {
     if (gameState === 'editing') {
@@ -680,7 +681,7 @@ function initializeGame() {
     score = 0;
     chainCount = 0;
     pendingOjama = 0;
-    chainOjamaBuffer = 0;
+    chainAttackScoreBuffer = 0;
     updateOjamaUI();
 
     gameState = 'playing';
@@ -985,7 +986,7 @@ function lockPuyo() {
 
     gameState = 'chaining';
     chainCount = 0;
-    chainOjamaBuffer = 0;
+    chainAttackScoreBuffer = 0;
     runChain();
 }
 
@@ -1084,11 +1085,9 @@ async function runChain() {
 
     if (groups.length === 0) {
         if (checkBoardEmpty()) {
-            score += 3600;
+            score += ALL_CLEAR_SCORE_BONUS;
+            chainAttackScoreBuffer += ALL_CLEAR_SCORE_BONUS;
             updateUI();
-
-            // 全消しは攻撃にも加える
-            chainOjamaBuffer += ALL_CLEAR_BONUS_OJAMA;
         }
 
         const gameOverLineY = HEIGHT - 3;
@@ -1099,11 +1098,11 @@ async function runChain() {
             return;
         }
 
-        // 自分の攻撃で待機おじゃまを相殺
-        let outgoingOjama = cancelPendingOjama(chainOjamaBuffer);
-        chainOjamaBuffer = 0;
+        // 連鎖終了時に、raw score をおじゃまへ換算して相殺→送信
+        const attackOjama = scoreToOjama(chainAttackScoreBuffer);
+        let outgoingOjama = consumeOjamaForAttack(attackOjama);
+        chainAttackScoreBuffer = 0;
 
-        // 残った分だけ相手へ送信
         if (outgoingOjama > 0 && typeof window.sendOjama === 'function') {
             window.sendOjama(outgoingOjama);
         }
@@ -1132,11 +1131,11 @@ async function runChain() {
     if (chainAbortFlag) return;
 
     chainCount++;
-    let chainScore = calculateScore(groups, chainCount);
+    const chainScore = calculateScore(groups, chainCount);
     score += chainScore;
 
-    // 送るおじゃまを加算
-    chainOjamaBuffer += scoreToOjama(chainScore);
+    // raw score をためる
+    chainAttackScoreBuffer += chainScore;
 
     let erasedCoords = [];
     groups.forEach(({ group }) => {
@@ -1160,7 +1159,15 @@ async function runChain() {
     if (nextGroups.length === 0) {
         gameState = 'playing';
 
-        // 連鎖中にたまったおじゃまを先に反映
+        // 連鎖終了時に、raw score をおじゃまへ換算して相殺→送信
+        const attackOjama = scoreToOjama(chainAttackScoreBuffer);
+        let outgoingOjama = consumeOjamaForAttack(attackOjama);
+        chainAttackScoreBuffer = 0;
+
+        if (outgoingOjama > 0 && typeof window.sendOjama === 'function') {
+            window.sendOjama(outgoingOjama);
+        }
+
         if (!applyPendingOjamaToBoard()) {
             return;
         }
@@ -1266,7 +1273,7 @@ function renderEditNextPuyos() {
         if (editingNextPuyos.length > idx) {
             // ペアは [sub, main]（index 0 = sub / 上、index 1 = main / 下）
             const [c_main, c_sub] = editingNextPuyos[idx];
-            
+
             slot.appendChild(createEditablePuyo(c_sub, idx, 1)); // 上
             slot.appendChild(createEditablePuyo(c_main, idx, 0)); // 下
         }
@@ -1283,7 +1290,7 @@ function renderEditNextPuyos() {
         pairContainer.appendChild(countSpan);
         const puyoRow = document.createElement('div');
         puyoRow.className = 'next-puyo-row';
-        const [c_main, c_sub] = editingNextPuyos[i]; // fixed: [sub, main]
+        const [c_main, c_sub] = editingNextPuyos[i];
         puyoRow.appendChild(createEditablePuyo(c_sub, i, 1)); // 上 (sub)
         puyoRow.appendChild(createEditablePuyo(c_main, i, 0)); // 下 (main)
         pairContainer.appendChild(puyoRow);
@@ -1453,7 +1460,6 @@ function getDropY(x, startY = 0) {
 
         // キーバインドは外して、Undo の U と衝突しないようにする
         // 1段上げはボタンクリックのみ使用
-
     } catch (e) {
         console.error('raisePuyoOneRow init error:', e);
     }
