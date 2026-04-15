@@ -33,6 +33,9 @@ const BONUS_TABLE = {
 // 履歴管理パラメータ
 const MAX_HISTORY_SIZE = 300;
 
+// おじゃまボーナス
+const ALL_CLEAR_BONUS_OJAMA = 30;
+
 // ゲームの状態管理
 let board = [];
 let currentPuyo = null;
@@ -1083,6 +1086,9 @@ async function runChain() {
         if (checkBoardEmpty()) {
             score += 3600;
             updateUI();
+
+            // 全消しは攻撃にも加える
+            chainOjamaBuffer += ALL_CLEAR_BONUS_OJAMA;
         }
 
         const gameOverLineY = HEIGHT - 3;
@@ -1244,6 +1250,7 @@ function renderEditNextPuyos() {
             ev.stopPropagation();
             if (gameState !== 'editing') return;
             if (editingNextPuyos.length > listIndex) {
+                // puyoIndex: 0 = main(下), 1 = sub(上)
                 editingNextPuyos[listIndex][puyoIndex] = currentEditColor;
                 nextEdited = true;
                 renderEditNextPuyos();
@@ -1252,16 +1259,20 @@ function renderEditNextPuyos() {
         return puyo;
     };
 
+    // ----- visible slots (NEXT1, NEXT2) -----
     visibleSlots.forEach((slot, idx) => {
         slot.innerHTML = '';
 
         if (editingNextPuyos.length > idx) {
+            // ペアは [sub, main]（index 0 = sub / 上、index 1 = main / 下）
             const [c_main, c_sub] = editingNextPuyos[idx];
+            
             slot.appendChild(createEditablePuyo(c_sub, idx, 1)); // 上
             slot.appendChild(createEditablePuyo(c_main, idx, 0)); // 下
         }
     });
 
+    // ----- full list -----
     listContainer.innerHTML = '';
     for (let i = NUM_VISIBLE_NEXT_PUYOS; i < MAX_NEXT_PUYOS; i++) {
         if (editingNextPuyos.length <= i) break;
@@ -1272,9 +1283,9 @@ function renderEditNextPuyos() {
         pairContainer.appendChild(countSpan);
         const puyoRow = document.createElement('div');
         puyoRow.className = 'next-puyo-row';
-        const [c_main, c_sub] = editingNextPuyos[i];
-        puyoRow.appendChild(createEditablePuyo(c_sub, i, 1));
-        puyoRow.appendChild(createEditablePuyo(c_main, i, 0));
+        const [c_main, c_sub] = editingNextPuyos[i]; // fixed: [sub, main]
+        puyoRow.appendChild(createEditablePuyo(c_sub, i, 1)); // 上 (sub)
+        puyoRow.appendChild(createEditablePuyo(c_main, i, 0)); // 下 (main)
         pairContainer.appendChild(puyoRow);
         listContainer.appendChild(pairContainer);
     }
@@ -1336,6 +1347,7 @@ window.toggleMode = function() {
         checkMobileControlsVisibility();
         if (boardElement) boardElement.removeEventListener('click', handleBoardClickEditMode);
 
+        // ここで currentPuyo を Next1 に差し替える
         if (nextEdited) {
             currentPuyo = null;
             ensureNextQueueCapacity();
@@ -1354,7 +1366,6 @@ window.updateGravityWait = function(value) {
     const display = document.getElementById('gravity-wait-value');
     if (display) display.textContent = gravityWaitTime + 'ms';
 };
-
 window.updateChainWait = function(value) {
     chainWaitTime = parseInt(value);
     const display = document.getElementById('chain-wait-value');
@@ -1383,28 +1394,15 @@ window.resetGame = function() {
     initializeGame();
 };
 
-// ---------- おじゃま用 / オンライン同期用公開API ----------
-window.getNextQueue = function() {
-    return copyNextQueue(nextQueue);
-};
+// ---------- ユーティリティ / その他 ----------
+function getDropY(x, startY = 0) {
+    if (x < 0 || x >= WIDTH) return -1;
+    let y = Math.max(0, startY);
+    while (y < HEIGHT && board[y][x] !== COLORS.EMPTY) y++;
+    return y < HEIGHT ? y : HEIGHT - 1;
+}
 
-window.setNextQueue = function(newQueue) {
-    if (!Array.isArray(newQueue)) return;
-    nextQueue = JSON.parse(JSON.stringify(newQueue));
-    queueIndex = 0;
-    ensureNextQueueCapacity();
-    renderBoard();
-};
-
-window.getPendingOjama = function() {
-    return pendingOjama;
-};
-
-window.applyPendingOjamaToBoard = applyPendingOjamaToBoard;
-
-window.triggerGameOver = triggerGameOver;
-
-// ---------- ぷよを1段上げる（デバッグ用） ----------
+// raisePuyoOneRow（デバッグ用）: 境界チェックを HIDDEN_ROWS で統一
 (function() {
     'use strict';
     try {
@@ -1427,6 +1425,7 @@ window.triggerGameOver = triggerGameOver;
                 const newMainY = mainY + 1;
                 const newSubY = subY + 1;
 
+                // 範囲超過判定（HEIGHT を基準）
                 if (newMainY >= HEIGHT || newSubY >= HEIGHT) {
                     alert('これ以上上に移動できません。');
                     return;
@@ -1434,6 +1433,7 @@ window.triggerGameOver = triggerGameOver;
 
                 let canMove = true;
 
+                // board の占有判定は可視領域（y < HEIGHT - HIDDEN_ROWS）に対して実施
                 if (newMainY < HEIGHT - HIDDEN_ROWS) {
                     if (board[newMainY][mainX] !== COLORS.EMPTY) canMove = false;
                 }
@@ -1451,20 +1451,34 @@ window.triggerGameOver = triggerGameOver;
             }
         };
 
-        document.addEventListener('keydown', function(e) {
-            try {
-                if (typeof gameState !== 'undefined' && gameState === 'playing' && e.key === 'u') {
-                    window.raisePuyoOneRow();
-                }
-            } catch (err) {
-                console.error('キーイベントエラー:', err);
-            }
-        });
+        // キーバインドは外して、Undo の U と衝突しないようにする
+        // 1段上げはボタンクリックのみ使用
 
     } catch (e) {
         console.error('raisePuyoOneRow init error:', e);
     }
 })();
+
+// オンライン・履歴・おじゃま同期用の公開API
+window.getNextQueue = function() {
+    return copyNextQueue(nextQueue);
+};
+
+window.setNextQueue = function(newQueue) {
+    if (!Array.isArray(newQueue)) return;
+    nextQueue = JSON.parse(JSON.stringify(newQueue));
+    queueIndex = 0;
+    ensureNextQueueCapacity();
+    renderBoard();
+};
+
+window.getPendingOjama = function() {
+    return pendingOjama;
+};
+
+window.applyPendingOjamaToBoard = applyPendingOjamaToBoard;
+
+window.triggerGameOver = triggerGameOver;
 
 // 初期化
 document.addEventListener('DOMContentLoaded', () => {
