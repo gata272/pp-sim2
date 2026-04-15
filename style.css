@@ -202,8 +202,7 @@ body {
 #history-controls {
     display: flex;
     flex-direction: row; 
-    gap: 5px; 
-    margin-bottom: 5px; 
+    gap: 5px;
 }
 
 #undo-button, #redo-button {
