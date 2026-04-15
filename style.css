@@ -106,7 +106,7 @@ body {
 #info-panel {
     display: flex;
     flex-direction: column; 
-    gap: 5px;
+    gap: 8px;
     flex: 1;
     min-width: 0;
     max-width: 200px;
@@ -116,12 +116,12 @@ body {
 #play-info-container, #edit-info-container {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 10px;
     width: 100%;
 }
 
 .info-box {
-    padding: 5px 3px;
+    padding: 8px 5px;
     border: 1px solid #444; 
     background-color: #333; 
     border-radius: 5px;
@@ -149,7 +149,7 @@ body {
 }
 
 #ojama-box {
-    padding: 5px 3px;
+    padding: 8px 5px;
     border: 1px solid #444;
     background-color: #333;
     border-radius: 5px;
@@ -208,7 +208,7 @@ body {
 
 #undo-button, #redo-button {
     flex-grow: 1; 
-    padding: 5px 2px;
+    padding: 8px 2px;
     border: none;
     border-radius: 5px;
     font-size: 0.75em;
@@ -219,7 +219,7 @@ body {
 
 .mode-toggle-btn, #reset-button-edit, #reset-button-play, #auto-drop-toggle-button {
     width: 100%;
-    padding: 5px;
+    padding: 8px;
     border: none;
     border-radius: 5px;
     font-size: 0.85em;
@@ -232,7 +232,7 @@ body {
 
 #raise-puyo-button {
     width: 100%;
-    padding: 5px;
+    padding: 8px;
     border: none;
     border-radius: 5px;
     font-size: 0.85em;
@@ -244,7 +244,7 @@ body {
 
 #online-toggle-btn {
     width: 100%;
-    padding: 5px;
+    padding: 8px;
     border: none;
     border-radius: 5px;
     font-size: 0.85em;
@@ -259,7 +259,7 @@ body {
     color: white;
     margin-top: 20px;
     width: 100%;
-    padding: 5px;
+    padding: 8px;
     border: none;
     border-radius: 5px;
     font-size: 0.9em;
@@ -500,139 +500,4 @@ body {
 
 .warning {
     animation: warningFlash 0.5s infinite;
-}
-
-/* スマホ圧縮 */
-@media (max-width: 650px) {
-    #wrapper {
-        flex-direction: column;
-        align-items: center;
-        gap: 6px;
-        padding: 8px;
-    }
-
-    #puyo-board {
-        --puyo-cell-size: 32px !important;
-        max-height: none;
-    }
-
-    #info-panel {
-        width: 100%;
-        max-width: none;
-        gap: 4px;
-    }
-
-    #play-info-container,
-    #edit-info-container {
-        gap: 4px;
-    }
-
-    .info-box {
-        padding: 4px 3px;
-    }
-
-    .info-box h2 {
-        margin: 0 0 2px 0;
-        font-size: 0.78em;
-    }
-
-    #score,
-    #chain-count,
-    #ojama-count {
-        font-size: 0.95em;
-    }
-
-    #play-stats-info {
-        gap: 4px;
-    }
-
-    #ojama-box {
-        padding: 4px 3px;
-    }
-
-    #history-controls {
-        gap: 4px;
-        margin-bottom: 4px;
-    }
-
-    #undo-button,
-    #redo-button {
-        padding: 4px 2px;
-        font-size: 0.72em;
-    }
-
-    .mode-toggle-btn,
-    #reset-button-edit,
-    #reset-button-play,
-    #auto-drop-toggle-button,
-    #raise-puyo-button,
-    #online-toggle-btn,
-    #setting-back-btn {
-        padding: 4px 5px;
-        font-size: 0.76em;
-        margin-top: 3px;
-    }
-
-    .next-puyo-row {
-        gap: 8px;
-        margin-top: 3px;
-    }
-
-    .next-puyo-slot {
-        min-width: 24px;
-        min-height: 48px;
-        padding: 3px;
-    }
-
-    .next-puyo-slot .puyo,
-    #play-next-info .puyo {
-        width: 20px !important;
-        height: 20px !important;
-    }
-
-    #edit-next-list-container {
-        max-height: 140px;
-        margin-top: 6px;
-        padding: 4px;
-    }
-
-    #edit-next-list-container .next-puyo-slot {
-        width: 24px;
-        height: 48px;
-    }
-
-    #edit-next-list-container .puyo {
-        width: 18px !important;
-        height: 18px !important;
-    }
-
-    .palette-row {
-        gap: 4px;
-    }
-
-    #mobile-controls {
-        max-width: 100%;
-        gap: 5px;
-        padding: 0 2px;
-        margin-top: 8px;
-    }
-
-    .mobile-btn {
-        height: 92px;
-        font-size: 1em;
-        border-radius: 7px;
-    }
-
-    .small-btn {
-        font-size: 0.82em;
-    }
-
-    #setting-overlay {
-        padding: 10px;
-    }
-
-    #setting-overlay .info-box {
-        max-width: none;
-        padding: 12px;
-    }
 }
