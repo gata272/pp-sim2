@@ -22,6 +22,47 @@
     let boardSyncTimer = null;
     const BOARD_SYNC_INTERVAL = 100;
 
+    function updateCopyIdButtons() {
+        const copyBtn = document.getElementById('copy-my-id-btn');
+        if (copyBtn) {
+            copyBtn.disabled = !myId || myId === '----';
+            copyBtn.textContent = myId && myId !== '----' ? 'IDをコピー' : 'ID未生成';
+        }
+
+        const miniBtn = document.querySelector('.mini-copy-btn');
+        if (miniBtn) {
+            miniBtn.disabled = !myId || myId === '----';
+        }
+    }
+
+    window.copyMyPeerId = async function() {
+        if (!myId || myId === '----') {
+            alert('まだIDが生成されていません。');
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(myId);
+
+            const buttons = [
+                document.getElementById('copy-my-id-btn'),
+                document.querySelector('.mini-copy-btn')
+            ];
+
+            buttons.forEach(btn => {
+                if (!btn) return;
+                const original = btn.textContent;
+                btn.textContent = 'コピー済み';
+                setTimeout(() => {
+                    btn.textContent = original || 'IDをコピー';
+                }, 1200);
+            });
+        } catch (err) {
+            console.error('Clipboard copy failed:', err);
+            prompt('IDをコピーしてください', myId);
+        }
+    };
+
     // ---------- UI ----------
     window.showOnlineOverlay = function() {
         const overlay = document.getElementById('online-overlay');
@@ -114,6 +155,7 @@
                     <div id="online-status">PeerJSを初期化中...</div>
                     <div id="my-id-display" style="margin: 10px 0; font-size: 0.9em; color: #aaa;">
                         あなたのID: <span id="my-peer-id" style="color: #fff; font-weight: bold;">----</span>
+                        <button class="online-btn secondary copy-id-btn" id="copy-my-id-btn" onclick="copyMyPeerId()" disabled>ID未生成</button>
                     </div>
                     <input type="text" id="opponent-id-input" placeholder="相手のIDを入力">
                     <button class="online-btn" onclick="connectToOpponent()">接続する</button>
@@ -158,6 +200,7 @@
                 winContainer.innerHTML = `
                     <span class="stat-label">勝利数</span>
                     <span id="win-count-display" class="stat-value">0 - 0</span>
+                    <button class="mini-copy-btn" onclick="copyMyPeerId()">ID</button>
                 `;
                 playStatsInfo.appendChild(winContainer);
             }
@@ -226,6 +269,8 @@
 
                 const status = document.getElementById('online-status');
                 if (status) status.textContent = '接続待機中...';
+
+                updateCopyIdButtons();
             });
 
             peer.on('connection', (connection) => {
