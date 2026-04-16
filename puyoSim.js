@@ -34,7 +34,7 @@ const BONUS_TABLE = {
 const MAX_HISTORY_SIZE = 300;
 
 // おじゃまボーナス（全消しは raw score として足す）
-const ALL_CLEAR_SCORE_BONUS = 3600;
+const ALL_CLEAR_SCORE_BONUS = 2100;
 
 // ゲームの状態管理
 let board = [];
@@ -852,8 +852,8 @@ function getGhostFinalPositions() {
 // 衝突判定
 function checkCollision(coords) {
     for (const puyo of coords) {
-        if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0) return true;
-        if (puyo.y < HEIGHT - HIDDEN_ROWS && board[puyo.y][puyo.x] !== COLORS.EMPTY) return true;
+        if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0 || puyo.y >= HEIGHT) return true;
+        if (board[puyo.y][puyo.x] !== COLORS.EMPTY) return true;
     }
     return false;
 }
@@ -1069,7 +1069,7 @@ function calculateScore(groups, currentChain) {
     const colorIdx = Math.min(colorSet.size, BONUS_TABLE.COLOR.length - 1);
     bonusTotal += BONUS_TABLE.COLOR[colorIdx];
 
-    const finalBonus = Math.max(1, bonusTotal);
+    const finalBonus = Math.max(1, Math.min(999, bonusTotal));
     const totalScore = (10 * totalPuyos) * finalBonus;
     return totalScore;
 }
