@@ -497,3 +497,21 @@ body {
 .warning {
     animation: warningFlash 0.5s infinite;
 }
+
+body.board-gameover #puyo-board .puyo {
+    position: relative;
+}
+
+body.board-gameover #puyo-board .puyo::after {
+    content: 'X';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: red;
+    font-size: 1.3em;
+    font-weight: bold;
+    opacity: 0.85;
+    pointer-events: none;
+}
