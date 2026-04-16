@@ -33,8 +33,16 @@ const BONUS_TABLE = {
 // 履歴管理パラメータ
 const MAX_HISTORY_SIZE = 300;
 
-// おじゃまボーナス（全消しは raw score として足す）
+// おじゃまボーナス
 const ALL_CLEAR_SCORE_BONUS = 2100;
+
+// PT2寄せの換算・制限
+const NUISANCE_TARGET_POINTS = 70;
+const MAX_OJAMA_DROP_PER_TURN = 30;
+
+// NEXTは128組で色を均等にする
+const NEXT_QUEUE_BALANCE_BATCH_SIZE = 128;
+const NEXT_QUEUE_COLORS = [COLORS.RED, COLORS.BLUE, COLORS.GREEN, COLORS.YELLOW];
 
 // ゲームの状態管理
 let board = [];
@@ -52,6 +60,7 @@ let nextEdited = false;
 // おじゃま管理
 let pendingOjama = 0; // 受け取って待機中のおじゃま（個数）
 let chainAttackScoreBuffer = 0; // 現在の連鎖で発生した攻撃の raw score
+let nuisancePointBuffer = 0; // 連鎖ごとの端数持ち越し
 
 // 履歴スタック（Undo / Redo）
 let historyStack = [];
@@ -121,7 +130,20 @@ function updateOjamaUI() {
 
 // score をおじゃま個数へ換算
 function scoreToOjama(scoreValue) {
-    return Math.floor(Math.max(0, scoreValue) / 70);
+    return Math.floor(Math.max(0, scoreValue) / NUISANCE_TARGET_POINTS);
+}
+
+function flushChainOjamaBuffer() {
+    nuisancePointBuffer += chainAttackScoreBuffer / NUISANCE_TARGET_POINTS;
+    const attackOjama = Math.floor(nuisancePointBuffer);
+    nuisancePointBuffer -= attackOjama;
+
+    let outgoingOjama = consumeOjamaForAttack(attackOjama);
+    chainAttackScoreBuffer = 0;
+
+    if (outgoingOjama > 0 && typeof window.sendOjama === 'function') {
+        window.sendOjama(outgoingOjama);
+    }
 }
 
 // online.js から受け取る入口
@@ -143,9 +165,34 @@ function consumeOjamaForAttack(attackOjama) {
     return attack - canceled;
 }
 
+// 128組分の次ぷよを、4色64個ずつ均等になるように作る
+function buildBalancedNextBatch(batchPairs = NEXT_QUEUE_BALANCE_BATCH_SIZE) {
+    const totalPuyos = batchPairs * 2;
+    const perColor = totalPuyos / NEXT_QUEUE_COLORS.length;
+
+    const pool = [];
+    NEXT_QUEUE_COLORS.forEach(color => {
+        for (let i = 0; i < perColor; i++) {
+            pool.push(color);
+        }
+    });
+
+    shuffleArray(pool);
+
+    const batch = [];
+    for (let i = 0; i < pool.length; i += 2) {
+        batch.push([pool[i], pool[i + 1]]);
+    }
+    return batch;
+}
+
+function appendBalancedNextBatch() {
+    nextQueue.push(...buildBalancedNextBatch());
+}
+
 // おじゃまを盤面に積む
 function dropOjamaToBoard(count) {
-    const amount = Math.max(0, Math.floor(Number(count) || 0));
+    const amount = Math.max(0, Math.min(MAX_OJAMA_DROP_PER_TURN, Math.floor(Number(count) || 0)));
     if (amount === 0) return true;
 
     const emptyCells = board.reduce((sum, row) => {
@@ -156,31 +203,32 @@ function dropOjamaToBoard(count) {
         return false;
     }
 
-    const cols = Array.from({ length: WIDTH }, (_, i) => i);
-    let placed = 0;
+    const fullRounds = Math.floor(amount / WIDTH);
+    const remainder = amount % WIDTH;
 
-    while (placed < amount) {
-        shuffleArray(cols);
-
-        let placedThisRound = false;
-        for (const x of cols) {
-            if (placed >= amount) break;
-
-            let stackHeight = 0;
-            for (let y = 0; y < HEIGHT; y++) {
-                if (board[y][x] !== COLORS.EMPTY) stackHeight++;
-            }
-
-            if (stackHeight < HEIGHT) {
-                board[stackHeight][x] = COLORS.GARBAGE;
-                placed++;
-                placedThisRound = true;
-                break;
-            }
+    const placeOne = (x) => {
+        let stackHeight = 0;
+        for (let y = 0; y < HEIGHT; y++) {
+            if (board[y][x] !== COLORS.EMPTY) stackHeight++;
         }
+        if (stackHeight >= HEIGHT) return false;
+        board[stackHeight][x] = COLORS.GARBAGE;
+        return true;
+    };
 
-        if (!placedThisRound) {
-            return false;
+    for (let round = 0; round < fullRounds; round++) {
+        const cols = Array.from({ length: WIDTH }, (_, i) => i);
+        shuffleArray(cols);
+        for (const x of cols) {
+            if (!placeOne(x)) return false;
+        }
+    }
+
+    if (remainder > 0) {
+        const cols = Array.from({ length: WIDTH }, (_, i) => i);
+        shuffleArray(cols);
+        for (let i = 0; i < remainder; i++) {
+            if (!placeOne(cols[i])) return false;
         }
     }
 
@@ -191,8 +239,8 @@ function dropOjamaToBoard(count) {
 function applyPendingOjamaToBoard() {
     if (pendingOjama <= 0) return true;
 
-    const amount = pendingOjama;
-    pendingOjama = 0;
+    const amount = Math.min(MAX_OJAMA_DROP_PER_TURN, pendingOjama);
+    pendingOjama -= amount;
     updateOjamaUI();
 
     const ok = dropOjamaToBoard(amount);
@@ -208,6 +256,7 @@ function applyPendingOjamaToBoard() {
 
 function triggerGameOver() {
     gameState = 'gameover';
+    document.body.classList.add('board-gameover');
     clearInterval(dropTimer);
     updateUI();
     renderBoard();
@@ -223,24 +272,19 @@ function triggerGameOver() {
 function generateInitialNextQueue() {
     nextQueue = [];
     queueIndex = 0;
-    const initialCount = Math.max(MAX_NEXT_PUYOS, 100);
-    for (let i = 0; i < initialCount; i++) {
-        nextQueue.push(getRandomPair());
-    }
+    appendBalancedNextBatch();
 }
 
 function ensureNextQueueCapacity() {
     const threshold = 40;
-    if (nextQueue.length - queueIndex < threshold) {
-        for (let i = 0; i < 100; i++) {
-            nextQueue.push(getRandomPair());
-        }
+    while (nextQueue.length - queueIndex < threshold) {
+        appendBalancedNextBatch();
     }
 }
 
 function consumeNextPair() {
     if (queueIndex >= nextQueue.length) {
-        for (let i = 0; i < 100; i++) nextQueue.push(getRandomPair());
+        appendBalancedNextBatch();
     }
     const pair = nextQueue[queueIndex];
     queueIndex++;
@@ -485,6 +529,7 @@ function saveState(clearRedoStack = true) {
         score: score,
         chainCount: chainCount,
         pendingOjama: pendingOjama,
+        nuisancePointBuffer: nuisancePointBuffer,
         currentPuyo: currentPuyo ? {
             mainColor: currentPuyo.mainColor,
             subColor: currentPuyo.subColor,
@@ -515,6 +560,7 @@ function restoreState(state) {
     score = state.score;
     chainCount = state.chainCount;
     pendingOjama = state.pendingOjama || 0;
+    nuisancePointBuffer = state.nuisancePointBuffer || 0;
     updateOjamaUI();
 
     if (state.currentPuyo) {
@@ -682,9 +728,11 @@ function initializeGame() {
     chainCount = 0;
     pendingOjama = 0;
     chainAttackScoreBuffer = 0;
+    nuisancePointBuffer = 0;
     updateOjamaUI();
 
     gameState = 'playing';
+    document.body.classList.remove('board-gameover');
 
     generateInitialNextQueue();
     editingNextPuyos = copyNextQueue(nextQueue.slice(0, MAX_NEXT_PUYOS));
@@ -706,10 +754,9 @@ function initializeGame() {
         }
     }
 
-    if (!currentPuyo) {
-        ensureNextQueueCapacity();
-        generateNewPuyo();
-    }
+    currentPuyo = null;
+    ensureNextQueueCapacity();
+    generateNewPuyo();
 
     startPuyoDropLoop();
     updateUI();
@@ -852,8 +899,8 @@ function getGhostFinalPositions() {
 // 衝突判定
 function checkCollision(coords) {
     for (const puyo of coords) {
-        if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0 || puyo.y >= HEIGHT) return true;
-        if (board[puyo.y][puyo.x] !== COLORS.EMPTY) return true;
+        if (puyo.x < 0 || puyo.x >= WIDTH || puyo.y < 0 || puyo.y > HEIGHT) return true;
+        if (puyo.y < HEIGHT && board[puyo.y][puyo.x] !== COLORS.EMPTY) return true;
     }
     return false;
 }
@@ -1098,16 +1145,8 @@ async function runChain() {
             return;
         }
 
-        // 連鎖終了時に、raw score をおじゃまへ換算して相殺→送信
-        const attackOjama = scoreToOjama(chainAttackScoreBuffer);
-        let outgoingOjama = consumeOjamaForAttack(attackOjama);
-        chainAttackScoreBuffer = 0;
+        flushChainOjamaBuffer();
 
-        if (outgoingOjama > 0 && typeof window.sendOjama === 'function') {
-            window.sendOjama(outgoingOjama);
-        }
-
-        // 受信していたおじゃまを盤面へ反映
         if (!applyPendingOjamaToBoard()) {
             return;
         }
@@ -1159,14 +1198,7 @@ async function runChain() {
     if (nextGroups.length === 0) {
         gameState = 'playing';
 
-        // 連鎖終了時に、raw score をおじゃまへ換算して相殺→送信
-        const attackOjama = scoreToOjama(chainAttackScoreBuffer);
-        let outgoingOjama = consumeOjamaForAttack(attackOjama);
-        chainAttackScoreBuffer = 0;
-
-        if (outgoingOjama > 0 && typeof window.sendOjama === 'function') {
-            window.sendOjama(outgoingOjama);
-        }
+        flushChainOjamaBuffer();
 
         if (!applyPendingOjamaToBoard()) {
             return;
@@ -1432,8 +1464,8 @@ function getDropY(x, startY = 0) {
                 const newMainY = mainY + 1;
                 const newSubY = subY + 1;
 
-                // 範囲超過判定（HEIGHT を基準）
-                if (newMainY >= HEIGHT || newSubY >= HEIGHT) {
+                // main は 13 まで、sub は 14 まで許可
+                if (newMainY >= HEIGHT || newSubY > HEIGHT) {
                     alert('これ以上上に移動できません。');
                     return;
                 }
@@ -1444,7 +1476,7 @@ function getDropY(x, startY = 0) {
                 if (newMainY < HEIGHT - HIDDEN_ROWS) {
                     if (board[newMainY][mainX] !== COLORS.EMPTY) canMove = false;
                 }
-                if (newSubY < HEIGHT - HIDDEN_ROWS) {
+                if (newSubY < HEIGHT && newSubY < HEIGHT - HIDDEN_ROWS) {
                     if (board[newSubY][subX] !== COLORS.EMPTY) canMove = false;
                 }
 
