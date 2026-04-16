@@ -62,7 +62,7 @@
     display: none;
     flex-direction: column;
     align-items: center;
-    margin-top: 10px;
+    margin-top: 5px;
     padding: 5px;
     background: rgba(0, 0, 0, 0.5);
     border-radius: 5px;
@@ -109,9 +109,9 @@ body.online-match-active #win-count-container {
 body.online-match-active #opponent-info {
     display: flex !important;
     justify-content: space-around;
-    font-size: 0.85em;
+    font-size: 0.6em;
     color: #aaa;
-    margin-top: 8px;
+    margin-top: 5px;
     padding: 5px 0;
     border-top: 1px solid #444;
 }
@@ -146,7 +146,6 @@ body.online-match-active #surrender-button {
     font-weight: bold;
     background-color: #d9534f;
     color: white;
-    margin-top: 5px;
     cursor: pointer;
 }
 
@@ -166,14 +165,14 @@ body.online-match-active #surrender-button {
 
 /* IDコピー */
 .copy-id-btn {
-    margin-top: 8px;
+    margin-top: 5px;
     padding: 6px 10px;
     font-size: 0.85em;
 }
 
 .mini-copy-btn {
     padding: 4px 8px;
-    font-size: 0.72em;
+    font-size: 0.6em;
     border: none;
     border-radius: 4px;
     cursor: pointer;
