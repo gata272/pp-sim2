@@ -23,6 +23,7 @@
     max-width: 400px;
     text-align: center;
     border: 1px solid #555;
+    box-sizing: border-box;
 }
 
 .online-box h2 {
@@ -57,6 +58,52 @@
     background: #6c757d;
 }
 
+/* IDコピー */
+.copy-id-btn {
+    margin-top: 5px;
+    padding: 6px 10px;
+    font-size: 0.85em;
+    width: auto;
+    min-width: 92px;
+}
+
+.mini-copy-btn {
+    padding: 4px 8px;
+    font-size: 0.6em;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #6c757d;
+    color: white;
+    white-space: nowrap;
+    line-height: 1;
+}
+
+.mini-copy-btn:disabled,
+.copy-id-btn:disabled,
+.online-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* ID表示エリア */
+#my-id-display {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    margin: 10px 0;
+    font-size: 0.9em;
+    color: #aaa;
+}
+
+#my-peer-id {
+    color: #fff;
+    font-weight: bold;
+    word-break: break-all;
+}
+
 /* 相手の盤面表示用 */
 #opponent-board-container {
     display: none;
@@ -67,6 +114,7 @@
     background: rgba(0, 0, 0, 0.5);
     border-radius: 5px;
     border: 1px solid #444;
+    box-sizing: border-box;
 }
 
 #opponent-board-container h3 {
@@ -95,6 +143,13 @@
 /* 勝利数枠のスタイル */
 #win-count-container {
     display: none;
+    align-items: center;
+    gap: 6px;
+}
+
+#win-count-display {
+    flex: 1;
+    text-align: center;
 }
 
 body.online-match-active #win-count-container {
@@ -150,7 +205,8 @@ body.online-match-active #surrender-button {
 }
 
 /* マッチ提案・リザルト */
-#match-proposal-overlay, #match-result-overlay {
+#match-proposal-overlay,
+#match-result-overlay {
     position: fixed;
     top: 0;
     left: 0;
@@ -161,37 +217,43 @@ body.online-match-active #surrender-button {
     display: none;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
 }
 
-/* IDコピー */
-.copy-id-btn {
-    margin-top: 5px;
-    padding: 6px 10px;
-    font-size: 0.85em;
-}
-
-.mini-copy-btn {
-    padding: 4px 8px;
-    font-size: 0.6em;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    background: #6c757d;
-    color: white;
-    white-space: nowrap;
-}
-
-#win-count-container {
-    display: none;
-    align-items: center;
-    gap: 6px;
-}
-
-#win-count-display {
-    flex: 1;
-    text-align: center;
-}
-
-body.online-match-active #win-count-container {
+/* 連戦用の結果画面でもボタンが崩れないようにする */
+#result-actions,
+#proposal-actions {
     display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+/* 小さな補助テキスト */
+#online-status {
+    word-break: break-word;
+    line-height: 1.4;
+}
+
+/* 画面が狭い時の微調整 */
+@media (max-width: 420px) {
+    .online-box {
+        padding: 16px;
+    }
+
+    #my-id-display {
+        font-size: 0.85em;
+    }
+
+    .copy-id-btn {
+        min-width: 84px;
+        font-size: 0.8em;
+    }
+
+    #opponent-board-container h3 {
+        font-size: 0.65em;
+    }
+
+    body.online-match-active #opponent-info {
+        font-size: 0.55em;
+    }
 }
