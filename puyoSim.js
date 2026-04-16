@@ -5,6 +5,7 @@
 // - Edit / Play
 // - おじゃまぷよ送受信・相殺・落下
 // - オンライン同期用フック
+// - 連戦用フック追加
 
 // 盤面サイズ
 const WIDTH = 6;
@@ -44,6 +45,9 @@ const MAX_OJAMA_DROP_PER_TURN = 30;
 const NEXT_QUEUE_BALANCE_BATCH_SIZE = 128;
 const NEXT_QUEUE_COLORS = [COLORS.RED, COLORS.BLUE, COLORS.GREEN, COLORS.YELLOW];
 
+// ゲームオーバー表示用
+const BOARD_GAMEOVER_CLASS = 'board-gameover';
+
 // ゲームの状態管理
 let board = [];
 let currentPuyo = null;
@@ -60,7 +64,7 @@ let nextEdited = false;
 // おじゃま管理
 let pendingOjama = 0; // 受け取って待機中のおじゃま（個数）
 let chainAttackScoreBuffer = 0; // 現在の連鎖で発生した攻撃の raw score
-let nuisancePointBuffer = 0; // 連鎖ごとの端数持ち越し
+let nuisancePointBuffer = 0; // 端数持ち越し
 
 // 履歴スタック（Undo / Redo）
 let historyStack = [];
@@ -98,6 +102,45 @@ function shuffleArray(arr) {
         [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     return arr;
+}
+
+function hasFourUniqueColorsAcrossFirstTwoPairs(batch) {
+    if (!batch || batch.length < 2) return false;
+    const s = new Set([...batch[0], ...batch[1]]);
+    return s.size === 4;
+}
+
+// 128組分の次ぷよを、4色64個ずつ均等になるように作る
+function buildBalancedNextBatch(batchPairs = NEXT_QUEUE_BALANCE_BATCH_SIZE) {
+    const totalPuyos = batchPairs * 2;
+    const perColor = totalPuyos / NEXT_QUEUE_COLORS.length;
+
+    const pool = [];
+    NEXT_QUEUE_COLORS.forEach(color => {
+        for (let i = 0; i < perColor; i++) {
+            pool.push(color);
+        }
+    });
+
+    shuffleArray(pool);
+
+    const batch = [];
+    for (let i = 0; i < pool.length; i += 2) {
+        batch.push([pool[i], pool[i + 1]]);
+    }
+    return batch;
+}
+
+function appendBalancedNextBatch() {
+    let batch = buildBalancedNextBatch();
+    let guard = 0;
+
+    while (hasFourUniqueColorsAcrossFirstTwoPairs(batch) && guard < 100) {
+        batch = buildBalancedNextBatch();
+        guard++;
+    }
+
+    nextQueue.push(...batch);
 }
 
 // sleep helper that registers chainTimer so it can be cancelled
@@ -138,12 +181,14 @@ function flushChainOjamaBuffer() {
     const attackOjama = Math.floor(nuisancePointBuffer);
     nuisancePointBuffer -= attackOjama;
 
-    let outgoingOjama = consumeOjamaForAttack(attackOjama);
+    const outgoingOjama = consumeOjamaForAttack(attackOjama);
     chainAttackScoreBuffer = 0;
 
     if (outgoingOjama > 0 && typeof window.sendOjama === 'function') {
         window.sendOjama(outgoingOjama);
     }
+
+    return outgoingOjama;
 }
 
 // online.js から受け取る入口
@@ -165,40 +210,12 @@ function consumeOjamaForAttack(attackOjama) {
     return attack - canceled;
 }
 
-// 128組分の次ぷよを、4色64個ずつ均等になるように作る
-function buildBalancedNextBatch(batchPairs = NEXT_QUEUE_BALANCE_BATCH_SIZE) {
-    const totalPuyos = batchPairs * 2;
-    const perColor = totalPuyos / NEXT_QUEUE_COLORS.length;
-
-    const pool = [];
-    NEXT_QUEUE_COLORS.forEach(color => {
-        for (let i = 0; i < perColor; i++) {
-            pool.push(color);
-        }
-    });
-
-    shuffleArray(pool);
-
-    const batch = [];
-    for (let i = 0; i < pool.length; i += 2) {
-        batch.push([pool[i], pool[i + 1]]);
-    }
-    return batch;
-}
-
-function appendBalancedNextBatch() {
-    nextQueue.push(...buildBalancedNextBatch());
-}
-
 // おじゃまを盤面に積む
 function dropOjamaToBoard(count) {
     const amount = Math.max(0, Math.min(MAX_OJAMA_DROP_PER_TURN, Math.floor(Number(count) || 0)));
     if (amount === 0) return true;
 
-    const emptyCells = board.reduce((sum, row) => {
-        return sum + row.filter(c => c === COLORS.EMPTY).length;
-    }, 0);
-
+    const emptyCells = board.reduce((sum, row) => sum + row.filter(c => c === COLORS.EMPTY).length, 0);
     if (amount > emptyCells) {
         return false;
     }
@@ -255,11 +272,17 @@ function applyPendingOjamaToBoard() {
 }
 
 function triggerGameOver() {
+    if (gameState === 'gameover') return;
+
     gameState = 'gameover';
-    document.body.classList.add('board-gameover');
+    document.body.classList.add(BOARD_GAMEOVER_CLASS);
     clearInterval(dropTimer);
+
     updateUI();
     renderBoard();
+
+    // ゲームオーバー状態も履歴に保存
+    saveState(true);
 
     if (typeof window.notifyGameOver === 'function') {
         window.notifyGameOver();
@@ -272,7 +295,16 @@ function triggerGameOver() {
 function generateInitialNextQueue() {
     nextQueue = [];
     queueIndex = 0;
-    appendBalancedNextBatch();
+
+    let batch = buildBalancedNextBatch();
+    let guard = 0;
+
+    while (hasFourUniqueColorsAcrossFirstTwoPairs(batch) && guard < 100) {
+        batch = buildBalancedNextBatch();
+        guard++;
+    }
+
+    nextQueue.push(...batch);
 }
 
 function ensureNextQueueCapacity() {
@@ -530,6 +562,7 @@ function saveState(clearRedoStack = true) {
         chainCount: chainCount,
         pendingOjama: pendingOjama,
         nuisancePointBuffer: nuisancePointBuffer,
+        gameState: gameState,
         currentPuyo: currentPuyo ? {
             mainColor: currentPuyo.mainColor,
             subColor: currentPuyo.subColor,
@@ -569,8 +602,16 @@ function restoreState(state) {
         currentPuyo = null;
     }
 
-    gameState = 'playing';
+    gameState = state.gameState || 'playing';
+    document.body.classList.toggle(BOARD_GAMEOVER_CLASS, gameState === 'gameover');
+
     clearInterval(dropTimer);
+
+    if (gameState === 'gameover') {
+        updateUI();
+        renderBoard();
+        return;
+    }
 
     gravity();
 
@@ -670,7 +711,7 @@ function handleBoardClickEditMode(event) {
         board[y][x] = currentEditColor;
         renderBoard();
     }
-};
+}
 
 window.applyNextPuyos = function() {
     if (gameState === 'editing') {
@@ -696,7 +737,7 @@ window.clearEditNext = function() {
                 console.warn("clearEditNext: Max retries reached.");
                 break;
             }
-        } while (hasFourUniqueColors(editingNextPuyos[i - 1], newPair));
+        } while (hasFourUniqueColorsAcrossFirstTwoPairs([editingNextPuyos[i - 1], newPair]));
         editingNextPuyos.push(newPair);
     }
     renderEditNextPuyos();
@@ -710,12 +751,6 @@ function getRandomColor() {
 
 function getRandomPair() {
     return [getRandomColor(), getRandomColor()];
-}
-
-function hasFourUniqueColors(pair1, pair2) {
-    if (!pair1 || !pair2) return false;
-    const s = new Set([...pair1, ...pair2]);
-    return s.size === 4;
 }
 
 let _initializedOnce = false;
@@ -732,7 +767,7 @@ function initializeGame() {
     updateOjamaUI();
 
     gameState = 'playing';
-    document.body.classList.remove('board-gameover');
+    document.body.classList.remove(BOARD_GAMEOVER_CLASS);
 
     generateInitialNextQueue();
     editingNextPuyos = copyNextQueue(nextQueue.slice(0, MAX_NEXT_PUYOS));
@@ -1173,7 +1208,6 @@ async function runChain() {
     const chainScore = calculateScore(groups, chainCount);
     score += chainScore;
 
-    // raw score をためる
     chainAttackScoreBuffer += chainScore;
 
     let erasedCoords = [];
@@ -1289,7 +1323,6 @@ function renderEditNextPuyos() {
             ev.stopPropagation();
             if (gameState !== 'editing') return;
             if (editingNextPuyos.length > listIndex) {
-                // puyoIndex: 0 = main(下), 1 = sub(上)
                 editingNextPuyos[listIndex][puyoIndex] = currentEditColor;
                 nextEdited = true;
                 renderEditNextPuyos();
@@ -1298,12 +1331,10 @@ function renderEditNextPuyos() {
         return puyo;
     };
 
-    // ----- visible slots (NEXT1, NEXT2) -----
     visibleSlots.forEach((slot, idx) => {
         slot.innerHTML = '';
 
         if (editingNextPuyos.length > idx) {
-            // ペアは [sub, main]（index 0 = sub / 上、index 1 = main / 下）
             const [c_main, c_sub] = editingNextPuyos[idx];
 
             slot.appendChild(createEditablePuyo(c_sub, idx, 1)); // 上
@@ -1311,7 +1342,6 @@ function renderEditNextPuyos() {
         }
     });
 
-    // ----- full list -----
     listContainer.innerHTML = '';
     for (let i = NUM_VISIBLE_NEXT_PUYOS; i < MAX_NEXT_PUYOS; i++) {
         if (editingNextPuyos.length <= i) break;
@@ -1323,8 +1353,8 @@ function renderEditNextPuyos() {
         const puyoRow = document.createElement('div');
         puyoRow.className = 'next-puyo-row';
         const [c_main, c_sub] = editingNextPuyos[i];
-        puyoRow.appendChild(createEditablePuyo(c_sub, i, 1)); // 上 (sub)
-        puyoRow.appendChild(createEditablePuyo(c_main, i, 0)); // 下 (main)
+        puyoRow.appendChild(createEditablePuyo(c_sub, i, 1));
+        puyoRow.appendChild(createEditablePuyo(c_main, i, 0));
         pairContainer.appendChild(puyoRow);
         listContainer.appendChild(pairContainer);
     }
@@ -1370,6 +1400,7 @@ window.toggleMode = function() {
     if (gameState === 'playing' || gameState === 'gameover') {
         clearInterval(dropTimer);
         gameState = 'editing';
+        document.body.classList.remove(BOARD_GAMEOVER_CLASS);
         if (infoPanel) infoPanel.classList.add('edit-mode-active');
         document.body.classList.add('edit-mode-active');
         if (modeToggleButton) modeToggleButton.textContent = 'play';
@@ -1380,13 +1411,13 @@ window.toggleMode = function() {
         renderBoard();
     } else if (gameState === 'editing') {
         gameState = 'playing';
+        document.body.classList.remove(BOARD_GAMEOVER_CLASS);
         if (infoPanel) infoPanel.classList.remove('edit-mode-active');
         document.body.classList.remove('edit-mode-active');
         if (modeToggleButton) modeToggleButton.textContent = 'edit';
         checkMobileControlsVisibility();
         if (boardElement) boardElement.removeEventListener('click', handleBoardClickEditMode);
 
-        // ここで currentPuyo を Next1 に差し替える
         if (nextEdited) {
             currentPuyo = null;
             ensureNextQueueCapacity();
@@ -1405,6 +1436,7 @@ window.updateGravityWait = function(value) {
     const display = document.getElementById('gravity-wait-value');
     if (display) display.textContent = gravityWaitTime + 'ms';
 };
+
 window.updateChainWait = function(value) {
     chainWaitTime = parseInt(value);
     const display = document.getElementById('chain-wait-value');
@@ -1432,6 +1464,13 @@ window.resetGame = function() {
     clearInterval(dropTimer);
     initializeGame();
 };
+
+// 連戦用の公開フック
+window.prepareForRematch = function() {
+    window.resetGame();
+};
+window.requestRematch = window.prepareForRematch;
+window.resetForRematch = window.prepareForRematch;
 
 // ---------- ユーティリティ / その他 ----------
 function getDropY(x, startY = 0) {
@@ -1515,7 +1554,6 @@ window.getPendingOjama = function() {
 };
 
 window.applyPendingOjamaToBoard = applyPendingOjamaToBoard;
-
 window.triggerGameOver = triggerGameOver;
 
 // 初期化
