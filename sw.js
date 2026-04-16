@@ -5,8 +5,8 @@ const urlsToCache = [
     './style.css',
     './puyoSim.js',
     './manifest.json',
-    './apple-touch-icon.png.png',
-    './android-icon-192x192.png.png'
+    './apple-touch-icon.png',
+    './android-icon-192x192.png'
 ];
 
 // インストール時にキャッシュを作成
