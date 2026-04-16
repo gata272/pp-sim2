@@ -22,6 +22,9 @@
     let boardSyncTimer = null;
     const BOARD_SYNC_INTERVAL = 100;
 
+    let rematchRequested = false;
+    let rematchPendingFromOpponent = false;
+
     function updateCopyIdButtons() {
         const copyBtn = document.getElementById('copy-my-id-btn');
         if (copyBtn) {
@@ -71,6 +74,7 @@
             if (!peerInitialized && !peerInitializing) {
                 initPeer();
             }
+            updateCopyIdButtons();
         }
     };
 
@@ -144,6 +148,68 @@
         }
     };
 
+    window.requestRematch = function() {
+        if (!conn || !conn.open) {
+            alert('接続がありません。');
+            return;
+        }
+        if (isMatchActive) {
+            alert('対戦中は連戦を申し込めません。');
+            return;
+        }
+        if (rematchRequested) {
+            return;
+        }
+
+        rematchRequested = true;
+        conn.send({
+            type: 'REMATCH_REQUEST',
+            winTarget: winTarget
+        });
+
+        const content = document.getElementById('result-content');
+        const actions = document.getElementById('result-actions');
+        if (content) {
+            content.innerHTML = `
+                <p>連戦の申し込みを送信しました。</p>
+                <p style="font-size: 1.0em; margin-top: 10px;">相手の返答を待っています...</p>
+            `;
+        }
+        if (actions) {
+            actions.innerHTML = `
+                <button class="online-btn secondary" onclick="location.reload()">終了</button>
+            `;
+        }
+    };
+
+    window.acceptRematch = function(target) {
+        if (!conn || !conn.open) return;
+
+        conn.send({
+            type: 'REMATCH_ACCEPT',
+            winTarget: target || winTarget
+        });
+
+        const overlay = document.getElementById('match-proposal-overlay');
+        if (overlay) overlay.style.display = 'none';
+
+        rematchPendingFromOpponent = false;
+        rematchRequested = false;
+
+        startMatch(target || winTarget);
+    };
+
+    window.rejectRematch = function() {
+        if (!conn || !conn.open) return;
+
+        conn.send({ type: 'REMATCH_REJECT' });
+
+        const overlay = document.getElementById('match-proposal-overlay');
+        if (overlay) overlay.style.display = 'none';
+
+        rematchPendingFromOpponent = false;
+    };
+
     // ---------- DOM ----------
     function initOnlineUI() {
         if (!document.getElementById('online-overlay')) {
@@ -200,7 +266,7 @@
                 winContainer.innerHTML = `
                     <span class="stat-label">勝利数</span>
                     <span id="win-count-display" class="stat-value">0 - 0</span>
-                    <button class="mini-copy-btn" onclick="copyMyPeerId()">ID</button>
+                    <button class="mini-copy-btn" onclick="copyMyPeerId()" disabled>ID</button>
                 `;
                 playStatsInfo.appendChild(winContainer);
             }
@@ -300,6 +366,8 @@
                 } else {
                     if (status) status.textContent = `エラー: ${err.type}`;
                 }
+
+                updateCopyIdButtons();
             });
 
             peer.on('disconnected', () => {
@@ -403,6 +471,24 @@
                 showMatchResult('シリーズ勝利！');
                 endMatch();
                 break;
+
+            case 'REMATCH_REQUEST':
+                if (isMatchActive) break;
+                rematchPendingFromOpponent = true;
+                showRematchProposal(data.winTarget);
+                break;
+
+            case 'REMATCH_ACCEPT':
+                if (isMatchActive) break;
+                rematchRequested = false;
+                startMatch(data.winTarget || winTarget);
+                break;
+
+            case 'REMATCH_REJECT':
+                if (isMatchActive) break;
+                rematchRequested = false;
+                showMatchResult('連戦は拒否されました。');
+                break;
         }
     }
 
@@ -443,6 +529,23 @@
         `;
     }
 
+    function showRematchProposal(target) {
+        const overlay = document.getElementById('match-proposal-overlay');
+        const content = document.getElementById('proposal-content');
+        const actions = document.getElementById('proposal-actions');
+        const title = document.getElementById('proposal-title');
+
+        if (!overlay || !content || !actions || !title) return;
+
+        overlay.style.display = 'flex';
+        title.textContent = '連戦の申し込み';
+        content.innerHTML = `<p>相手から <strong>${target || winTarget}本先取</strong> の連戦申し込みが届きました。</p>`;
+        actions.innerHTML = `
+            <button class="online-btn" onclick="acceptRematch(${target || winTarget})">承認して再戦</button>
+            <button class="online-btn secondary" onclick="rejectRematch()">拒否</button>
+        `;
+    }
+
     function startMatch(target) {
         winTarget = target;
         myWins = 0;
@@ -451,9 +554,14 @@
         oppChainCount = 0;
         oppOjamaPending = 0;
         isMatchActive = true;
+        rematchRequested = false;
+        rematchPendingFromOpponent = false;
 
         const overlay = document.getElementById('match-proposal-overlay');
         if (overlay) overlay.style.display = 'none';
+
+        const resultOverlay = document.getElementById('match-result-overlay');
+        if (resultOverlay) resultOverlay.style.display = 'none';
 
         document.body.classList.add('online-match-active');
         ensureSurrenderButton();
@@ -465,7 +573,11 @@
             if (window.toggleAutoDrop) window.toggleAutoDrop();
         }
 
-        if (window.resetGame) window.resetGame();
+        if (window.prepareForRematch) {
+            window.prepareForRematch();
+        } else if (window.resetGame) {
+            window.resetGame();
+        }
 
         updateWinCountDisplay();
         startBoardSync();
@@ -617,7 +729,11 @@
             endMatch();
         } else {
             setTimeout(() => {
-                if (window.resetGame) window.resetGame();
+                if (window.prepareForRematch) {
+                    window.prepareForRematch();
+                } else if (window.resetGame) {
+                    window.resetGame();
+                }
                 if (isHost) setTimeout(() => syncNextPuyos(), 500);
             }, 2000);
         }
@@ -630,42 +746,9 @@
         if (!overlay || !content || !actions) return;
 
         overlay.style.display = 'flex';
+        rematchRequested = false;
+        rematchPendingFromOpponent = false;
+
         content.innerHTML = `
             <p>${message}</p>
-            <p style="font-size: 1.2em; margin-top: 10px;">最終スコア: ${myWins} - ${oppWins}</p>
-        `;
-        actions.innerHTML = `<button class="online-btn" onclick="location.reload()">終了</button>`;
-    }
-
-    function endMatch() {
-        isMatchActive = false;
-        document.body.classList.remove('online-match-active');
-        stopBoardSync();
-
-        const surrenderBtn = document.getElementById('surrender-button');
-        if (surrenderBtn) surrenderBtn.style.display = 'none';
-    }
-
-    window.setNextQueue = function(newNext) {
-        if (typeof newNext !== 'undefined') {
-            nextQueue = JSON.parse(JSON.stringify(newNext));
-            queueIndex = 0;
-            if (window.renderBoard) window.renderBoard();
-        }
-    };
-
-    // ---------- 起動 ----------
-    function autoInitPeer() {
-        if (!peerInitialized && !peerInitializing) initPeer();
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            initOnlineUI();
-            autoInitPeer();
-        });
-    } else {
-        initOnlineUI();
-        autoInitPeer();
-    }
-})();
+            <p style="font-size: 1.2
