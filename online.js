@@ -214,7 +214,7 @@
                 oppContainer.innerHTML = `
                     <h3>相手の盤面</h3>
                     <div id="opponent-board"></div>
-                    <div id="opponent-info" style="margin-top: 8px; display: flex; justify-content: space-around; font-size: 0.85em; color: #aaa;">
+                    <div id="opponent-info" style="margin-top: 3px; display: flex; justify-content: space-around; font-size: 0.6em; color: #aaa;">
                         <div>スコア: <span id="opp-score">0</span></div>
                         <div>連鎖: <span id="opp-chain">0</span></div>
                         <div>おじゃま: <span id="opp-ojama">0</span></div>
