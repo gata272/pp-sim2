@@ -116,7 +116,7 @@ body {
 #play-info-container, #edit-info-container {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 5px;
     width: 100%;
 }
 
@@ -173,8 +173,7 @@ body {
 .next-puyo-row {
     display: flex; 
     justify-content: center;
-    gap: 15px;
-    margin-top: 5px;
+    gap: 10px;
 }
 #play-next-info .puyo {
     width: 24px; 
@@ -238,7 +237,6 @@ body {
     font-weight: bold;
     background-color: #9b59b6;
     color: white;
-    margin-top: 5px;
 }
 
 #online-toggle-btn {
@@ -255,7 +253,7 @@ body {
 #setting-back-btn {
     background-color: #457b9d;
     color: white;
-    margin-top: 10px;
+    margin-top: 5px;
     width: 100%;
     padding: 8px;
     border: none;
