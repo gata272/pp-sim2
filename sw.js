@@ -1,9 +1,12 @@
-const CACHE_NAME = 'puyo-sim-v1';
+const CACHE_NAME = 'puyo-sim-v2';
 const urlsToCache = [
     './',
     './index.html',
     './style.css',
+    './online.css',
+    './online.js',
     './puyoSim.js',
+    './puyoAI.js',
     './manifest.json',
     './apple-touch-icon.png',
     './android-icon-192x192.png'
