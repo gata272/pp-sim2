@@ -1,4 +1,4 @@
-console.log('online.js loaded');
+window.__log && window.__log('online.js loaded');
 /* online.js */
 (function() {
     let peer = null;
@@ -214,6 +214,7 @@ console.log('online.js loaded');
 
     // ---------- DOM ----------
     function initOnlineUI() {
+        window.__log && window.__log('initOnlineUI start');
         if (!document.getElementById('online-overlay')) {
             const overlay = document.createElement('div');
             overlay.id = 'online-overlay';
