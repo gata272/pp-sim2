@@ -1145,7 +1145,9 @@ function calculateScore(groups, currentChain) {
         bonusTotal += BONUS_TABLE.GROUP[idx];
     });
 
-    const chainIdx = Math.min(currentChain, BONUS_TABLE.CHAIN.length - 1);
+    // ここが修正点:
+    // currentChain は 1連鎖目で 1 になるため、CHAIN 配列は currentChain - 1 で参照する
+    const chainIdx = Math.max(0, Math.min(currentChain - 1, BONUS_TABLE.CHAIN.length - 1));
     bonusTotal += BONUS_TABLE.CHAIN[chainIdx];
 
     const colorIdx = Math.min(colorSet.size, BONUS_TABLE.COLOR.length - 1);
