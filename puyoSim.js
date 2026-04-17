@@ -1141,21 +1141,24 @@ function calculateScore(groups, currentChain) {
     groups.forEach(({ group, color }) => {
         totalPuyos += group.length;
         colorSet.add(color);
+
         const idx = Math.min(group.length, BONUS_TABLE.GROUP.length - 1);
         bonusTotal += BONUS_TABLE.GROUP[idx];
     });
 
-    // ここが修正点:
-    // currentChain は 1連鎖目で 1 になるため、CHAIN 配列は currentChain - 1 で参照する
+    // 1連鎖目は CHAIN[0] を使う
     const chainIdx = Math.max(0, Math.min(currentChain - 1, BONUS_TABLE.CHAIN.length - 1));
     bonusTotal += BONUS_TABLE.CHAIN[chainIdx];
 
     const colorIdx = Math.min(colorSet.size, BONUS_TABLE.COLOR.length - 1);
     bonusTotal += BONUS_TABLE.COLOR[colorIdx];
 
-    const finalBonus = Math.max(1, Math.min(999, bonusTotal));
-    const totalScore = (10 * totalPuyos) * finalBonus;
-    return totalScore;
+    // A+B+C が 0 のときは 1 にする
+    const bonusMultiplier = (bonusTotal === 0) ? 1 : bonusTotal;
+
+    // X = 10 × 消したぷよの数
+    // score = X × (A + B + C)
+    return (10 * totalPuyos) * bonusMultiplier;
 }
 
 // 連鎖処理（async）
