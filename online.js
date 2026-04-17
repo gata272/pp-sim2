@@ -1,4 +1,3 @@
-window.__log && window.__log('online.js loaded');
 /* online.js */
 (function() {
     let peer = null;
@@ -69,7 +68,6 @@ window.__log && window.__log('online.js loaded');
 
     // ---------- UI ----------
     window.showOnlineOverlay = function() {
-        console.log('showOnlineOverlay called');
         const overlay = document.getElementById('online-overlay');
         if (overlay) {
             overlay.style.display = 'flex';
@@ -214,7 +212,6 @@ window.__log && window.__log('online.js loaded');
 
     // ---------- DOM ----------
     function initOnlineUI() {
-        window.__log && window.__log('initOnlineUI start');
         if (!document.getElementById('online-overlay')) {
             const overlay = document.createElement('div');
             overlay.id = 'online-overlay';
@@ -754,4 +751,48 @@ window.__log && window.__log('online.js loaded');
 
         content.innerHTML = `
             <p>${message}</p>
-            <p style="font-size: 1.2
+            <p style="font-size: 1.2em; margin-top: 10px;">最終スコア: ${myWins} - ${oppWins}</p>
+        `;
+
+        if (conn && conn.open) {
+            actions.innerHTML = `
+                <button class="online-btn" onclick="requestRematch()">連戦を申し込む</button>
+                <button class="online-btn secondary" onclick="location.reload()">終了</button>
+            `;
+        } else {
+            actions.innerHTML = `<button class="online-btn secondary" onclick="location.reload()">終了</button>`;
+        }
+    }
+
+    function endMatch() {
+        isMatchActive = false;
+        document.body.classList.remove('online-match-active');
+        stopBoardSync();
+
+        const surrenderBtn = document.getElementById('surrender-button');
+        if (surrenderBtn) surrenderBtn.style.display = 'none';
+    }
+
+    window.setNextQueue = function(newNext) {
+        if (typeof newNext !== 'undefined') {
+            nextQueue = JSON.parse(JSON.stringify(newNext));
+            queueIndex = 0;
+            if (window.renderBoard) window.renderBoard();
+        }
+    };
+
+    // ---------- 起動 ----------
+    function autoInitPeer() {
+        if (!peerInitialized && !peerInitializing) initPeer();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            initOnlineUI();
+            autoInitPeer();
+        });
+    } else {
+        initOnlineUI();
+        autoInitPeer();
+    }
+})();
