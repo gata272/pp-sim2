@@ -1,3 +1,4 @@
+console.log('online.js loaded');
 /* online.js */
 (function() {
     let peer = null;
