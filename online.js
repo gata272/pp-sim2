@@ -68,6 +68,7 @@
 
     // ---------- UI ----------
     window.showOnlineOverlay = function() {
+        console.log('showOnlineOverlay called');
         const overlay = document.getElementById('online-overlay');
         if (overlay) {
             overlay.style.display = 'flex';
