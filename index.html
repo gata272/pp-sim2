@@ -18,6 +18,51 @@
 
     <link rel="stylesheet" href="./style.css">
     <link rel="stylesheet" href="./online.css">
+
+    <script>
+        // 先に最低限の保険を入れる
+        window.__bootLogs = window.__bootLogs || [];
+        window.__log = function (msg) {
+            const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            window.__bootLogs.push(line);
+            console.log(line);
+
+            const box = document.getElementById('boot-log');
+            if (box) box.textContent = window.__bootLogs.slice(-40).join('\n');
+
+            try {
+                localStorage.setItem('__bootLogs', JSON.stringify(window.__bootLogs.slice(-80)));
+            } catch (e) {}
+        };
+
+        window.addEventListener('error', function (e) {
+            window.__log(`ERROR: ${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`);
+        });
+
+        window.addEventListener('unhandledrejection', function (e) {
+            window.__log(`PROMISE: ${String(e.reason)}`);
+        });
+
+        // ボタンが先に押されても落ちないようにする
+        window.showOnlineOverlay = window.showOnlineOverlay || function () {
+            window.__log('showOnlineOverlay fallback called');
+            const overlay = document.getElementById('online-overlay');
+            if (overlay) {
+                overlay.style.display = 'flex';
+            } else {
+                alert('online-overlay がまだ作られていません');
+            }
+        };
+
+        window.hideOnlineOverlay = window.hideOnlineOverlay || function () {
+            const overlay = document.getElementById('online-overlay');
+            if (overlay) overlay.style.display = 'none';
+        };
+
+        if (new URLSearchParams(location.search).has('debug')) {
+            window.__showBootLog = true;
+        }
+    </script>
 </head>
 <body>
 
@@ -153,21 +198,38 @@
 
     <p class="small-text">puyo-sim_ver2.1.1 by gata</p>
 
+    <pre id="boot-log" style="display:none; white-space:pre-wrap; font-size:11px; line-height:1.4; background:#000; color:#ddd; padding:8px; margin:8px; max-width:800px; width:100%; box-sizing:border-box; border:1px solid #444; border-radius:6px;"></pre>
+
     <script src="./puyoAI.js"></script>
     <script src="./puyoSim.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="./online.js"></script>
 
     <script>
+        if (window.__showBootLog) {
+            const box = document.getElementById('boot-log');
+            if (box) {
+                box.style.display = 'block';
+                try {
+                    const saved = JSON.parse(localStorage.getItem('__bootLogs') || '[]');
+                    if (saved.length) box.textContent = saved.join('\n');
+                } catch (e) {}
+            }
+        }
+
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
                 navigator.serviceWorker.register('./sw.js').then(function(registration) {
                     console.log('Service Worker registered successfully:', registration);
+                    window.__log && window.__log('Service Worker registered');
                 }).catch(function(error) {
                     console.log('Service Worker registration failed:', error);
+                    window.__log && window.__log('SW register failed: ' + error);
                 });
             });
         }
+
+        window.__log && window.__log('index.html loaded');
     </script>
 
 </body>
