@@ -10,6 +10,7 @@ const urlsToCache = [
     './manifest.json',
     './apple-touch-icon.png',
     './android-icon-192x192.png'
+    './android-icon-512x512.png'
 ];
 
 // インストール時にキャッシュを作成
