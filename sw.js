@@ -9,7 +9,7 @@ const urlsToCache = [
     './puyoAI.js',
     './manifest.json',
     './apple-touch-icon.png',
-    './android-icon-192x192.png'
+    './android-icon-192x192.png',
     './android-icon-512x512.png'
 ];
 
