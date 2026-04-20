@@ -1561,6 +1561,38 @@ window.getPendingOjama = function() {
 window.applyPendingOjamaToBoard = applyPendingOjamaToBoard;
 window.triggerGameOver = triggerGameOver;
 
+// --- AI / 外部連携フック ---
+window.getBoardSnapshot = function() {
+    return copyBoard(board);
+};
+
+window.getGameState = function() {
+    return gameState;
+};
+
+window.getCurrentPuyoState = function() {
+    return currentPuyo ? { ...currentPuyo } : null;
+};
+
+window.getUpcomingPairs = function(count = 3) {
+    return nextQueue.slice(queueIndex, queueIndex + count).map(pair => pair.slice());
+};
+
+// AI が狙った向き・位置へ一瞬で寄せてから落とすためのフック
+window.__aiApplyPlacement = function(mainX, rotation) {
+    if (gameState !== 'playing' || !currentPuyo) return false;
+
+    currentPuyo.mainX = mainX;
+    currentPuyo.mainY = HEIGHT - 2; // AI はここから最適位置へ hardDrop する
+    currentPuyo.rotation = rotation;
+
+    if (typeof renderBoard === 'function') renderBoard();
+    return true;
+};
+
+// 明示的に外から使えるようにしておく
+window.hardDrop = hardDrop;
+
 // 初期化
 document.addEventListener('DOMContentLoaded', () => {
     initializeGame();
