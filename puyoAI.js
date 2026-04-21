@@ -752,3 +752,148 @@
     startAutoplay();
   }
 })();
+// ===== HTMLボタン対応用 =====
+function setAIStatus(text) {
+  const el = document.getElementById('ai-status');
+  if (el) el.textContent = text;
+}
+
+function setAIAutoButtonText(on) {
+  const btn = document.getElementById('ai-auto-button');
+  if (btn) btn.textContent = on ? 'AI自動: ON' : 'AI自動: OFF';
+}
+
+function setAIStepButtonState(disabled) {
+  const btn = document.getElementById('ai-step-button');
+  if (btn) btn.disabled = !!disabled;
+}
+
+function isAIReady() {
+  return !!window.PuyoAI && typeof window.PuyoAI.think === 'function';
+}
+
+function runPuyoAIInternal() {
+  if (!isAIReady()) {
+    setAIStatus('AIがまだ読み込まれていません');
+    return false;
+  }
+
+  if (typeof gameState !== 'undefined' && gameState !== 'playing') {
+    setAIStatus('プレイ中のみ実行できます');
+    return false;
+  }
+
+  if (typeof currentPuyo !== 'undefined' && !currentPuyo) {
+    setAIStatus('操作ぷよがありません');
+    return false;
+  }
+
+  setAIStatus('AI思考中...');
+  setAIStepButtonState(true);
+
+  try {
+    const plan = window.PuyoAI.think();
+    if (!plan) {
+      setAIStatus('手が見つかりませんでした');
+      return false;
+    }
+
+    const piece = typeof currentPuyo !== 'undefined' ? currentPuyo : null;
+    if (!piece) {
+      setAIStatus('操作ぷよがありません');
+      return false;
+    }
+
+    // 回転
+    const targetRotation = plan.rotation;
+    let nowRotation = piece.rotation;
+    const cw = (targetRotation - nowRotation + 4) % 4;
+    const ccw = (nowRotation - targetRotation + 4) % 4;
+
+    if (cw <= ccw) {
+      for (let i = 0; i < cw; i++) {
+        if (typeof window.rotatePuyoCW === 'function') window.rotatePuyoCW();
+      }
+    } else {
+      for (let i = 0; i < ccw; i++) {
+        if (typeof window.rotatePuyoCCW === 'function') window.rotatePuyoCCW();
+      }
+    }
+
+    // 横移動
+    const updatedPiece = typeof currentPuyo !== 'undefined' ? currentPuyo : null;
+    if (updatedPiece) {
+      let dx = plan.mainX - updatedPiece.mainX;
+      while (dx < 0) {
+        if (typeof window.handleInput === 'function') {
+          window.handleInput({ key: 'ArrowLeft' });
+        } else if (typeof movePuyo === 'function') {
+          movePuyo(-1, 0);
+        }
+        dx++;
+      }
+      while (dx > 0) {
+        if (typeof window.handleInput === 'function') {
+          window.handleInput({ key: 'ArrowRight' });
+        } else if (typeof movePuyo === 'function') {
+          movePuyo(1, 0);
+        }
+        dx--;
+      }
+    }
+
+    // ハードドロップ
+    if (typeof window.hardDrop === 'function') {
+      window.hardDrop();
+    } else {
+      const ev = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+      document.dispatchEvent(ev);
+    }
+
+    setAIStatus('AI完了');
+    return true;
+  } catch (err) {
+    console.error('[PuyoAI] run failed:', err);
+    setAIStatus('AI実行エラー');
+    return false;
+  } finally {
+    setAIStepButtonState(false);
+  }
+}
+
+window.runPuyoAI = function() {
+  return runPuyoAIInternal();
+};
+
+window.toggleAIAuto = function() {
+  if (!isAIReady()) {
+    setAIStatus('AIがまだ読み込まれていません');
+    return;
+  }
+
+  if (window.__puyoAIAutoTimer) {
+    clearInterval(window.__puyoAIAutoTimer);
+    window.__puyoAIAutoTimer = null;
+    setAIAutoButtonText(false);
+    setAIStatus('AI待機中');
+    return;
+  }
+
+  window.__puyoAIAutoTimer = setInterval(() => {
+    if (typeof gameState !== 'undefined' && gameState !== 'playing') return;
+    if (typeof currentPuyo !== 'undefined' && !currentPuyo) return;
+    if (typeof document === 'undefined') return;
+    runPuyoAIInternal();
+  }, 120);
+
+  setAIAutoButtonText(true);
+  setAIStatus('AI自動実行中');
+};
+
+// 起動時の表示整備
+document.addEventListener('DOMContentLoaded', () => {
+  const ready = isAIReady();
+  setAIAutoButtonText(false);
+  setAIStepButtonState(false);
+  setAIStatus(ready ? 'AI待機中' : 'AI読み込み中');
+});
