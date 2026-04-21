@@ -5,12 +5,13 @@
     const WIDTH = 6;
     const HEIGHT = 14;
     const HIDDEN_ROWS = 2;
-
-    const MAX_SEARCH_DEPTH = 3;     // 現在 + NEXT1 + NEXT2
-    const BEAM_WIDTH = 24;          // 盤面が軽いので少し広め
-    const NUISANCE_TARGET_POINTS = 70;
+    const MAX_SEARCH_DEPTH = 3;
+    const BEAM_WIDTH = 32;
+    const AUTO_TICK_MS = 120;
     const MAX_OJAMA_DROP_PER_TURN = 30;
+    const NUISANCE_TARGET_POINTS = 70;
     const ALL_CLEAR_SCORE_BONUS = 2100;
+    const BOARD_GAMEOVER_CLASS = 'board-gameover';
 
     const COLORS = {
         EMPTY: 0,
@@ -27,26 +28,17 @@
         COLOR: [0, 0, 3, 6, 12]
     };
 
-    const ROTATION_OFFSETS = [
-        [{ x: 0, y: 0 }, { x: 0, y: 1 }],  // 0: main 下 / sub 上
-        [{ x: 0, y: 0 }, { x: -1, y: 0 }], // 1: sub 左
-        [{ x: 0, y: 0 }, { x: 0, y: -1 }], // 2: sub 下
-        [{ x: 0, y: 0 }, { x: 1, y: 0 }]   // 3: sub 右
+    const OFFSETS = [
+        [{ x: 0, y: 0 }, { x: 0, y: 1 }],
+        [{ x: 0, y: 0 }, { x: -1, y: 0 }],
+        [{ x: 0, y: 0 }, { x: 0, y: -1 }],
+        [{ x: 0, y: 0 }, { x: 1, y: 0 }]
     ];
 
     let autoEnabled = false;
     let autoTimer = null;
-    let aiInProgress = false;
-
-    function setStatus(text) {
-        const el = document.getElementById('ai-status');
-        if (el) el.textContent = text;
-    }
-
-    function setAutoButtonText() {
-        const btn = document.getElementById('ai-auto-button');
-        if (btn) btn.textContent = autoEnabled ? 'AI自動: ON' : 'AI自動: OFF';
-    }
+    let searchBusy = false;
+    let transposition = new Map();
 
     function getGameState() {
         if (typeof window.getGameState === 'function') return window.getGameState();
@@ -54,24 +46,32 @@
         return 'playing';
     }
 
-    function getBoardSnapshot() {
+    function getBoard() {
         if (typeof window.getBoardSnapshot === 'function') return window.getBoardSnapshot();
         if (typeof board !== 'undefined') return board.map(row => row.slice());
         return [];
     }
 
-    function getCurrentPuyoState() {
+    function getCurrentPuyo() {
         if (typeof window.getCurrentPuyoState === 'function') return window.getCurrentPuyoState();
         if (typeof currentPuyo !== 'undefined' && currentPuyo) return { ...currentPuyo };
         return null;
     }
 
-    function getUpcomingPairs(count = 2) {
-        if (typeof window.getUpcomingPairs === 'function') return window.getUpcomingPairs(count);
-        if (typeof nextQueue !== 'undefined' && typeof queueIndex !== 'undefined') {
-            return nextQueue.slice(queueIndex, queueIndex + count).map(pair => pair.slice());
-        }
-        return [];
+    function getPendingOjama() {
+        if (typeof window.getPendingOjama === 'function') return Math.max(0, Math.floor(Number(window.getPendingOjama()) || 0));
+        if (typeof pendingOjama !== 'undefined') return Math.max(0, Math.floor(Number(pendingOjama) || 0));
+        return 0;
+    }
+
+    function setStatus(text) {
+        const el = document.getElementById('ai-status');
+        if (el) el.textContent = text;
+    }
+
+    function syncButtonText() {
+        const btn = document.getElementById('ai-auto-button');
+        if (btn) btn.textContent = autoEnabled ? 'AI自動: ON' : 'AI自動: OFF';
     }
 
     function cloneBoard(src) {
@@ -82,30 +82,8 @@
         return x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT;
     }
 
-    function isEmptyBoard(boardState) {
-        for (let y = 0; y < HEIGHT; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                if (boardState[y][x] !== COLORS.EMPTY) return false;
-            }
-        }
-        return true;
-    }
-
-    function canSpawn(boardState) {
-        // 現在のゲームのスポーン位置に合わせる
-        const cells = [
-            { x: 2, y: HEIGHT - 2 },
-            { x: 2, y: HEIGHT - 1 }
-        ];
-        for (const c of cells) {
-            if (!inBounds(c.x, c.y)) return false;
-            if (boardState[c.y][c.x] !== COLORS.EMPTY) return false;
-        }
-        return true;
-    }
-
     function getCoords(mainX, mainY, rotation) {
-        const off = ROTATION_OFFSETS[rotation & 3];
+        const off = OFFSETS[rotation & 3];
         return [
             { x: mainX + off[0].x, y: mainY + off[0].y, kind: 'main' },
             { x: mainX + off[1].x, y: mainY + off[1].y, kind: 'sub' }
@@ -115,12 +93,12 @@
     function canPlace(boardState, coords) {
         for (const p of coords) {
             if (!inBounds(p.x, p.y)) return false;
-            if (boardState[p.y][p.x] !== COLORS.EMPTY) return false;
+            if (p.y < HEIGHT - HIDDEN_ROWS && boardState[p.y][p.x] !== COLORS.EMPTY) return false;
         }
         return true;
     }
 
-    function shuffleInPlace(arr, rng) {
+    function shuffle(arr, rng) {
         for (let i = arr.length - 1; i > 0; i--) {
             const j = Math.floor(rng() * (i + 1));
             [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -138,7 +116,7 @@
         };
     }
 
-    function boardSeed(boardState, pendingOjama, salt = 0) {
+    function seedFrom(boardState, pending, salt = 0) {
         let h = 2166136261 >>> 0;
         for (let y = 0; y < HEIGHT; y++) {
             for (let x = 0; x < WIDTH; x++) {
@@ -146,7 +124,7 @@
                 h = Math.imul(h, 16777619);
             }
         }
-        h ^= pendingOjama + 0x9e3779b9 + salt;
+        h ^= (pending + 0x9e3779b9 + salt) >>> 0;
         return h >>> 0;
     }
 
@@ -162,21 +140,19 @@
         }
     }
 
-    function clearGarbageAround(boardState, erasedCoords) {
-        const toClear = new Set();
+    function clearGarbage(boardState, erasedCoords) {
+        const set = new Set();
         for (const p of erasedCoords) {
-            const dirs = [
-                [0, 1], [0, -1], [1, 0], [-1, 0]
-            ];
+            const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
             for (const [dx, dy] of dirs) {
                 const nx = p.x + dx;
                 const ny = p.y + dy;
                 if (inBounds(nx, ny) && boardState[ny][nx] === COLORS.GARBAGE) {
-                    toClear.add(nx + ',' + ny);
+                    set.add(nx + ',' + ny);
                 }
             }
         }
-        toClear.forEach(key => {
+        set.forEach(key => {
             const [x, y] = key.split(',').map(Number);
             boardState[y][x] = COLORS.EMPTY;
         });
@@ -185,9 +161,9 @@
     function findGroups(boardState) {
         const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
         const groups = [];
-        const maxSearchY = HEIGHT - HIDDEN_ROWS; // 現行ロジックに合わせる
+        const maxY = HEIGHT - HIDDEN_ROWS;
 
-        for (let y = 0; y < maxSearchY; y++) {
+        for (let y = 0; y < maxY; y++) {
             for (let x = 0; x < WIDTH; x++) {
                 const color = boardState[y][x];
                 if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
@@ -199,19 +175,11 @@
                 while (stack.length) {
                     const cur = stack.pop();
                     group.push(cur);
-
-                    const dirs = [
-                        [0, 1], [0, -1], [1, 0], [-1, 0]
-                    ];
+                    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
                     for (const [dx, dy] of dirs) {
                         const nx = cur.x + dx;
                         const ny = cur.y + dy;
-                        if (
-                            nx >= 0 && nx < WIDTH &&
-                            ny >= 0 && ny < maxSearchY &&
-                            !visited[ny][nx] &&
-                            boardState[ny][nx] === color
-                        ) {
+                        if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < maxY && !visited[ny][nx] && boardState[ny][nx] === color) {
                             visited[ny][nx] = true;
                             stack.push({ x: nx, y: ny });
                         }
@@ -228,50 +196,57 @@
     function calculateScore(groups, chainIndex) {
         let totalPuyos = 0;
         const colorSet = new Set();
-        let bonusTotal = 0;
+        let bonus = 0;
 
         for (const { group, color } of groups) {
             totalPuyos += group.length;
             colorSet.add(color);
             const idx = Math.min(group.length, BONUS_TABLE.GROUP.length - 1);
-            bonusTotal += BONUS_TABLE.GROUP[idx];
+            bonus += BONUS_TABLE.GROUP[idx];
         }
 
         const chainIdx = Math.max(0, Math.min(chainIndex - 1, BONUS_TABLE.CHAIN.length - 1));
-        bonusTotal += BONUS_TABLE.CHAIN[chainIdx];
+        bonus += BONUS_TABLE.CHAIN[chainIdx];
 
         const colorIdx = Math.min(colorSet.size, BONUS_TABLE.COLOR.length - 1);
-        bonusTotal += BONUS_TABLE.COLOR[colorIdx];
+        bonus += BONUS_TABLE.COLOR[colorIdx];
 
-        const finalBonus = Math.max(1, bonusTotal);
-        return (10 * totalPuyos) * finalBonus;
+        bonus = Math.max(1, Math.min(999, bonus));
+        return (10 * totalPuyos) * bonus;
     }
 
-    function simulateChain(boardState) {
+    function isEmptyBoard(boardState) {
+        for (let y = 0; y < HEIGHT; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                if (boardState[y][x] !== COLORS.EMPTY) return false;
+            }
+        }
+        return true;
+    }
+
+    function resolveChain(boardState) {
         const b = cloneBoard(boardState);
         let totalScore = 0;
-        let chain = 0;
-        let totalCleared = 0;
+        let chains = 0;
 
         while (true) {
             simulateGravity(b);
             const groups = findGroups(b);
             if (groups.length === 0) break;
 
-            chain++;
-            const gain = calculateScore(groups, chain);
-            totalScore += gain;
+            chains++;
+            const gained = calculateScore(groups, chains);
+            totalScore += gained;
 
-            const erasedCoords = [];
+            const erased = [];
             for (const { group } of groups) {
                 for (const p of group) {
                     b[p.y][p.x] = COLORS.EMPTY;
-                    erasedCoords.push(p);
+                    erased.push(p);
                 }
             }
 
-            totalCleared += erasedCoords.length;
-            clearGarbageAround(b, erasedCoords);
+            clearGarbage(b, erased);
             simulateGravity(b);
         }
 
@@ -282,8 +257,7 @@
         return {
             board: b,
             totalScore,
-            chainCount: chain,
-            totalCleared,
+            chains,
             allClear: isEmptyBoard(b)
         };
     }
@@ -291,11 +265,11 @@
     function countHoles(boardState) {
         let holes = 0;
         for (let x = 0; x < WIDTH; x++) {
-            let seenBlock = false;
+            let seen = false;
             for (let y = 0; y < HEIGHT; y++) {
                 if (boardState[y][x] !== COLORS.EMPTY) {
-                    seenBlock = true;
-                } else if (seenBlock) {
+                    seen = true;
+                } else if (seen) {
                     holes++;
                 }
             }
@@ -315,115 +289,134 @@
         return heights;
     }
 
-    function surfaceRoughness(heights) {
+    function roughness(heights) {
         let r = 0;
-        for (let x = 0; x < WIDTH - 1; x++) {
-            r += Math.abs(heights[x] - heights[x + 1]);
-        }
+        for (let i = 0; i < WIDTH - 1; i++) r += Math.abs(heights[i] - heights[i + 1]);
         return r;
     }
 
-    function connectedPotential(boardState) {
-        // 2連結・3連結を少しだけ評価する
-        const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
-        let score = 0;
-        const maxSearchY = HEIGHT - HIDDEN_ROWS;
+    function adjacencyPotential(boardState) {
+        let s = 0;
+        const maxY = HEIGHT - HIDDEN_ROWS;
+        for (let y = 0; y < maxY; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                const c = boardState[y][x];
+                if (c === COLORS.EMPTY || c === COLORS.GARBAGE) continue;
+                if (x + 1 < WIDTH && boardState[y][x + 1] === c) s += 5;
+                if (y + 1 < maxY && boardState[y + 1][x] === c) s += 5;
+            }
+        }
+        return s;
+    }
 
-        for (let y = 0; y < maxSearchY; y++) {
+    function groupPotential(boardState) {
+        const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+        const maxY = HEIGHT - HIDDEN_ROWS;
+        let score = 0;
+
+        for (let y = 0; y < maxY; y++) {
             for (let x = 0; x < WIDTH; x++) {
                 const color = boardState[y][x];
                 if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
 
                 const stack = [{ x, y }];
                 visited[y][x] = true;
-                let size = 0;
+                const group = [];
+                let touchEmpty = 0;
 
                 while (stack.length) {
                     const cur = stack.pop();
-                    size++;
-
-                    const dirs = [
-                        [0, 1], [0, -1], [1, 0], [-1, 0]
-                    ];
+                    group.push(cur);
+                    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
                     for (const [dx, dy] of dirs) {
                         const nx = cur.x + dx;
                         const ny = cur.y + dy;
-                        if (
-                            nx >= 0 && nx < WIDTH &&
-                            ny >= 0 && ny < maxSearchY &&
-                            !visited[ny][nx] &&
-                            boardState[ny][nx] === color
-                        ) {
+                        if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= maxY) continue;
+                        if (boardState[ny][nx] === color && !visited[ny][nx]) {
                             visited[ny][nx] = true;
                             stack.push({ x: nx, y: ny });
+                        } else if (boardState[ny][nx] === COLORS.EMPTY) {
+                            touchEmpty++;
                         }
                     }
                 }
 
-                if (size === 2) score += 3;
-                else if (size === 3) score += 8;
-                else score += size * 2;
+                if (group.length === 2) score += 8 + touchEmpty * 2;
+                else if (group.length === 3) score += 20 + touchEmpty * 3;
+                else if (group.length >= 4) score += 60 + group.length * 2;
             }
         }
 
         return score;
     }
 
-    function evaluateBoard(boardState, pendingOjama) {
+    function shapeScore(boardState) {
         const heights = columnHeights(boardState);
         const maxH = Math.max(...heights);
         const holes = countHoles(boardState);
-        const rough = surfaceRoughness(heights);
-        const potential = connectedPotential(boardState);
+        const rough = roughness(heights);
+        const adj = adjacencyPotential(boardState);
+        const groups = groupPotential(boardState);
+        const center = heights[2] * 2 + heights[3] * 2;
+        const sideBalance = Math.abs((heights[0] + heights[1]) - (heights[4] + heights[5]));
 
-        const topDanger = (boardState[HEIGHT - 3] && boardState[HEIGHT - 3][2] !== COLORS.EMPTY) ? 1800 : 0;
+        let score = 0;
+        score += adj;
+        score += groups * 2;
+        score -= holes * 18;
+        score -= rough * 5;
+        score -= maxH * 8;
+        score -= sideBalance * 3;
+        score -= center * 2;
 
-        return (
-            potential * 10 -
-            holes * 16 -
-            rough * 5 -
-            maxH * 6 -
-            pendingOjama * 25 -
-            topDanger
-        );
+        if (maxH <= 8) score += 40;
+        if (maxH <= 10) score += 20;
+
+        return score;
     }
 
-    function applyOjamaChunk(boardState, count, seed) {
-        const amount = Math.max(0, Math.min(MAX_OJAMA_DROP_PER_TURN, Math.floor(count || 0)));
-        if (amount === 0) return { board: boardState, ok: true };
+    function boardDangerPenalty(boardState, pendingOjama) {
+        let penalty = 0;
+        const heights = columnHeights(boardState);
+        const maxH = Math.max(...heights);
+
+        if (boardState[HEIGHT - 3] && boardState[HEIGHT - 3][2] !== COLORS.EMPTY) penalty += 5000;
+        if (maxH >= 12) penalty += 3500;
+        if (maxH >= 11) penalty += 1800;
+
+        penalty += pendingOjama * 28;
+        penalty += countHoles(boardState) * 10;
+        return penalty;
+    }
+
+    function applyOjamaChunk(boardState, amount, seed) {
+        const n = Math.max(0, Math.min(MAX_OJAMA_DROP_PER_TURN, Math.floor(Number(amount) || 0)));
+        if (n === 0) return { board: boardState, ok: true };
 
         const b = cloneBoard(boardState);
-        const emptyCells = b.reduce((sum, row) => sum + row.filter(c => c === COLORS.EMPTY).length, 0);
-        if (amount > emptyCells) {
-            return { board: b, ok: false };
-        }
+        const emptyCells = b.reduce((sum, row) => sum + row.filter(v => v === COLORS.EMPTY).length, 0);
+        if (n > emptyCells) return { board: b, ok: false };
 
         const rng = mulberry32(seed);
-        const columns = Array.from({ length: WIDTH }, (_, i) => i);
         let placed = 0;
+        const cols = [0, 1, 2, 3, 4, 5];
 
-        while (placed < amount) {
-            shuffleInPlace(columns, rng);
-
-            let placedThisRound = false;
-            for (const x of columns) {
-                if (placed >= amount) break;
-
-                let h = 0;
-                for (let y = 0; y < HEIGHT; y++) {
-                    if (b[y][x] !== COLORS.EMPTY) h++;
-                }
-
-                if (h < HEIGHT) {
-                    b[h][x] = COLORS.GARBAGE;
-                    placed++;
-                    placedThisRound = true;
-                    break;
-                }
+        const placeOne = (x) => {
+            let h = 0;
+            for (let y = 0; y < HEIGHT; y++) {
+                if (b[y][x] !== COLORS.EMPTY) h++;
             }
+            if (h >= HEIGHT) return false;
+            b[h][x] = COLORS.GARBAGE;
+            return true;
+        };
 
-            if (!placedThisRound) {
-                return { board: b, ok: false };
+        while (placed < n) {
+            const round = Math.min(WIDTH, n - placed);
+            shuffle(cols, rng);
+            for (let i = 0; i < round; i++) {
+                if (!placeOne(cols[i])) return { board: b, ok: false };
+                placed++;
             }
         }
 
@@ -434,13 +427,15 @@
     function simulatePlacement(boardState, pair, mainX, rotation) {
         const spawnY = HEIGHT - 2;
         let mainY = spawnY;
+        const mainColor = pair[1];
+        const subColor = pair[0];
 
-        const spawnCoords = getCoords(mainX, mainY, rotation);
-        if (!canPlace(boardState, spawnCoords)) return null;
+        const initial = getCoords(mainX, mainY, rotation);
+        if (!canPlace(boardState, initial)) return null;
 
         while (true) {
-            const nextCoords = getCoords(mainX, mainY - 1, rotation);
-            if (!canPlace(boardState, nextCoords)) break;
+            const test = getCoords(mainX, mainY - 1, rotation);
+            if (!canPlace(boardState, test)) break;
             mainY--;
         }
 
@@ -448,79 +443,14 @@
         if (!canPlace(boardState, finalCoords)) return null;
 
         const b = cloneBoard(boardState);
-        const mainColor = pair[1];
-        const subColor = pair[0];
-
         for (const p of finalCoords) {
             b[p.y][p.x] = (p.kind === 'main') ? mainColor : subColor;
         }
 
-        // lockPuyo 相当
         simulateGravity(b);
-        for (let x = 0; x < WIDTH; x++) {
-            b[HEIGHT - 1][x] = COLORS.EMPTY;
-        }
+        for (let x = 0; x < WIDTH; x++) b[HEIGHT - 1][x] = COLORS.EMPTY;
 
         return { board: b, mainX, mainY, rotation };
-    }
-
-    function simulateTurn(state, pair, placement, turnDepth) {
-        const placed = simulatePlacement(state.board, pair, placement.mainX, placement.rotation);
-        if (!placed) return null;
-
-        const chainResult = simulateChain(placed.board);
-        let nextBoard = chainResult.board;
-        let moveScore = chainResult.totalScore;
-        let bestChain = chainResult.chainCount;
-        let pending = state.pendingOjama;
-
-        // 自分の攻撃で相殺
-        const attackOjama = Math.floor(Math.max(0, moveScore) / NUISANCE_TARGET_POINTS);
-        pending = Math.max(0, pending - attackOjama);
-
-        // 次の手の前に、おじゃまを最大 30 個だけ盤面に落とす
-        if (pending > 0) {
-            const chunk = Math.min(MAX_OJAMA_DROP_PER_TURN, pending);
-            const seed = boardSeed(nextBoard, pending, turnDepth * 97 + attackOjama);
-            const applied = applyOjamaChunk(nextBoard, chunk, seed);
-            if (!applied.ok) {
-                return {
-                    board: nextBoard,
-                    pending: pending - chunk,
-                    moveScore,
-                    bestChain,
-                    dead: true,
-                    heuristic: -1e9,
-                    placement: { mainX: placement.mainX, rotation: placement.rotation }
-                };
-            }
-            nextBoard = applied.board;
-            pending -= chunk;
-        }
-
-        if (!canSpawn(nextBoard)) {
-            return {
-                board: nextBoard,
-                pending,
-                moveScore,
-                bestChain,
-                dead: true,
-                heuristic: -1e9,
-                placement: { mainX: placement.mainX, rotation: placement.rotation }
-            };
-        }
-
-        const heuristic = evaluateBoard(nextBoard, pending);
-
-        return {
-            board: nextBoard,
-            pending,
-            moveScore,
-            bestChain,
-            dead: false,
-            heuristic,
-            placement: { mainX: placement.mainX, rotation: placement.rotation }
-        };
     }
 
     function enumeratePlacements(boardState, pair) {
@@ -534,39 +464,114 @@
         return list;
     }
 
+    function boardKey(boardState, pending, depth, pair, scoreHint = 0) {
+        return [
+            depth,
+            pending,
+            pair[0],
+            pair[1],
+            scoreHint,
+            boardState.map(row => row.join('')).join('')
+        ].join('|');
+    }
+
+    function canSpawn(boardState) {
+        const coords = [
+            { x: 2, y: HEIGHT - 2 },
+            { x: 2, y: HEIGHT - 1 }
+        ];
+        for (const p of coords) {
+            if (!inBounds(p.x, p.y)) return false;
+            if (boardState[p.y][p.x] !== COLORS.EMPTY) return false;
+        }
+        return true;
+    }
+
+    function simulateTurn(node, pair, placement, depth) {
+        const placed = simulatePlacement(node.board, pair, placement.mainX, placement.rotation);
+        if (!placed) return null;
+
+        const chainResult = resolveChain(placed.board);
+        let nextBoard = chainResult.board;
+        let moveScore = chainResult.totalScore;
+        let bestChain = chainResult.chains;
+        let pending = node.pending;
+
+        const attackOjama = Math.floor(Math.max(0, moveScore) / NUISANCE_TARGET_POINTS);
+        pending = Math.max(0, pending - attackOjama);
+
+        if (pending > 0) {
+            const dropNow = Math.min(MAX_OJAMA_DROP_PER_TURN, pending);
+            const seed = seedFrom(nextBoard, pending, depth * 97 + attackOjama);
+            const applied = applyOjamaChunk(nextBoard, dropNow, seed);
+            if (!applied.ok) {
+                return {
+                    board: applied.board,
+                    pending: pending - dropNow,
+                    moveScore,
+                    bestChain,
+                    allClear: false,
+                    dead: true,
+                    heuristic: -1e12,
+                    placement: { mainX: placement.mainX, rotation: placement.rotation }
+                };
+            }
+            nextBoard = applied.board;
+            pending -= dropNow;
+        }
+
+        const dead = boardDangerPenalty(nextBoard, pending) >= 5000 || !canSpawn(nextBoard);
+        const heuristic = shapeScore(nextBoard) - boardDangerPenalty(nextBoard, pending);
+
+        return {
+            board: nextBoard,
+            pending,
+            moveScore,
+            bestChain,
+            allClear: chainResult.allClear,
+            dead,
+            heuristic,
+            placement: { mainX: placement.mainX, rotation: placement.rotation }
+        };
+    }
+
     function compareNodes(a, b) {
         if (a.dead !== b.dead) return a.dead ? 1 : -1;
         if (a.bestChain !== b.bestChain) return b.bestChain - a.bestChain;
         if (a.totalScore !== b.totalScore) return b.totalScore - a.totalScore;
+        if (a.allClear !== b.allClear) return a.allClear ? -1 : 1;
         if (a.heuristic !== b.heuristic) return b.heuristic - a.heuristic;
         if (a.pending !== b.pending) return a.pending - b.pending;
-        return b.totalCleared - a.totalCleared;
+        return b.pathScore - a.pathScore;
     }
 
     function searchBestPlan() {
-        const current = getCurrentPuyoState();
+        const current = getCurrentPuyo();
         if (!current) return null;
 
-        const lookahead = getUpcomingPairs(MAX_SEARCH_DEPTH - 1);
+        const queue = getUpcomingPairs(2);
         const sequence = [
             [current.subColor, current.mainColor],
-            ...lookahead
+            ...queue
         ];
 
         let beam = [{
-            board: getBoardSnapshot(),
-            pending: typeof window.getPendingOjama === 'function' ? window.getPendingOjama() : 0,
+            board: getBoard(),
+            pending: getPendingOjama(),
             totalScore: 0,
             bestChain: 0,
-            totalCleared: 0,
-            heuristic: evaluateBoard(getBoardSnapshot(), typeof window.getPendingOjama === 'function' ? window.getPendingOjama() : 0),
+            allClear: false,
             dead: false,
-            path: []
+            heuristic: shapeScore(getBoard()) - boardDangerPenalty(getBoard(), getPendingOjama()),
+            path: [],
+            pathScore: 0
         }];
+
+        transposition.clear();
 
         for (let depth = 0; depth < sequence.length; depth++) {
             const pair = sequence[depth];
-            const nextCandidates = [];
+            const candidates = [];
 
             for (const node of beam) {
                 const placements = enumeratePlacements(node.board, pair);
@@ -574,31 +579,40 @@
                     const sim = simulateTurn(node, pair, placement, depth);
                     if (!sim) continue;
 
-                    nextCandidates.push({
+                    const pathScore = node.pathScore + sim.moveScore + sim.heuristic;
+                    const nextNode = {
                         board: sim.board,
                         pending: sim.pending,
                         totalScore: node.totalScore + sim.moveScore,
                         bestChain: Math.max(node.bestChain, sim.bestChain),
-                        totalCleared: node.totalCleared + (sim.bestChain > 0 ? 0 : 0),
-                        heuristic: sim.heuristic,
+                        allClear: node.allClear || sim.allClear,
                         dead: sim.dead,
-                        path: node.path.concat(sim.placement)
-                    });
+                        heuristic: sim.heuristic,
+                        path: node.path.concat(sim.placement),
+                        pathScore
+                    };
+
+                    const key = boardKey(nextNode.board, nextNode.pending, depth, pair, nextNode.bestChain);
+                    const prev = transposition.get(key);
+                    if (prev !== undefined && prev >= nextNode.pathScore) continue;
+                    transposition.set(key, nextNode.pathScore);
+
+                    candidates.push(nextNode);
                 }
             }
 
-            if (nextCandidates.length === 0) break;
-            nextCandidates.sort(compareNodes);
-            beam = nextCandidates.slice(0, BEAM_WIDTH);
+            if (!candidates.length) break;
+            candidates.sort(compareNodes);
+            beam = candidates.slice(0, BEAM_WIDTH);
         }
 
-        if (beam.length === 0) return null;
+        if (!beam.length) return null;
         beam.sort(compareNodes);
         return beam[0];
     }
 
-    function executePlan(plan) {
-        if (!plan || !plan.path || plan.path.length === 0) return false;
+    function applyPlan(plan) {
+        if (!plan || !plan.path || !plan.path.length) return false;
         const first = plan.path[0];
 
         if (typeof window.__aiApplyPlacement === 'function') {
@@ -623,68 +637,57 @@
         return true;
     }
 
-    function runAIOnce(fromAuto = false) {
-        if (aiInProgress) return false;
+    function runOnce() {
+        if (searchBusy) return false;
         if (document.body.classList.contains('online-match-active')) {
-            setStatus('対戦中はAIを停止');
+            setStatus('対戦中はAI停止');
             return false;
         }
         if (getGameState() !== 'playing') return false;
+        if (!getCurrentPuyo()) return false;
 
-        const current = getCurrentPuyoState();
-        if (!current) return false;
-
-        aiInProgress = true;
-
+        searchBusy = true;
         try {
             const plan = searchBestPlan();
             if (!plan) {
-                setStatus('AI: 手が見つからない');
-                aiInProgress = false;
+                setStatus('AI: 候補なし');
                 return false;
             }
 
-            const ok = executePlan(plan);
-            setStatus(
-                ok
-                    ? `AI: chain=${plan.bestChain}, score=${plan.totalScore}`
-                    : 'AI: 実行失敗'
-            );
+            const ok = applyPlan(plan);
+            setStatus(ok ? `AI: chain=${plan.bestChain}, score=${plan.totalScore}` : 'AI: 実行失敗');
             return ok;
         } catch (err) {
             console.error('AI error:', err);
             setStatus('AI: エラー');
             return false;
         } finally {
-            aiInProgress = false;
+            searchBusy = false;
         }
     }
 
-    function tickAutoAI() {
+    function tickAuto() {
         if (!autoEnabled) return;
-        if (aiInProgress) return;
+        if (searchBusy) return;
         if (document.body.classList.contains('online-match-active')) return;
         if (getGameState() !== 'playing') return;
-        if (!getCurrentPuyoState()) return;
-        runAIOnce(true);
+        if (!getCurrentPuyo()) return;
+        runOnce();
     }
 
     window.runPuyoAI = function () {
-        return runAIOnce(false);
+        return runOnce();
     };
 
     window.requestAIPlay = window.runPuyoAI;
 
     window.toggleAIAuto = function () {
         autoEnabled = !autoEnabled;
-        setAutoButtonText();
-
+        syncButtonText();
         if (autoEnabled) {
-            if (!autoTimer) {
-                autoTimer = setInterval(tickAutoAI, 120);
-            }
+            if (!autoTimer) autoTimer = setInterval(tickAuto, AUTO_TICK_MS);
             setStatus('AI自動: ON');
-            tickAutoAI();
+            tickAuto();
         } else {
             if (autoTimer) {
                 clearInterval(autoTimer);
@@ -694,14 +697,24 @@
         }
     };
 
-    function initAI() {
-        setAutoButtonText();
+    window.stopPuyoAI = function () {
+        autoEnabled = false;
+        syncButtonText();
+        if (autoTimer) {
+            clearInterval(autoTimer);
+            autoTimer = null;
+        }
+        setStatus('AI停止');
+    };
+
+    function init() {
+        syncButtonText();
         setStatus('AI待機中');
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initAI);
+        document.addEventListener('DOMContentLoaded', init);
     } else {
-        initAI();
+        init();
     }
 })();
