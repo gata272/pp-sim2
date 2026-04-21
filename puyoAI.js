@@ -2,18 +2,12 @@
 (function () {
     'use strict';
 
-    const WIDTH = 6;
-    const HEIGHT = 14;
-    const HIDDEN_ROWS = 2;
-    const MAX_SEARCH_DEPTH = 3;
-    const BEAM_WIDTH = 32;
-    const AUTO_TICK_MS = 120;
-    const MAX_OJAMA_DROP_PER_TURN = 30;
-    const NUISANCE_TARGET_POINTS = 70;
-    const ALL_CLEAR_SCORE_BONUS = 2100;
-    const BOARD_GAMEOVER_CLASS = 'board-gameover';
+    const AI_WIDTH = typeof WIDTH !== 'undefined' ? WIDTH : 6;
+    const AI_HEIGHT = typeof HEIGHT !== 'undefined' ? HEIGHT : 14;
+    const AI_HIDDEN_ROWS = typeof HIDDEN_ROWS !== 'undefined' ? HIDDEN_ROWS : 2;
+    const AI_VISIBLE_MAX_Y = AI_HEIGHT - AI_HIDDEN_ROWS;
 
-    const COLORS = {
+    const AI_COLORS = typeof COLORS !== 'undefined' ? COLORS : {
         EMPTY: 0,
         RED: 1,
         BLUE: 2,
@@ -22,699 +16,733 @@
         GARBAGE: 5
     };
 
-    const BONUS_TABLE = {
+    const AI_BONUS_TABLE = typeof BONUS_TABLE !== 'undefined' ? BONUS_TABLE : {
         CHAIN: [0, 8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512],
         GROUP: [0, 0, 0, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         COLOR: [0, 0, 3, 6, 12]
     };
 
-    const OFFSETS = [
-        [{ x: 0, y: 0 }, { x: 0, y: 1 }],
-        [{ x: 0, y: 0 }, { x: -1, y: 0 }],
-        [{ x: 0, y: 0 }, { x: 0, y: -1 }],
-        [{ x: 0, y: 0 }, { x: 1, y: 0 }]
-    ];
+    const AI_ALL_CLEAR_BONUS = typeof ALL_CLEAR_SCORE_BONUS !== 'undefined' ? ALL_CLEAR_SCORE_BONUS : 2100;
 
-    let autoEnabled = false;
-    let autoTimer = null;
-    let searchBusy = false;
-    let transposition = new Map();
+    const AI_CONFIG = {
+        enabled: true,
+        beamWidth: 24,
+        searchDepth: 3,
+        thinkIntervalMs: 60,
+        chainPriority: 100000000,
+        scorePriority: 100,
+        potentialPriority: 1
+    };
 
-    function getGameState() {
-        if (typeof window.getGameState === 'function') return window.getGameState();
-        if (typeof gameState !== 'undefined') return gameState;
-        return 'playing';
-    }
+    let aiBusy = false;
+    let aiTimer = null;
+    let aiLastHandledPieceRef = null;
+    let aiButton = null;
 
     function getBoard() {
-        if (typeof window.getBoardSnapshot === 'function') return window.getBoardSnapshot();
-        if (typeof board !== 'undefined') return board.map(row => row.slice());
-        return [];
+        return typeof board !== 'undefined' && Array.isArray(board) ? board : null;
     }
 
     function getCurrentPuyo() {
-        if (typeof window.getCurrentPuyoState === 'function') return window.getCurrentPuyoState();
-        if (typeof currentPuyo !== 'undefined' && currentPuyo) return { ...currentPuyo };
-        return null;
+        return typeof currentPuyo !== 'undefined' && currentPuyo ? currentPuyo : null;
     }
 
-    function getPendingOjama() {
-        if (typeof window.getPendingOjama === 'function') return Math.max(0, Math.floor(Number(window.getPendingOjama()) || 0));
-        if (typeof pendingOjama !== 'undefined') return Math.max(0, Math.floor(Number(pendingOjama) || 0));
-        return 0;
+    function getGameState() {
+        return typeof gameState !== 'undefined' ? gameState : 'unknown';
     }
 
-    function setStatus(text) {
-        const el = document.getElementById('ai-status');
-        if (el) el.textContent = text;
+    function getNextQueueValue() {
+        if (typeof nextQueue !== 'undefined' && Array.isArray(nextQueue)) return nextQueue;
+        if (typeof window.getNextQueue === 'function') return window.getNextQueue();
+        return [];
     }
 
-    function syncButtonText() {
-        const btn = document.getElementById('ai-auto-button');
-        if (btn) btn.textContent = autoEnabled ? 'AI自動: ON' : 'AI自動: OFF';
+    function getQueueIndexValue() {
+        return typeof queueIndex !== 'undefined' ? queueIndex : 0;
     }
 
-    function cloneBoard(src) {
-        return src.map(row => row.slice());
+    function cloneBoard(srcBoard) {
+        return srcBoard.map(row => row.slice());
     }
 
-    function inBounds(x, y) {
-        return x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT;
+    function clonePiece(piece) {
+        if (!piece) return null;
+        return {
+            mainColor: piece.mainColor,
+            subColor: piece.subColor,
+            mainX: piece.mainX,
+            mainY: piece.mainY,
+            rotation: piece.rotation
+        };
     }
 
-    function getCoords(mainX, mainY, rotation) {
-        const off = OFFSETS[rotation & 3];
-        return [
-            { x: mainX + off[0].x, y: mainY + off[0].y, kind: 'main' },
-            { x: mainX + off[1].x, y: mainY + off[1].y, kind: 'sub' }
-        ];
+    function getPieceCells(x, y, rotation, piece) {
+        const main = { x, y, color: piece.mainColor };
+        let subX = x;
+        let subY = y;
+
+        if (rotation === 0) subY = y + 1;
+        else if (rotation === 1) subX = x - 1;
+        else if (rotation === 2) subY = y - 1;
+        else if (rotation === 3) subX = x + 1;
+
+        const sub = { x: subX, y: subY, color: piece.subColor };
+        return [main, sub];
     }
 
-    function canPlace(boardState, coords) {
-        for (const p of coords) {
-            if (!inBounds(p.x, p.y)) return false;
-            if (p.y < HEIGHT - HIDDEN_ROWS && boardState[p.y][p.x] !== COLORS.EMPTY) return false;
+    function canPlaceAt(boardData, piece, x, y, rotation) {
+        const cells = getPieceCells(x, y, rotation, piece);
+        for (const cell of cells) {
+            if (cell.x < 0 || cell.x >= AI_WIDTH) return false;
+            if (cell.y < 0 || cell.y >= AI_HEIGHT) return false;
+            if (boardData[cell.y][cell.x] !== AI_COLORS.EMPTY) return false;
         }
         return true;
     }
 
-    function shuffle(arr, rng) {
-        for (let i = arr.length - 1; i > 0; i--) {
-            const j = Math.floor(rng() * (i + 1));
-            [arr[i], arr[j]] = [arr[j], arr[i]];
+    function findRestingY(boardData, piece, x, y, rotation) {
+        if (!canPlaceAt(boardData, piece, x, y, rotation)) return null;
+
+        let curY = y;
+        while (canPlaceAt(boardData, piece, x, curY - 1, rotation)) {
+            curY--;
         }
-        return arr;
+        return curY;
     }
 
-    function mulberry32(seed) {
-        let t = seed >>> 0;
-        return function () {
-            t += 0x6D2B79F5;
-            let r = Math.imul(t ^ (t >>> 15), 1 | t);
-            r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
-            return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    function moveState(boardData, piece, state, action) {
+        if (!state) return null;
+
+        if (action === 'L') {
+            const nx = state.x - 1;
+            const ny = state.y;
+            if (canPlaceAt(boardData, piece, nx, ny, state.rotation)) {
+                return { x: nx, y: ny, rotation: state.rotation };
+            }
+            return null;
+        }
+
+        if (action === 'R') {
+            const nx = state.x + 1;
+            const ny = state.y;
+            if (canPlaceAt(boardData, piece, nx, ny, state.rotation)) {
+                return { x: nx, y: ny, rotation: state.rotation };
+            }
+            return null;
+        }
+
+        if (action === 'D') {
+            const nx = state.x;
+            const ny = state.y - 1;
+            if (canPlaceAt(boardData, piece, nx, ny, state.rotation)) {
+                return { x: nx, y: ny, rotation: state.rotation };
+            }
+            return null;
+        }
+
+        if (action === 'CW' || action === 'CCW') {
+            const delta = action === 'CW' ? 1 : -1;
+            const newRotation = (state.rotation + delta + 4) % 4;
+            const attempts = [[0, 0]];
+
+            if (state.rotation === 0 || state.rotation === 2) {
+                if (newRotation === 1) {
+                    attempts.push([1, 0], [0, 1]);
+                } else if (newRotation === 3) {
+                    attempts.push([-1, 0], [0, 1]);
+                }
+            } else {
+                attempts.push([0, 1]);
+            }
+
+            for (const [dx, dy] of attempts) {
+                const nx = state.x + dx;
+                const ny = state.y + dy;
+                if (canPlaceAt(boardData, piece, nx, ny, newRotation)) {
+                    return { x: nx, y: ny, rotation: newRotation };
+                }
+            }
+
+            return null;
+        }
+
+        return null;
+    }
+
+    function enumerateReachableStates(boardData, piece) {
+        const start = {
+            x: piece.mainX,
+            y: piece.mainY,
+            rotation: piece.rotation
         };
-    }
 
-    function seedFrom(boardState, pending, salt = 0) {
-        let h = 2166136261 >>> 0;
-        for (let y = 0; y < HEIGHT; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                h ^= (boardState[y][x] + 17 * (x + 1) + 131 * (y + 1)) & 0xff;
-                h = Math.imul(h, 16777619);
-            }
-        }
-        h ^= (pending + 0x9e3779b9 + salt) >>> 0;
-        return h >>> 0;
-    }
+        const startKey = `${start.x},${start.y},${start.rotation}`;
+        const seen = new Map();
+        const queue = [{ state: start, key: startKey, depth: 0, parent: null, action: null }];
+        seen.set(startKey, queue[0]);
 
-    function simulateGravity(boardState) {
-        for (let x = 0; x < WIDTH; x++) {
-            const col = [];
-            for (let y = 0; y < HEIGHT; y++) {
-                if (boardState[y][x] !== COLORS.EMPTY) col.push(boardState[y][x]);
-            }
-            for (let y = 0; y < HEIGHT; y++) {
-                boardState[y][x] = y < col.length ? col[y] : COLORS.EMPTY;
-            }
-        }
-    }
+        const actions = ['L', 'R', 'D', 'CW', 'CCW'];
 
-    function clearGarbage(boardState, erasedCoords) {
-        const set = new Set();
-        for (const p of erasedCoords) {
-            const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-            for (const [dx, dy] of dirs) {
-                const nx = p.x + dx;
-                const ny = p.y + dy;
-                if (inBounds(nx, ny) && boardState[ny][nx] === COLORS.GARBAGE) {
-                    set.add(nx + ',' + ny);
+        for (let i = 0; i < queue.length; i++) {
+            const cur = queue[i];
+
+            for (const action of actions) {
+                const next = moveState(boardData, piece, cur.state, action);
+                if (!next) continue;
+
+                const key = `${next.x},${next.y},${next.rotation}`;
+                if (!seen.has(key)) {
+                    const node = {
+                        state: next,
+                        key,
+                        depth: cur.depth + 1,
+                        parent: cur.key,
+                        action
+                    };
+                    seen.set(key, node);
+                    queue.push(node);
                 }
             }
         }
-        set.forEach(key => {
-            const [x, y] = key.split(',').map(Number);
-            boardState[y][x] = COLORS.EMPTY;
-        });
+
+        return seen;
     }
 
-    function findGroups(boardState) {
-        const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
-        const groups = [];
-        const maxY = HEIGHT - HIDDEN_ROWS;
+    function reconstructActions(seenMap, targetKey) {
+        const actions = [];
+        let cur = seenMap.get(targetKey);
 
-        for (let y = 0; y < maxY; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                const color = boardState[y][x];
-                if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
+        while (cur && cur.parent !== null) {
+            actions.push(cur.action);
+            cur = seenMap.get(cur.parent);
+        }
+
+        actions.reverse();
+        return actions;
+    }
+
+    function collectCandidatePlacements(boardData, piece) {
+        const seen = enumerateReachableStates(boardData, piece);
+        const bestBySignature = new Map();
+
+        for (const node of seen.values()) {
+            const { x, y, rotation } = node.state;
+            const signature = `${x},${rotation}`;
+
+            const currentBest = bestBySignature.get(signature);
+            if (!currentBest || node.state.y > currentBest.state.y || (node.state.y === currentBest.state.y && node.depth < currentBest.depth)) {
+                bestBySignature.set(signature, node);
+            }
+        }
+
+        const candidates = [];
+        for (const node of bestBySignature.values()) {
+            const { x, y, rotation } = node.state;
+            const landingY = findRestingY(boardData, piece, x, y, rotation);
+            if (landingY === null) continue;
+
+            candidates.push({
+                x,
+                y,
+                rotation,
+                landingY,
+                key: node.key,
+                actions: reconstructActions(seen, node.key)
+            });
+        }
+
+        return candidates;
+    }
+
+    function clearGarbageAround(boardData, erasedCoords) {
+        const toClear = new Set();
+
+        for (const { x, y } of erasedCoords) {
+            const neighbors = [
+                [0, 1], [0, -1], [1, 0], [-1, 0]
+            ];
+
+            for (const [dx, dy] of neighbors) {
+                const nx = x + dx;
+                const ny = y + dy;
+                if (nx < 0 || nx >= AI_WIDTH || ny < 0 || ny >= AI_HEIGHT) continue;
+                if (boardData[ny][nx] === AI_COLORS.GARBAGE) {
+                    toClear.add(`${nx},${ny}`);
+                }
+            }
+        }
+
+        for (const key of toClear) {
+            const [x, y] = key.split(',').map(Number);
+            boardData[y][x] = AI_COLORS.EMPTY;
+        }
+    }
+
+    function simulateGravity(boardData) {
+        for (let x = 0; x < AI_WIDTH; x++) {
+            const column = [];
+            for (let y = 0; y < AI_HEIGHT; y++) {
+                if (boardData[y][x] !== AI_COLORS.EMPTY) {
+                    column.push(boardData[y][x]);
+                }
+            }
+
+            for (let y = 0; y < AI_HEIGHT; y++) {
+                boardData[y][x] = y < column.length ? column[y] : AI_COLORS.EMPTY;
+            }
+        }
+    }
+
+    function findConnectedGroups(boardData) {
+        const visited = Array.from({ length: AI_HEIGHT }, () => Array(AI_WIDTH).fill(false));
+        const groups = [];
+
+        for (let y = 0; y < AI_VISIBLE_MAX_Y; y++) {
+            for (let x = 0; x < AI_WIDTH; x++) {
+                const color = boardData[y][x];
+                if (color === AI_COLORS.EMPTY || color === AI_COLORS.GARBAGE || visited[y][x]) continue;
 
                 const stack = [{ x, y }];
-                visited[y][x] = true;
                 const group = [];
+                visited[y][x] = true;
 
-                while (stack.length) {
+                while (stack.length > 0) {
                     const cur = stack.pop();
                     group.push(cur);
-                    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-                    for (const [dx, dy] of dirs) {
+
+                    const neighbors = [
+                        [0, 1], [0, -1], [1, 0], [-1, 0]
+                    ];
+
+                    for (const [dx, dy] of neighbors) {
                         const nx = cur.x + dx;
                         const ny = cur.y + dy;
-                        if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < maxY && !visited[ny][nx] && boardState[ny][nx] === color) {
-                            visited[ny][nx] = true;
-                            stack.push({ x: nx, y: ny });
-                        }
+                        if (nx < 0 || nx >= AI_WIDTH || ny < 0 || ny >= AI_VISIBLE_MAX_Y) continue;
+                        if (visited[ny][nx]) continue;
+                        if (boardData[ny][nx] !== color) continue;
+                        visited[ny][nx] = true;
+                        stack.push({ x: nx, y: ny });
                     }
                 }
 
-                if (group.length >= 4) groups.push({ color, group });
+                if (group.length >= 4) {
+                    groups.push({ color, group });
+                }
             }
         }
 
         return groups;
     }
 
-    function calculateScore(groups, chainIndex) {
-        let totalPuyos = 0;
+    function calculateChainScore(groups, chainNumber) {
+        let totalCells = 0;
         const colorSet = new Set();
-        let bonus = 0;
+        let bonusTotal = 0;
 
-        for (const { group, color } of groups) {
-            totalPuyos += group.length;
+        for (const { color, group } of groups) {
+            totalCells += group.length;
             colorSet.add(color);
-            const idx = Math.min(group.length, BONUS_TABLE.GROUP.length - 1);
-            bonus += BONUS_TABLE.GROUP[idx];
+
+            const groupIdx = Math.min(group.length, AI_BONUS_TABLE.GROUP.length - 1);
+            bonusTotal += AI_BONUS_TABLE.GROUP[groupIdx];
         }
 
-        const chainIdx = Math.max(0, Math.min(chainIndex - 1, BONUS_TABLE.CHAIN.length - 1));
-        bonus += BONUS_TABLE.CHAIN[chainIdx];
+        const chainIdx = Math.max(0, Math.min(chainNumber - 1, AI_BONUS_TABLE.CHAIN.length - 1));
+        bonusTotal += AI_BONUS_TABLE.CHAIN[chainIdx];
 
-        const colorIdx = Math.min(colorSet.size, BONUS_TABLE.COLOR.length - 1);
-        bonus += BONUS_TABLE.COLOR[colorIdx];
+        const colorIdx = Math.min(colorSet.size, AI_BONUS_TABLE.COLOR.length - 1);
+        bonusTotal += AI_BONUS_TABLE.COLOR[colorIdx];
 
-        bonus = Math.max(1, Math.min(999, bonus));
-        return (10 * totalPuyos) * bonus;
+        const effectiveBonus = Math.max(1, Math.min(999, bonusTotal));
+        return 10 * totalCells * effectiveBonus;
     }
 
-    function isEmptyBoard(boardState) {
-        for (let y = 0; y < HEIGHT; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                if (boardState[y][x] !== COLORS.EMPTY) return false;
+    function checkBoardEmpty(boardData) {
+        for (let y = 0; y < AI_HEIGHT; y++) {
+            for (let x = 0; x < AI_WIDTH; x++) {
+                if (boardData[y][x] !== AI_COLORS.EMPTY) return false;
             }
         }
         return true;
     }
 
-    function resolveChain(boardState) {
-        const b = cloneBoard(boardState);
+    function resolveAllChains(boardData) {
+        const workBoard = cloneBoard(boardData);
         let totalScore = 0;
-        let chains = 0;
+        let totalChains = 0;
 
         while (true) {
-            simulateGravity(b);
-            const groups = findGroups(b);
-            if (groups.length === 0) break;
+            simulateGravity(workBoard);
+            const groups = findConnectedGroups(workBoard);
 
-            chains++;
-            const gained = calculateScore(groups, chains);
-            totalScore += gained;
+            if (groups.length === 0) {
+                if (checkBoardEmpty(workBoard)) {
+                    totalScore += AI_ALL_CLEAR_BONUS;
+                }
+                break;
+            }
 
-            const erased = [];
+            totalChains++;
+            totalScore += calculateChainScore(groups, totalChains);
+
+            const erasedCoords = [];
             for (const { group } of groups) {
-                for (const p of group) {
-                    b[p.y][p.x] = COLORS.EMPTY;
-                    erased.push(p);
+                for (const cell of group) {
+                    workBoard[cell.y][cell.x] = AI_COLORS.EMPTY;
+                    erasedCoords.push(cell);
                 }
             }
 
-            clearGarbage(b, erased);
-            simulateGravity(b);
-        }
-
-        if (isEmptyBoard(b)) {
-            totalScore += ALL_CLEAR_SCORE_BONUS;
+            clearGarbageAround(workBoard, erasedCoords);
         }
 
         return {
-            board: b,
-            totalScore,
-            chains,
-            allClear: isEmptyBoard(b)
+            board: workBoard,
+            score: totalScore,
+            chains: totalChains
         };
     }
 
-    function countHoles(boardState) {
-        let holes = 0;
-        for (let x = 0; x < WIDTH; x++) {
-            let seen = false;
-            for (let y = 0; y < HEIGHT; y++) {
-                if (boardState[y][x] !== COLORS.EMPTY) {
-                    seen = true;
-                } else if (seen) {
+    function evaluateBoardPotential(boardData) {
+        let score = 0;
+
+        for (let x = 0; x < AI_WIDTH; x++) {
+            let seenBlock = false;
+            let holes = 0;
+            let height = 0;
+
+            for (let y = 0; y < AI_HEIGHT; y++) {
+                const cell = boardData[y][x];
+                if (cell !== AI_COLORS.EMPTY) {
+                    seenBlock = true;
+                    height = y + 1;
+                } else if (seenBlock) {
                     holes++;
                 }
             }
-        }
-        return holes;
-    }
 
-    function columnHeights(boardState) {
-        const heights = new Array(WIDTH).fill(0);
-        for (let x = 0; x < WIDTH; x++) {
-            let h = 0;
-            for (let y = 0; y < HEIGHT; y++) {
-                if (boardState[y][x] !== COLORS.EMPTY) h = y + 1;
-            }
-            heights[x] = h;
-        }
-        return heights;
-    }
+            score -= holes * 16;
+            score -= height * 2;
 
-    function roughness(heights) {
-        let r = 0;
-        for (let i = 0; i < WIDTH - 1; i++) r += Math.abs(heights[i] - heights[i + 1]);
-        return r;
-    }
-
-    function adjacencyPotential(boardState) {
-        let s = 0;
-        const maxY = HEIGHT - HIDDEN_ROWS;
-        for (let y = 0; y < maxY; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                const c = boardState[y][x];
-                if (c === COLORS.EMPTY || c === COLORS.GARBAGE) continue;
-                if (x + 1 < WIDTH && boardState[y][x + 1] === c) s += 5;
-                if (y + 1 < maxY && boardState[y + 1][x] === c) s += 5;
+            if (height >= AI_HEIGHT - 2) {
+                score -= 40;
             }
         }
-        return s;
-    }
 
-    function groupPotential(boardState) {
-        const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
-        const maxY = HEIGHT - HIDDEN_ROWS;
-        let score = 0;
+        for (let y = 0; y < AI_VISIBLE_MAX_Y; y++) {
+            for (let x = 0; x < AI_WIDTH; x++) {
+                const color = boardData[y][x];
+                if (color === AI_COLORS.EMPTY || color === AI_COLORS.GARBAGE) continue;
 
-        for (let y = 0; y < maxY; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                const color = boardState[y][x];
-                if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
-
-                const stack = [{ x, y }];
-                visited[y][x] = true;
-                const group = [];
-                let touchEmpty = 0;
-
-                while (stack.length) {
-                    const cur = stack.pop();
-                    group.push(cur);
-                    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-                    for (const [dx, dy] of dirs) {
-                        const nx = cur.x + dx;
-                        const ny = cur.y + dy;
-                        if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= maxY) continue;
-                        if (boardState[ny][nx] === color && !visited[ny][nx]) {
-                            visited[ny][nx] = true;
-                            stack.push({ x: nx, y: ny });
-                        } else if (boardState[ny][nx] === COLORS.EMPTY) {
-                            touchEmpty++;
-                        }
-                    }
-                }
-
-                if (group.length === 2) score += 8 + touchEmpty * 2;
-                else if (group.length === 3) score += 20 + touchEmpty * 3;
-                else if (group.length >= 4) score += 60 + group.length * 2;
+                if (x + 1 < AI_WIDTH && boardData[y][x + 1] === color) score += 3;
+                if (y + 1 < AI_VISIBLE_MAX_Y && boardData[y + 1][x] === color) score += 3;
             }
+        }
+
+        const groups = findConnectedGroups(boardData);
+        for (const { group } of groups) {
+            if (group.length === 2) score += 8;
+            else if (group.length === 3) score += 20;
         }
 
         return score;
     }
 
-    function shapeScore(boardState) {
-        const heights = columnHeights(boardState);
-        const maxH = Math.max(...heights);
-        const holes = countHoles(boardState);
-        const rough = roughness(heights);
-        const adj = adjacencyPotential(boardState);
-        const groups = groupPotential(boardState);
-        const center = heights[2] * 2 + heights[3] * 2;
-        const sideBalance = Math.abs((heights[0] + heights[1]) - (heights[4] + heights[5]));
+    function simulatePlacement(boardData, piece, candidate) {
+        const landingY = findRestingY(boardData, piece, candidate.x, candidate.y, candidate.rotation);
+        if (landingY === null) return null;
 
-        let score = 0;
-        score += adj;
-        score += groups * 2;
-        score -= holes * 18;
-        score -= rough * 5;
-        score -= maxH * 8;
-        score -= sideBalance * 3;
-        score -= center * 2;
+        const workBoard = cloneBoard(boardData);
+        const cells = getPieceCells(candidate.x, landingY, candidate.rotation, piece);
 
-        if (maxH <= 8) score += 40;
-        if (maxH <= 10) score += 20;
-
-        return score;
-    }
-
-    function boardDangerPenalty(boardState, pendingOjama) {
-        let penalty = 0;
-        const heights = columnHeights(boardState);
-        const maxH = Math.max(...heights);
-
-        if (boardState[HEIGHT - 3] && boardState[HEIGHT - 3][2] !== COLORS.EMPTY) penalty += 5000;
-        if (maxH >= 12) penalty += 3500;
-        if (maxH >= 11) penalty += 1800;
-
-        penalty += pendingOjama * 28;
-        penalty += countHoles(boardState) * 10;
-        return penalty;
-    }
-
-    function applyOjamaChunk(boardState, amount, seed) {
-        const n = Math.max(0, Math.min(MAX_OJAMA_DROP_PER_TURN, Math.floor(Number(amount) || 0)));
-        if (n === 0) return { board: boardState, ok: true };
-
-        const b = cloneBoard(boardState);
-        const emptyCells = b.reduce((sum, row) => sum + row.filter(v => v === COLORS.EMPTY).length, 0);
-        if (n > emptyCells) return { board: b, ok: false };
-
-        const rng = mulberry32(seed);
-        let placed = 0;
-        const cols = [0, 1, 2, 3, 4, 5];
-
-        const placeOne = (x) => {
-            let h = 0;
-            for (let y = 0; y < HEIGHT; y++) {
-                if (b[y][x] !== COLORS.EMPTY) h++;
-            }
-            if (h >= HEIGHT) return false;
-            b[h][x] = COLORS.GARBAGE;
-            return true;
-        };
-
-        while (placed < n) {
-            const round = Math.min(WIDTH, n - placed);
-            shuffle(cols, rng);
-            for (let i = 0; i < round; i++) {
-                if (!placeOne(cols[i])) return { board: b, ok: false };
-                placed++;
-            }
+        for (const cell of cells) {
+            if (cell.x < 0 || cell.x >= AI_WIDTH || cell.y < 0 || cell.y >= AI_HEIGHT) return null;
+            if (workBoard[cell.y][cell.x] !== AI_COLORS.EMPTY) return null;
+            workBoard[cell.y][cell.x] = cell.color;
         }
 
-        simulateGravity(b);
-        return { board: b, ok: true };
-    }
-
-    function simulatePlacement(boardState, pair, mainX, rotation) {
-        const spawnY = HEIGHT - 2;
-        let mainY = spawnY;
-        const mainColor = pair[1];
-        const subColor = pair[0];
-
-        const initial = getCoords(mainX, mainY, rotation);
-        if (!canPlace(boardState, initial)) return null;
-
-        while (true) {
-            const test = getCoords(mainX, mainY - 1, rotation);
-            if (!canPlace(boardState, test)) break;
-            mainY--;
-        }
-
-        const finalCoords = getCoords(mainX, mainY, rotation);
-        if (!canPlace(boardState, finalCoords)) return null;
-
-        const b = cloneBoard(boardState);
-        for (const p of finalCoords) {
-            b[p.y][p.x] = (p.kind === 'main') ? mainColor : subColor;
-        }
-
-        simulateGravity(b);
-        for (let x = 0; x < WIDTH; x++) b[HEIGHT - 1][x] = COLORS.EMPTY;
-
-        return { board: b, mainX, mainY, rotation };
-    }
-
-    function enumeratePlacements(boardState, pair) {
-        const list = [];
-        for (let rotation = 0; rotation < 4; rotation++) {
-            for (let mainX = 0; mainX < WIDTH; mainX++) {
-                const sim = simulatePlacement(boardState, pair, mainX, rotation);
-                if (sim) list.push({ mainX, rotation });
-            }
-        }
-        return list;
-    }
-
-    function boardKey(boardState, pending, depth, pair, scoreHint = 0) {
-        return [
-            depth,
-            pending,
-            pair[0],
-            pair[1],
-            scoreHint,
-            boardState.map(row => row.join('')).join('')
-        ].join('|');
-    }
-
-    function canSpawn(boardState) {
-        const coords = [
-            { x: 2, y: HEIGHT - 2 },
-            { x: 2, y: HEIGHT - 1 }
-        ];
-        for (const p of coords) {
-            if (!inBounds(p.x, p.y)) return false;
-            if (boardState[p.y][p.x] !== COLORS.EMPTY) return false;
-        }
-        return true;
-    }
-
-    function simulateTurn(node, pair, placement, depth) {
-        const placed = simulatePlacement(node.board, pair, placement.mainX, placement.rotation);
-        if (!placed) return null;
-
-        const chainResult = resolveChain(placed.board);
-        let nextBoard = chainResult.board;
-        let moveScore = chainResult.totalScore;
-        let bestChain = chainResult.chains;
-        let pending = node.pending;
-
-        const attackOjama = Math.floor(Math.max(0, moveScore) / NUISANCE_TARGET_POINTS);
-        pending = Math.max(0, pending - attackOjama);
-
-        if (pending > 0) {
-            const dropNow = Math.min(MAX_OJAMA_DROP_PER_TURN, pending);
-            const seed = seedFrom(nextBoard, pending, depth * 97 + attackOjama);
-            const applied = applyOjamaChunk(nextBoard, dropNow, seed);
-            if (!applied.ok) {
-                return {
-                    board: applied.board,
-                    pending: pending - dropNow,
-                    moveScore,
-                    bestChain,
-                    allClear: false,
-                    dead: true,
-                    heuristic: -1e12,
-                    placement: { mainX: placement.mainX, rotation: placement.rotation }
-                };
-            }
-            nextBoard = applied.board;
-            pending -= dropNow;
-        }
-
-        const dead = boardDangerPenalty(nextBoard, pending) >= 5000 || !canSpawn(nextBoard);
-        const heuristic = shapeScore(nextBoard) - boardDangerPenalty(nextBoard, pending);
+        simulateGravity(workBoard);
+        const chainResult = resolveAllChains(workBoard);
 
         return {
-            board: nextBoard,
-            pending,
-            moveScore,
-            bestChain,
-            allClear: chainResult.allClear,
-            dead,
-            heuristic,
-            placement: { mainX: placement.mainX, rotation: placement.rotation }
+            board: chainResult.board,
+            score: chainResult.score,
+            chains: chainResult.chains,
+            landingY
         };
     }
 
-    function compareNodes(a, b) {
-        if (a.dead !== b.dead) return a.dead ? 1 : -1;
-        if (a.bestChain !== b.bestChain) return b.bestChain - a.bestChain;
-        if (a.totalScore !== b.totalScore) return b.totalScore - a.totalScore;
-        if (a.allClear !== b.allClear) return a.allClear ? -1 : 1;
-        if (a.heuristic !== b.heuristic) return b.heuristic - a.heuristic;
-        if (a.pending !== b.pending) return a.pending - b.pending;
-        return b.pathScore - a.pathScore;
+    function buildLookaheadPieces() {
+        const pieces = [];
+        const current = getCurrentPuyo();
+        const queue = getNextQueueValue();
+        const index = getQueueIndexValue();
+
+        if (current) {
+            pieces.push(clonePiece(current));
+        }
+
+        for (let i = 0; i < AI_CONFIG.searchDepth - 1; i++) {
+            const pair = queue[index + i];
+            if (!pair || !Array.isArray(pair) || pair.length < 2) break;
+
+            pieces.push({
+                mainColor: pair[1],
+                subColor: pair[0],
+                mainX: 2,
+                mainY: AI_HEIGHT - 2,
+                rotation: 0
+            });
+        }
+
+        return pieces;
     }
 
     function searchBestPlan() {
+        const boardData = getBoard();
         const current = getCurrentPuyo();
-        if (!current) return null;
 
-        const queue = getUpcomingPairs(2);
-        const sequence = [
-            [current.subColor, current.mainColor],
-            ...queue
-        ];
+        if (!boardData || !current) return null;
 
-        let beam = [{
-            board: getBoard(),
-            pending: getPendingOjama(),
+        const pieces = buildLookaheadPieces();
+        if (!pieces.length) return null;
+
+        let frontier = [{
+            board: cloneBoard(boardData),
             totalScore: 0,
-            bestChain: 0,
-            allClear: false,
-            dead: false,
-            heuristic: shapeScore(getBoard()) - boardDangerPenalty(getBoard(), getPendingOjama()),
-            path: [],
-            pathScore: 0
+            totalChains: 0,
+            totalPotential: evaluateBoardPotential(boardData),
+            firstActions: [],
+            rank: 0
         }];
 
-        transposition.clear();
+        for (let depth = 0; depth < pieces.length; depth++) {
+            const piece = pieces[depth];
+            const nextFrontier = [];
 
-        for (let depth = 0; depth < sequence.length; depth++) {
-            const pair = sequence[depth];
-            const candidates = [];
+            for (const node of frontier) {
+                const candidates = collectCandidatePlacements(node.board, piece);
+                if (!candidates.length) continue;
 
-            for (const node of beam) {
-                const placements = enumeratePlacements(node.board, pair);
-                for (const placement of placements) {
-                    const sim = simulateTurn(node, pair, placement, depth);
+                for (const candidate of candidates) {
+                    const sim = simulatePlacement(node.board, piece, candidate);
                     if (!sim) continue;
 
-                    const pathScore = node.pathScore + sim.moveScore + sim.heuristic;
-                    const nextNode = {
+                    const newNode = {
                         board: sim.board,
-                        pending: sim.pending,
-                        totalScore: node.totalScore + sim.moveScore,
-                        bestChain: Math.max(node.bestChain, sim.bestChain),
-                        allClear: node.allClear || sim.allClear,
-                        dead: sim.dead,
-                        heuristic: sim.heuristic,
-                        path: node.path.concat(sim.placement),
-                        pathScore
+                        totalScore: node.totalScore + sim.score,
+                        totalChains: node.totalChains + sim.chains,
+                        totalPotential: evaluateBoardPotential(sim.board),
+                        firstActions: depth === 0 ? candidate.actions.slice() : node.firstActions.slice()
                     };
 
-                    const key = boardKey(nextNode.board, nextNode.pending, depth, pair, nextNode.bestChain);
-                    const prev = transposition.get(key);
-                    if (prev !== undefined && prev >= nextNode.pathScore) continue;
-                    transposition.set(key, nextNode.pathScore);
+                    newNode.rank =
+                        (newNode.totalChains * AI_CONFIG.chainPriority) +
+                        (newNode.totalScore * AI_CONFIG.scorePriority) +
+                        (newNode.totalPotential * AI_CONFIG.potentialPriority);
 
-                    candidates.push(nextNode);
+                    nextFrontier.push(newNode);
                 }
             }
 
-            if (!candidates.length) break;
-            candidates.sort(compareNodes);
-            beam = candidates.slice(0, BEAM_WIDTH);
+            if (!nextFrontier.length) break;
+
+            nextFrontier.sort((a, b) => {
+                if (b.rank !== a.rank) return b.rank - a.rank;
+                if (b.totalChains !== a.totalChains) return b.totalChains - a.totalChains;
+                if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+                return b.totalPotential - a.totalPotential;
+            });
+
+            frontier = nextFrontier.slice(0, AI_CONFIG.beamWidth);
         }
 
-        if (!beam.length) return null;
-        beam.sort(compareNodes);
-        return beam[0];
+        if (!frontier.length) return null;
+
+        frontier.sort((a, b) => {
+            if (b.rank !== a.rank) return b.rank - a.rank;
+            if (b.totalChains !== a.totalChains) return b.totalChains - a.totalChains;
+            if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+            return b.totalPotential - a.totalPotential;
+        });
+
+        return frontier[0];
     }
 
-    function applyPlan(plan) {
-        if (!plan || !plan.path || !plan.path.length) return false;
-        const first = plan.path[0];
-
-        if (typeof window.__aiApplyPlacement === 'function') {
-            if (!window.__aiApplyPlacement(first.mainX, first.rotation)) return false;
-        } else if (typeof currentPuyo !== 'undefined' && currentPuyo) {
-            currentPuyo.mainX = first.mainX;
-            currentPuyo.mainY = HEIGHT - 2;
-            currentPuyo.rotation = first.rotation;
-            if (typeof renderBoard === 'function') renderBoard();
-        } else {
-            return false;
+    function performAction(action) {
+        if (action === 'L') {
+            return typeof movePuyo === 'function' ? movePuyo(-1, 0) : false;
         }
-
-        if (typeof window.hardDrop === 'function') {
-            window.hardDrop();
-        } else if (typeof hardDrop === 'function') {
-            hardDrop();
-        } else {
-            return false;
+        if (action === 'R') {
+            return typeof movePuyo === 'function' ? movePuyo(1, 0) : false;
         }
-
-        return true;
+        if (action === 'D') {
+            return typeof movePuyo === 'function' ? movePuyo(0, -1) : false;
+        }
+        if (action === 'CW') {
+            return typeof window.rotatePuyoCW === 'function' ? window.rotatePuyoCW() : false;
+        }
+        if (action === 'CCW') {
+            return typeof window.rotatePuyoCCW === 'function' ? window.rotatePuyoCCW() : false;
+        }
+        return false;
     }
 
-    function runOnce() {
-        if (searchBusy) return false;
-        if (document.body.classList.contains('online-match-active')) {
-            setStatus('対戦中はAI停止');
-            return false;
-        }
-        if (getGameState() !== 'playing') return false;
-        if (!getCurrentPuyo()) return false;
+    function executePlan(plan) {
+        if (!plan) return false;
 
-        searchBusy = true;
+        const current = getCurrentPuyo();
+        if (!current) return false;
+
+        for (const action of plan.firstActions) {
+            const ok = performAction(action);
+            if (!ok) break;
+            if (getGameState() !== 'playing' || !getCurrentPuyo()) {
+                return true;
+            }
+        }
+
+        if (getGameState() === 'playing' && getCurrentPuyo()) {
+            if (typeof hardDrop === 'function') {
+                hardDrop();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    function updateButtonLabel() {
+        if (!aiButton) return;
+        aiButton.textContent = AI_CONFIG.enabled ? 'AI: ON' : 'AI: OFF';
+    }
+
+    function ensureButton() {
+        if (aiButton) return;
+
+        const container = document.getElementById('play-controls');
+        if (!container) return;
+
+        aiButton = document.createElement('button');
+        aiButton.id = 'ai-button';
+        aiButton.type = 'button';
+        aiButton.style.width = '100%';
+        aiButton.style.padding = '8px';
+        aiButton.style.marginTop = '5px';
+        aiButton.style.border = 'none';
+        aiButton.style.borderRadius = '5px';
+        aiButton.style.fontSize = '0.85em';
+        aiButton.style.fontWeight = 'bold';
+        aiButton.style.backgroundColor = '#ff9800';
+        aiButton.style.color = 'white';
+        aiButton.style.cursor = 'pointer';
+        aiButton.onclick = () => {
+            window.puyoAI.toggle();
+        };
+
+        container.appendChild(aiButton);
+        updateButtonLabel();
+    }
+
+    function thinkAndPlay() {
+        if (!AI_CONFIG.enabled || aiBusy) return;
+
+        const state = getGameState();
+        const current = getCurrentPuyo();
+        if (state !== 'playing' || !current) return;
+        if (getBoard() === null) return;
+
+        if (current === aiLastHandledPieceRef) return;
+
+        aiBusy = true;
+        aiLastHandledPieceRef = current;
+
         try {
             const plan = searchBestPlan();
-            if (!plan) {
-                setStatus('AI: 候補なし');
-                return false;
-            }
+            const executed = executePlan(plan);
 
-            const ok = applyPlan(plan);
-            setStatus(ok ? `AI: chain=${plan.bestChain}, score=${plan.totalScore}` : 'AI: 実行失敗');
-            return ok;
+            if (!executed) {
+                if (typeof hardDrop === 'function') {
+                    hardDrop();
+                }
+            }
         } catch (err) {
-            console.error('AI error:', err);
-            setStatus('AI: エラー');
-            return false;
-        } finally {
-            searchBusy = false;
-        }
-    }
-
-    function tickAuto() {
-        if (!autoEnabled) return;
-        if (searchBusy) return;
-        if (document.body.classList.contains('online-match-active')) return;
-        if (getGameState() !== 'playing') return;
-        if (!getCurrentPuyo()) return;
-        runOnce();
-    }
-
-    window.runPuyoAI = function () {
-        return runOnce();
-    };
-
-    window.requestAIPlay = window.runPuyoAI;
-
-    window.toggleAIAuto = function () {
-        autoEnabled = !autoEnabled;
-        syncButtonText();
-        if (autoEnabled) {
-            if (!autoTimer) autoTimer = setInterval(tickAuto, AUTO_TICK_MS);
-            setStatus('AI自動: ON');
-            tickAuto();
-        } else {
-            if (autoTimer) {
-                clearInterval(autoTimer);
-                autoTimer = null;
+            console.error('[puyoAI] thinkAndPlay error:', err);
+            try {
+                if (typeof hardDrop === 'function' && getGameState() === 'playing' && getCurrentPuyo()) {
+                    hardDrop();
+                }
+            } catch (fallbackErr) {
+                console.error('[puyoAI] fallback error:', fallbackErr);
             }
-            setStatus('AI停止');
+        } finally {
+            aiBusy = false;
+        }
+    }
+
+    function startLoop() {
+        if (aiTimer) return;
+        aiTimer = setInterval(() => {
+            if (!AI_CONFIG.enabled) return;
+            thinkAndPlay();
+        }, AI_CONFIG.thinkIntervalMs);
+    }
+
+    function stopLoop() {
+        if (!aiTimer) return;
+        clearInterval(aiTimer);
+        aiTimer = null;
+    }
+
+    window.puyoAI = {
+        start() {
+            AI_CONFIG.enabled = true;
+            updateButtonLabel();
+            startLoop();
+        },
+        stop() {
+            AI_CONFIG.enabled = false;
+            updateButtonLabel();
+        },
+        toggle() {
+            AI_CONFIG.enabled = !AI_CONFIG.enabled;
+            updateButtonLabel();
+            if (AI_CONFIG.enabled) startLoop();
+        },
+        thinkNow() {
+            thinkAndPlay();
+        },
+        setBeamWidth(value) {
+            const n = Math.max(1, Math.floor(Number(value) || 1));
+            AI_CONFIG.beamWidth = n;
+        },
+        setDepth(value) {
+            const n = Math.max(1, Math.min(5, Math.floor(Number(value) || 1)));
+            AI_CONFIG.searchDepth = n;
+        },
+        status() {
+            return {
+                enabled: AI_CONFIG.enabled,
+                busy: aiBusy,
+                beamWidth: AI_CONFIG.beamWidth,
+                searchDepth: AI_CONFIG.searchDepth
+            };
         }
     };
 
-    window.stopPuyoAI = function () {
-        autoEnabled = false;
-        syncButtonText();
-        if (autoTimer) {
-            clearInterval(autoTimer);
-            autoTimer = null;
-        }
-        setStatus('AI停止');
-    };
+    document.addEventListener('DOMContentLoaded', () => {
+        ensureButton();
+        updateButtonLabel();
+        startLoop();
+    });
 
-    function init() {
-        syncButtonText();
-        setStatus('AI待機中');
+    if (document.readyState !== 'loading') {
+        ensureButton();
+        updateButtonLabel();
+        startLoop();
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
+    window.addEventListener('beforeunload', () => {
+        stopLoop();
+    });
 })();
