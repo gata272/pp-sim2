@@ -1,24 +1,41 @@
-/* puyoAI.js
- * Chain-first AI for Puyo Puyo Simulator
- * - beam search
- * - quiescence-like leaf extension
- * - chain length priority
- * - board-shape evaluation
- * - autoplay helper
- */
-(() => {
+// puyoAI.js
+// 3-ply beam search + chain-building heuristics
+// - targets longer chains by preferring future potential over small immediate clears
+// - works with the current puyoSim.js globals
+// - compatible with the HTML buttons:
+//   <button onclick="runPuyoAI()">AIで1手</button>
+//   <button onclick="toggleAIAuto()">AI自動</button>
+
+(function () {
   'use strict';
 
-  const AI = {
-    LOOKAHEAD_PLIES: 5,
-    BEAM_WIDTH: 12,
-    TIME_BUDGET_MS: 650,
-    AUTO_TICK_MS: 70,
-    ENABLE_AUTOPLAY: false,
-    DEBUG: false,
+  const AI_CONFIG = {
+    SEARCH_DEPTH: 3,            // current + NEXT1 + NEXT2
+    BEAM_WIDTH: 60,             // beam width per ply
+    TIME_LIMIT_MS: 1800,        // search budget per move
+    AUTO_INTERVAL_MS: 160,      // polling interval for auto mode
+    NO_MOVE_RETRY_MS: 120,
+    // Heavy bias toward building long chains.
+    TARGET_CHAIN_BONUS: 65000,
+    SMALL_CHAIN_PENALTY: 45000, // penalty when a move resolves only 1-5 chains
+    HEURISTIC_WEIGHT: 1,
+    SCORE_WEIGHT: 0.35,
+    HOLE_PENALTY: 2600,
+    HEIGHT_PENALTY: 420,
+    VARIANCE_PENALTY: 55,
+    SMOOTHNESS_BONUS: 210,
+    COMPONENT2_BONUS: 1400,
+    COMPONENT3_BONUS: 3200,
+    TOTALFILLED_BONUS: 26,
+    ALL_CLEAR_BONUS: 22000,
+    FAIL_SCORE: -1e18,
   };
 
-  const C = {
+  const WIDTH = typeof window.WIDTH === 'number' ? window.WIDTH : 6;
+  const HEIGHT = typeof window.HEIGHT === 'number' ? window.HEIGHT : 14;
+  const HIDDEN_ROWS = typeof window.HIDDEN_ROWS === 'number' ? window.HIDDEN_ROWS : 2;
+  const VISIBLE_ROWS = Math.max(0, HEIGHT - HIDDEN_ROWS);
+  const COLORS = window.COLORS || {
     EMPTY: 0,
     RED: 1,
     BLUE: 2,
@@ -26,182 +43,118 @@
     YELLOW: 4,
     GARBAGE: 5,
   };
-
-  const BONUS_TABLE = {
+  const BONUS_TABLE = window.BONUS_TABLE || {
     CHAIN: [0, 8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512],
     GROUP: [0, 0, 0, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     COLOR: [0, 0, 3, 6, 12],
   };
+  const ALL_CLEAR_SCORE_BONUS = typeof window.ALL_CLEAR_SCORE_BONUS === 'number' ? window.ALL_CLEAR_SCORE_BONUS : 2100;
 
-  const ALL_CLEAR_SCORE_BONUS = 2100;
+  const OFFSETS = [
+    [0, 1],   // rotation 0: sub above main
+    [-1, 0],  // rotation 1: sub left of main
+    [0, -1],  // rotation 2: sub below main
+    [1, 0],   // rotation 3: sub right of main
+  ];
 
+  let autoEnabled = false;
   let autoTimer = null;
-  let searchBusy = false;
-  let lastPlannedSignature = '';
-  let cachedPlan = null;
+  let aiBusy = false;
+  let lastThinkAt = 0;
 
-  function getBoard() {
-    return (typeof board !== 'undefined' && Array.isArray(board)) ? board : null;
+  function isReady() {
+    return typeof board !== 'undefined' && Array.isArray(board) &&
+      typeof currentPuyo !== 'undefined' && typeof nextQueue !== 'undefined' &&
+      typeof queueIndex !== 'undefined' && typeof gameState !== 'undefined';
   }
 
-  function getCurrentPuyo() {
-    return (typeof currentPuyo !== 'undefined' && currentPuyo) ? currentPuyo : null;
+  function aiStatus(text) {
+    const el = document.getElementById('ai-status');
+    if (el) el.textContent = text;
   }
 
-  function getGameState() {
-    return (typeof gameState !== 'undefined') ? gameState : 'playing';
+  function setAutoButton(on) {
+    const btn = document.getElementById('ai-auto-button');
+    if (btn) btn.textContent = on ? 'AI自動: ON' : 'AI自動: OFF';
   }
 
-  function getWidth() {
-    return (typeof WIDTH === 'number') ? WIDTH : 6;
-  }
-
-  function getHeight() {
-    return (typeof HEIGHT === 'number') ? HEIGHT : 14;
-  }
-
-  function getHiddenRows() {
-    return (typeof HIDDEN_ROWS === 'number') ? HIDDEN_ROWS : 2;
-  }
-
-  function getVisibleHeight() {
-    return getHeight() - getHiddenRows();
+  function setStepButtonDisabled(disabled) {
+    const btn = document.getElementById('ai-step-button');
+    if (btn) btn.disabled = !!disabled;
   }
 
   function cloneBoard(src) {
     return src.map(row => row.slice());
   }
 
-  function isEmptyCell(v) {
-    return v === C.EMPTY;
+  function isInside(x, y) {
+    return x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT;
   }
 
-  function boardKey(b) {
-    return b.map(row => row.join('')).join('|');
-  }
-
-  function sleepLikeBudgetExceeded(startTime) {
-    return performance.now() - startTime > AI.TIME_BUDGET_MS;
-  }
-
-  function inBounds(x, y) {
-    return x >= 0 && x < getWidth() && y >= 0 && y < getHeight();
-  }
-
-  function getCoordsFromState(pieceState) {
-    const { mainX, mainY, rotation } = pieceState;
-    let subX = mainX;
-    let subY = mainY;
-
-    if (rotation === 0) subY = mainY + 1;
-    else if (rotation === 1) subX = mainX - 1;
-    else if (rotation === 2) subY = mainY - 1;
-    else if (rotation === 3) subX = mainX + 1;
-
+  function getPieceCoords(mainX, mainY, rotation) {
+    const [dx, dy] = OFFSETS[rotation & 3];
     return [
-      { x: mainX, y: mainY, color: pieceState.mainColor },
-      { x: subX, y: subY, color: pieceState.subColor },
+      { x: mainX, y: mainY },
+      { x: mainX + dx, y: mainY + dy },
     ];
   }
 
-  function canOccupy(boardState, coords) {
-    const visibleHeight = getVisibleHeight();
-
+  function canPlaceOnBoard(targetBoard, mainX, mainY, rotation) {
+    const coords = getPieceCoords(mainX, mainY, rotation);
     for (const p of coords) {
-      if (!inBounds(p.x, p.y)) return false;
-      if (p.y < visibleHeight && boardState[p.y][p.x] !== C.EMPTY) return false;
+      if (!isInside(p.x, p.y)) return false;
+      if (targetBoard[p.y][p.x] !== COLORS.EMPTY) return false;
     }
     return true;
   }
 
-  function findLanding(boardState, piece, mainX, rotation) {
-    const spawnY = getHeight() - 2;
-    let y = spawnY;
-
-    const startState = {
-      mainX,
-      mainY: y,
-      rotation,
-      mainColor: piece.mainColor,
-      subColor: piece.subColor,
-    };
-
-    if (!canOccupy(boardState, getCoordsFromState(startState))) {
-      // そのままでは置けない配置は除外
-      return null;
+  function dropMainY(targetBoard, mainX, rotation) {
+    let y = HEIGHT - 2;
+    if (!canPlaceOnBoard(targetBoard, mainX, y, rotation)) return null;
+    while (canPlaceOnBoard(targetBoard, mainX, y - 1, rotation)) {
+      y -= 1;
     }
-
-    while (true) {
-      const nextState = {
-        mainX,
-        mainY: y - 1,
-        rotation,
-        mainColor: piece.mainColor,
-        subColor: piece.subColor,
-      };
-      const nextCoords = getCoordsFromState(nextState);
-      if (!canOccupy(boardState, nextCoords)) break;
-      y--;
-    }
-
-    return {
-      mainX,
-      mainY: y,
-      rotation,
-      mainColor: piece.mainColor,
-      subColor: piece.subColor,
-    };
+    return y;
   }
 
-  function enumerateLandingPlacements(boardState, piece) {
-    const placements = [];
-    const width = getWidth();
+  function placePiece(targetBoard, piece, placement) {
+    const { mainX, mainY, rotation } = placement;
+    const coords = getPieceCoords(mainX, mainY, rotation);
+    const next = cloneBoard(targetBoard);
 
-    for (let rotation = 0; rotation < 4; rotation++) {
-      const minX = (rotation === 1) ? 1 : 0;
-      const maxX = (rotation === 3) ? width - 2 : width - 1;
+    const mainColor = piece.mainColor;
+    const subColor = piece.subColor;
 
-      for (let mainX = minX; mainX <= maxX; mainX++) {
-        const landing = findLanding(boardState, piece, mainX, rotation);
-        if (landing) placements.push(landing);
-      }
+    for (const p of coords) {
+      if (!isInside(p.x, p.y)) return null;
+      if (next[p.y][p.x] !== COLORS.EMPTY) return null;
     }
 
-    // 重複を軽く除去
-    const seen = new Set();
-    return placements.filter(p => {
-      const key = `${p.mainX},${p.mainY},${p.rotation}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    next[coords[0].y][coords[0].x] = mainColor;
+    next[coords[1].y][coords[1].x] = subColor;
+    return next;
   }
 
-  function simulateGravity(boardState) {
-    const width = getWidth();
-    const height = getHeight();
-
-    for (let x = 0; x < width; x++) {
-      const col = [];
-      for (let y = 0; y < height; y++) {
-        if (boardState[y][x] !== C.EMPTY) col.push(boardState[y][x]);
+  function gravityOnBoard(targetBoard) {
+    for (let x = 0; x < WIDTH; x++) {
+      const stack = [];
+      for (let y = 0; y < HEIGHT; y++) {
+        if (targetBoard[y][x] !== COLORS.EMPTY) stack.push(targetBoard[y][x]);
       }
-      for (let y = 0; y < height; y++) {
-        boardState[y][x] = (y < col.length) ? col[y] : C.EMPTY;
+      for (let y = 0; y < HEIGHT; y++) {
+        targetBoard[y][x] = y < stack.length ? stack[y] : COLORS.EMPTY;
       }
     }
   }
 
-  function findConnectedGroups(boardState) {
-    const width = getWidth();
-    const visibleHeight = getVisibleHeight();
-    const visited = Array.from({ length: getHeight() }, () => Array(width).fill(false));
+  function findConnectedPuyosOnBoard(targetBoard) {
+    const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
     const groups = [];
 
-    for (let y = 0; y < visibleHeight; y++) {
-      for (let x = 0; x < width; x++) {
-        const color = boardState[y][x];
-        if (color === C.EMPTY || color === C.GARBAGE || visited[y][x]) continue;
+    for (let y = 0; y < VISIBLE_ROWS; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        const color = targetBoard[y][x];
+        if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
 
         const stack = [{ x, y }];
         visited[y][x] = true;
@@ -211,34 +164,28 @@
           const cur = stack.pop();
           group.push(cur);
 
-          const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-          for (const [dx, dy] of dirs) {
+          const neigh = [
+            [0, 1], [0, -1], [1, 0], [-1, 0],
+          ];
+          for (const [dx, dy] of neigh) {
             const nx = cur.x + dx;
             const ny = cur.y + dy;
-            if (
-              nx >= 0 && nx < width &&
-              ny >= 0 && ny < visibleHeight &&
-              !visited[ny][nx] &&
-              boardState[ny][nx] === color
-            ) {
-              visited[ny][nx] = true;
-              stack.push({ x: nx, y: ny });
-            }
+            if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= VISIBLE_ROWS) continue;
+            if (visited[ny][nx]) continue;
+            if (targetBoard[ny][nx] !== color) continue;
+            visited[ny][nx] = true;
+            stack.push({ x: nx, y: ny });
           }
         }
 
-        if (group.length >= 4) {
-          groups.push({ color, group });
-        }
+        if (group.length >= 4) groups.push({ color, group });
       }
     }
 
     return groups;
   }
 
-  function clearGarbageAdjacentTo(boardState, erasedCoords) {
-    const width = getWidth();
-    const height = getHeight();
+  function clearAdjacentGarbage(targetBoard, erasedCoords) {
     const toClear = new Set();
     const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
 
@@ -246,162 +193,128 @@
       for (const [dx, dy] of dirs) {
         const nx = x + dx;
         const ny = y + dy;
-        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-          if (boardState[ny][nx] === C.GARBAGE) {
-            toClear.add(`${nx},${ny}`);
-          }
+        if (!isInside(nx, ny)) continue;
+        if (targetBoard[ny][nx] === COLORS.GARBAGE) {
+          toClear.add(`${nx},${ny}`);
         }
       }
     }
 
     for (const key of toClear) {
-      const [x, y] = key.split(',').map(Number);
-      boardState[y][x] = C.EMPTY;
+      const [nx, ny] = key.split(',').map(Number);
+      targetBoard[ny][nx] = COLORS.EMPTY;
     }
   }
 
-  function resolveBoard(boardState) {
-    const height = getHeight();
-    const width = getWidth();
+  function scoreForGroups(groups, currentChain) {
+    let totalPuyos = 0;
+    const colorSet = new Set();
+    let bonusTotal = 0;
 
-    let totalScore = 0;
-    let chainCountResolved = 0;
-    let totalCleared = 0;
-
-    while (true) {
-      simulateGravity(boardState);
-      const groups = findConnectedGroups(boardState);
-      if (groups.length === 0) break;
-
-      chainCountResolved++;
-      let totalPuyos = 0;
-      const colorSet = new Set();
-      let groupBonus = 0;
-      const erasedCoords = [];
-
-      for (const { color, group } of groups) {
-        totalPuyos += group.length;
-        colorSet.add(color);
-        const groupIdx = Math.min(group.length, BONUS_TABLE.GROUP.length - 1);
-        groupBonus += BONUS_TABLE.GROUP[groupIdx];
-
-        for (const p of group) erasedCoords.push(p);
-      }
-
-      const chainIdx = Math.max(0, Math.min(chainCountResolved - 1, BONUS_TABLE.CHAIN.length - 1));
-      const colorIdx = Math.min(colorSet.size, BONUS_TABLE.COLOR.length - 1);
-
-      let bonus = groupBonus + BONUS_TABLE.CHAIN[chainIdx] + BONUS_TABLE.COLOR[colorIdx];
-      if (bonus <= 0) bonus = 1;
-
-      const stepScore = (10 * totalPuyos) * bonus;
-      totalScore += stepScore;
-      totalCleared += totalPuyos;
-
-      for (const { group } of groups) {
-        for (const p of group) {
-          boardState[p.y][p.x] = C.EMPTY;
-        }
-      }
-
-      clearGarbageAdjacentTo(boardState, erasedCoords);
-      simulateGravity(boardState);
+    for (const { group, color } of groups) {
+      totalPuyos += group.length;
+      colorSet.add(color);
+      const idx = Math.min(group.length, BONUS_TABLE.GROUP.length - 1);
+      bonusTotal += BONUS_TABLE.GROUP[idx];
     }
 
-    const allClear = isBoardEmpty(boardState);
-    if (allClear) {
-      totalScore += ALL_CLEAR_SCORE_BONUS;
-    }
+    const chainIdx = Math.max(0, Math.min(currentChain - 1, BONUS_TABLE.CHAIN.length - 1));
+    bonusTotal += BONUS_TABLE.CHAIN[chainIdx];
 
-    return {
-      board: boardState,
-      chainCount: chainCountResolved,
-      score: totalScore,
-      totalCleared,
-      allClear,
-    };
+    const colorIdx = Math.min(colorSet.size, BONUS_TABLE.COLOR.length - 1);
+    bonusTotal += BONUS_TABLE.COLOR[colorIdx];
+
+    const finalBonus = Math.max(1, Math.min(999, bonusTotal));
+    return (10 * totalPuyos) * finalBonus;
   }
 
-  function isBoardEmpty(boardState) {
-    for (let y = 0; y < getHeight(); y++) {
-      for (let x = 0; x < getWidth(); x++) {
-        if (boardState[y][x] !== C.EMPTY) return false;
+  function isBoardEmpty(targetBoard) {
+    for (let y = 0; y < HEIGHT; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        if (targetBoard[y][x] !== COLORS.EMPTY) return false;
       }
     }
     return true;
   }
 
-  function simulatePlacementAndResolve(baseBoard, piece, placement) {
-    const boardState = cloneBoard(baseBoard);
+  function resolveChains(targetBoard) {
+    let totalScore = 0;
+    let totalChains = 0;
 
-    const coords = getCoordsFromState(placement);
-    if (!canOccupy(boardState, coords)) return null;
-
-    // piece を置く
-    boardState[coords[0].y][coords[0].x] = piece.mainColor;
-    boardState[coords[1].y][coords[1].x] = piece.subColor;
-
-    simulateGravity(boardState);
-    return resolveBoard(boardState);
-  }
-
-  function countVisibleEmptyCells(boardState) {
-    const visibleHeight = getVisibleHeight();
-    let count = 0;
-    for (let y = 0; y < visibleHeight; y++) {
-      for (let x = 0; x < getWidth(); x++) {
-        if (boardState[y][x] === C.EMPTY) count++;
+    while (true) {
+      gravityOnBoard(targetBoard);
+      const groups = findConnectedPuyosOnBoard(targetBoard);
+      if (groups.length === 0) {
+        if (isBoardEmpty(targetBoard)) totalScore += ALL_CLEAR_SCORE_BONUS;
+        break;
       }
-    }
-    return count;
-  }
 
-  function evaluateShape(boardState) {
-    const width = getWidth();
-    const visibleHeight = getVisibleHeight();
+      totalChains += 1;
+      const chainScore = scoreForGroups(groups, totalChains);
+      totalScore += chainScore;
 
-    const heights = [];
-    let holes = 0;
-    let roughness = 0;
-    let maxHeight = 0;
-    let occupiedVisible = 0;
-
-    for (let x = 0; x < width; x++) {
-      let columnHeight = 0;
-      let seenBlock = false;
-
-      for (let y = visibleHeight - 1; y >= 0; y--) {
-        const v = boardState[y][x];
-        if (v !== C.EMPTY) {
-          if (!seenBlock) {
-            columnHeight = y + 1;
-            seenBlock = true;
-          }
-          occupiedVisible++;
-        } else if (seenBlock) {
-          holes++;
+      const erased = [];
+      for (const { group } of groups) {
+        for (const p of group) {
+          targetBoard[p.y][p.x] = COLORS.EMPTY;
+          erased.push(p);
         }
       }
 
-      heights.push(columnHeight);
-      maxHeight = Math.max(maxHeight, columnHeight);
+      clearAdjacentGarbage(targetBoard, erased);
     }
 
-    for (let x = 1; x < width; x++) {
-      roughness += Math.abs(heights[x] - heights[x - 1]);
+    return { board: targetBoard, totalScore, totalChains };
+  }
+
+  function analyzeBoard(targetBoard) {
+    const heights = Array(WIDTH).fill(0);
+    let totalFilled = 0;
+    let holes = 0;
+
+    for (let x = 0; x < WIDTH; x++) {
+      let seenFilled = false;
+      let h = 0;
+      for (let y = 0; y < HEIGHT; y++) {
+        const cell = targetBoard[y][x];
+        if (cell !== COLORS.EMPTY) {
+          seenFilled = true;
+          h += 1;
+          totalFilled += 1;
+        } else if (seenFilled) {
+          holes += 1;
+        }
+      }
+      heights[x] = h;
     }
 
-    // 同色のまとまりをざっくり数える
-    const visited = Array.from({ length: visibleHeight }, () => Array(width).fill(false));
-    let triads = 0;
-    let duos = 0;
-    let singles = 0;
-    let bigClusters = 0;
+    let maxHeight = 0;
+    let minHeight = HEIGHT;
+    let variance = 0;
+    let smoothness = 0;
+    let midHeightBonus = 0;
 
-    for (let y = 0; y < visibleHeight; y++) {
-      for (let x = 0; x < width; x++) {
-        const color = boardState[y][x];
-        if (color === C.EMPTY || color === C.GARBAGE || visited[y][x]) continue;
+    for (const h of heights) {
+      if (h > maxHeight) maxHeight = h;
+      if (h < minHeight) minHeight = h;
+      if (h >= 2 && h <= 9) midHeightBonus += 1;
+    }
+
+    const avg = heights.reduce((a, b) => a + b, 0) / WIDTH;
+    variance = heights.reduce((sum, h) => sum + (h - avg) * (h - avg), 0) / WIDTH;
+    for (let i = 0; i < WIDTH - 1; i++) {
+      smoothness -= Math.abs(heights[i] - heights[i + 1]);
+    }
+
+    const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+    let component2 = 0;
+    let component3 = 0;
+    let component4 = 0;
+
+    for (let y = 0; y < VISIBLE_ROWS; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        const color = targetBoard[y][x];
+        if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
 
         const stack = [{ x, y }];
         visited[y][x] = true;
@@ -409,491 +322,352 @@
 
         while (stack.length) {
           const cur = stack.pop();
-          size++;
-
-          const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-          for (const [dx, dy] of dirs) {
+          size += 1;
+          for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
             const nx = cur.x + dx;
             const ny = cur.y + dy;
-            if (
-              nx >= 0 && nx < width &&
-              ny >= 0 && ny < visibleHeight &&
-              !visited[ny][nx] &&
-              boardState[ny][nx] === color
-            ) {
-              visited[ny][nx] = true;
-              stack.push({ x: nx, y: ny });
-            }
+            if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= VISIBLE_ROWS) continue;
+            if (visited[ny][nx]) continue;
+            if (targetBoard[ny][nx] !== color) continue;
+            visited[ny][nx] = true;
+            stack.push({ x: nx, y: ny });
           }
         }
 
-        if (size === 1) singles++;
-        else if (size === 2) duos++;
-        else if (size === 3) triads++;
-        else bigClusters += size;
+        if (size === 2) component2 += 1;
+        else if (size === 3) component3 += 1;
+        else if (size >= 4) component4 += 1;
       }
     }
-
-    let sameAdj = 0;
-    for (let y = 0; y < visibleHeight; y++) {
-      for (let x = 0; x < width; x++) {
-        const v = boardState[y][x];
-        if (v === C.EMPTY || v === C.GARBAGE) continue;
-        if (x + 1 < width && boardState[y][x + 1] === v) sameAdj++;
-        if (y + 1 < visibleHeight && boardState[y + 1][x] === v) sameAdj++;
-      }
-    }
-
-    const emptyVisible = countVisibleEmptyCells(boardState);
-    const spacePressure = Math.max(0, 18 - emptyVisible);
-
-    // chain を作りやすい形を強めに評価
-    const chainPotential =
-      triads * 900 +
-      duos * 240 +
-      sameAdj * 18 +
-      bigClusters * 35 +
-      spacePressure * 100 -
-      holes * 260 -
-      roughness * 20 -
-      maxHeight * 18 -
-      singles * 18;
 
     return {
-      chainPotential,
+      heights,
+      totalFilled,
       holes,
-      roughness,
       maxHeight,
-      emptyVisible,
-      triads,
-      duos,
-      singles,
-      sameAdj,
-      bigClusters,
+      minHeight,
+      variance,
+      smoothness,
+      midHeightBonus,
+      component2,
+      component3,
+      component4,
     };
   }
 
-  function buildSearchSequence() {
-    const sequence = [];
-    const puyo = getCurrentPuyo();
-    if (!puyo) return sequence;
+  function evaluateState(result) {
+    const metrics = analyzeBoard(result.board);
 
-    sequence.push({
-      mainColor: puyo.mainColor,
-      subColor: puyo.subColor,
-      source: 'current',
+    let value = 0;
+
+    value += result.totalScore * AI_CONFIG.SCORE_WEIGHT;
+
+    if (result.totalChains > 0) {
+      value += result.totalChains * result.totalChains * AI_CONFIG.TARGET_CHAIN_BONUS;
+
+      if (result.totalChains < 6) {
+        value -= (6 - result.totalChains) * AI_CONFIG.SMALL_CHAIN_PENALTY;
+      } else {
+        value += result.totalChains * 50000;
+      }
+    } else {
+      value += metrics.component3 * AI_CONFIG.COMPONENT3_BONUS;
+      value += metrics.component2 * AI_CONFIG.COMPONENT2_BONUS;
+      value += metrics.midHeightBonus * 800;
+    }
+
+    value += metrics.component3 * AI_CONFIG.COMPONENT3_BONUS;
+    value += metrics.component2 * AI_CONFIG.COMPONENT2_BONUS;
+    value += metrics.midHeightBonus * 400;
+    value += metrics.smoothness * AI_CONFIG.SMOOTHNESS_BONUS;
+    value += metrics.totalFilled * AI_CONFIG.TOTALFILLED_BONUS;
+
+    value -= metrics.holes * AI_CONFIG.HOLE_PENALTY;
+    value -= metrics.maxHeight * AI_CONFIG.HEIGHT_PENALTY;
+    value -= metrics.variance * AI_CONFIG.VARIANCE_PENALTY;
+
+    if (metrics.maxHeight >= HEIGHT - 2) {
+      value -= 40000;
+    }
+
+    return value;
+  }
+
+  function enumeratePlacements(targetBoard, piece) {
+    const placements = [];
+    const seen = new Set();
+
+    for (let rotation = 0; rotation < 4; rotation++) {
+      for (let x = 0; x < WIDTH; x++) {
+        const y = dropMainY(targetBoard, x, rotation);
+        if (y === null) continue;
+        const key = `${x},${y},${rotation}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        placements.push({ mainX: x, mainY: y, rotation });
+      }
+    }
+
+    placements.sort((a, b) => {
+      const ca = Math.abs(a.mainX - 2.5) + (HEIGHT - 2 - a.mainY) * 0.25;
+      const cb = Math.abs(b.mainX - 2.5) + (HEIGHT - 2 - b.mainY) * 0.25;
+      return ca - cb;
     });
 
-    const q = (typeof nextQueue !== 'undefined' && Array.isArray(nextQueue))
-      ? nextQueue
-      : (typeof window.getNextQueue === 'function' ? window.getNextQueue() : []);
-
-    const startIndex = (typeof queueIndex === 'number') ? queueIndex : 0;
-    for (let i = 0; sequence.length < AI.LOOKAHEAD_PLIES && startIndex + i < q.length; i++) {
-      const pair = q[startIndex + i];
-      if (!pair || pair.length < 2) break;
-      sequence.push({
-        mainColor: pair[1],
-        subColor: pair[0],
-        source: 'next',
-        index: startIndex + i,
-      });
-    }
-
-    return sequence;
+    return placements;
   }
 
-  function scoreNode(node, resolution, depthIndex) {
-    const shape = evaluateShape(resolution.board);
-
-    let priority = 0;
-
-    // chain 長を最優先
-    const chainBoost = resolution.chainCount > 0 ? (resolution.chainCount * resolution.chainCount * 100000000) : 0;
-    priority += chainBoost;
-
-    // その枝で出たスコアも次点で評価
-    priority += resolution.score * 400;
-
-    // これまでの最大 chain を強く保持
-    priority += node.maxChainTriggered * 10000000;
-
-    // chain がまだ起きていない局面は build-up を重視
-    if (node.maxChainTriggered === 0 && resolution.chainCount === 0) {
-      priority += shape.chainPotential * 300;
-      priority -= shape.holes * 800;
-      priority -= shape.roughness * 25;
-      priority -= shape.maxHeight * 40;
-    } else {
-      priority += shape.chainPotential * 40;
-      priority -= shape.holes * 200;
-      priority -= shape.roughness * 10;
-      priority -= shape.maxHeight * 20;
-    }
-
-    // 早く強い形に到達した枝を少し優先
-    priority += (AI.LOOKAHEAD_PLIES - depthIndex) * 250;
-
-    // 安全なスペースも少し見る
-    priority += shape.emptyVisible * 8;
-
-    return priority;
+  function pieceFromCurrent() {
+    if (!currentPuyo) return null;
+    return {
+      mainColor: currentPuyo.mainColor,
+      subColor: currentPuyo.subColor,
+    };
   }
 
-  function searchBestMove() {
-    const boardState = getBoard();
-    const piece = getCurrentPuyo();
+  function pieceFromQueue(index) {
+    if (!Array.isArray(nextQueue) || index < 0 || index >= nextQueue.length) return null;
+    const pair = nextQueue[index];
+    if (!pair || pair.length < 2) return null;
+    return {
+      mainColor: pair[1],
+      subColor: pair[0],
+    };
+  }
 
-    if (!boardState || !piece || getGameState() !== 'playing') return null;
+  function makeRootPieces() {
+    const pieces = [];
+    const cur = pieceFromCurrent();
+    if (cur) pieces.push(cur);
 
-    const signature = [
-      boardKey(boardState),
-      piece.mainColor,
-      piece.subColor,
-      piece.mainX,
-      piece.mainY,
-      piece.rotation,
-      typeof queueIndex === 'number' ? queueIndex : 0,
-    ].join(':');
+    const next1 = pieceFromQueue(queueIndex);
+    const next2 = pieceFromQueue(queueIndex + 1);
+    if (next1) pieces.push(next1);
+    if (next2) pieces.push(next2);
 
-    if (signature === lastPlannedSignature && cachedPlan) {
-      return cachedPlan;
-    }
+    return pieces;
+  }
 
-    const start = performance.now();
-    const sequence = buildSearchSequence();
-    if (!sequence.length) return null;
+  function simulateOneMove(baseBoard, piece, placement) {
+    const placed = placePiece(baseBoard, piece, placement);
+    if (!placed) return null;
+    gravityOnBoard(placed);
+    const resolved = resolveChains(placed);
+    return resolved;
+  }
 
-    let frontier = [{
-      board: cloneBoard(boardState),
-      maxChainTriggered: 0,
+  function betterOf(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    if (b.evalScore !== a.evalScore) return b.evalScore > a.evalScore ? b : a;
+    if (b.totalChains !== a.totalChains) return b.totalChains > a.totalChains ? b : a;
+    if (b.totalScore !== a.totalScore) return b.totalScore > a.totalScore ? b : a;
+    return b;
+  }
+
+  function think() {
+    if (!isReady()) return null;
+
+    const pieces = makeRootPieces();
+    if (!pieces.length) return null;
+
+    const startBoard = cloneBoard(board);
+    const startTime = performance.now();
+
+    let beam = [{
+      board: startBoard,
+      path: [],
       totalScore: 0,
-      firstAction: null,
-      priority: -Infinity,
+      totalChains: 0,
+      evalScore: evaluateState({ board: startBoard, totalScore: 0, totalChains: 0 }),
     }];
 
-    let bestSeen = null;
+    let bestLeaf = null;
 
-    for (let depthIndex = 0; depthIndex < sequence.length; depthIndex++) {
-      const nextFrontier = [];
-      const currentPiece = sequence[depthIndex];
+    for (let depth = 0; depth < Math.min(AI_CONFIG.SEARCH_DEPTH, pieces.length); depth++) {
+      const piece = pieces[depth];
+      const candidates = [];
 
-      for (const node of frontier) {
-        const placements = enumerateLandingPlacements(node.board, currentPiece);
+      for (const node of beam) {
+        if (performance.now() - startTime > AI_CONFIG.TIME_LIMIT_MS) break;
 
+        const placements = enumeratePlacements(node.board, piece);
         for (const placement of placements) {
-          if (sleepLikeBudgetExceeded(start)) {
-            break;
-          }
+          if (performance.now() - startTime > AI_CONFIG.TIME_LIMIT_MS) break;
 
-          const resolution = simulatePlacementAndResolve(node.board, currentPiece, placement);
-          if (!resolution) continue;
+          const sim = simulateOneMove(node.board, piece, placement);
+          if (!sim) continue;
 
-          const firstAction = node.firstAction || {
-            rotation: placement.rotation,
-            mainX: placement.mainX,
+          const nextNode = {
+            board: sim.board,
+            path: node.path.concat([placement]),
+            totalScore: node.totalScore + sim.totalScore,
+            totalChains: node.totalChains + sim.totalChains,
           };
 
-          const newNode = {
-            board: resolution.board,
-            maxChainTriggered: Math.max(node.maxChainTriggered, resolution.chainCount),
-            totalScore: node.totalScore + resolution.score,
-            firstAction,
-            priority: 0,
-          };
+          nextNode.evalScore = evaluateState({
+            board: nextNode.board,
+            totalScore: nextNode.totalScore,
+            totalChains: nextNode.totalChains,
+          });
 
-          newNode.priority = scoreNode(newNode, resolution, depthIndex);
-
-          nextFrontier.push(newNode);
-
-          if (!bestSeen || newNode.priority > bestSeen.priority) {
-            bestSeen = newNode;
-          }
+          candidates.push(nextNode);
+          bestLeaf = betterOf(bestLeaf, nextNode);
         }
       }
 
-      if (!nextFrontier.length) break;
+      if (!candidates.length) break;
 
-      nextFrontier.sort((a, b) => b.priority - a.priority);
-      frontier = nextFrontier.slice(0, AI.BEAM_WIDTH);
+      candidates.sort((a, b) => {
+        if (b.evalScore !== a.evalScore) return b.evalScore - a.evalScore;
+        if (b.totalChains !== a.totalChains) return b.totalChains - a.totalChains;
+        if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+        return 0;
+      });
 
-      if (sleepLikeBudgetExceeded(start)) break;
+      beam = candidates.slice(0, AI_CONFIG.BEAM_WIDTH);
+      bestLeaf = betterOf(bestLeaf, beam[0]);
     }
 
-    const best = frontier[0] || bestSeen;
-    const plan = best ? best.firstAction : null;
-
-    lastPlannedSignature = signature;
-    cachedPlan = plan;
-
-    if (AI.DEBUG && plan) {
-      console.log('[PuyoAI] plan:', plan);
+    if (!bestLeaf || !bestLeaf.path.length) {
+      return null;
     }
 
-    return plan;
+    const first = bestLeaf.path[0];
+    const predictedChains = bestLeaf.totalChains;
+    const predictedScore = bestLeaf.totalScore;
+
+    return {
+      rotation: first.rotation,
+      mainX: first.mainX,
+      mainY: first.mainY,
+      predictedChains,
+      predictedScore,
+      evalScore: bestLeaf.evalScore,
+      searchMs: Math.round(performance.now() - startTime),
+    };
   }
 
-  function pressKey(key) {
-    const event = new KeyboardEvent('keydown', {
-      key,
-      bubbles: true,
-      cancelable: true,
-    });
-    document.dispatchEvent(event);
-  }
+  function applyPlan(plan) {
+    if (!plan || !currentPuyo) return false;
+    if (typeof gameState !== 'undefined' && gameState !== 'playing') return false;
 
-  function rotateToTarget(targetRotation) {
-    const piece = getCurrentPuyo();
-    if (!piece) return;
+    currentPuyo.mainX = plan.mainX;
+    currentPuyo.mainY = plan.mainY;
+    currentPuyo.rotation = plan.rotation;
 
-    let currentRotation = piece.rotation;
-    let cw = (targetRotation - currentRotation + 4) % 4;
-    let ccw = (currentRotation - targetRotation + 4) % 4;
-
-    if (cw <= ccw) {
-      for (let i = 0; i < cw; i++) pressKey('z');
-    } else {
-      for (let i = 0; i < ccw; i++) pressKey('x');
+    if (typeof renderBoard === 'function') renderBoard();
+    if (typeof hardDrop === 'function') {
+      hardDrop();
+    } else if (typeof lockPuyo === 'function') {
+      lockPuyo();
     }
-  }
 
-  function moveToTargetX(targetX) {
-    const piece = getCurrentPuyo();
-    if (!piece) return;
-
-    let dx = targetX - piece.mainX;
-    if (dx < 0) {
-      for (let i = 0; i < Math.abs(dx); i++) pressKey('ArrowLeft');
-    } else if (dx > 0) {
-      for (let i = 0; i < dx; i++) pressKey('ArrowRight');
-    }
-  }
-
-  function executePlan(plan) {
-    if (!plan) return false;
-    if (getGameState() !== 'playing') return false;
-
-    const pieceBefore = getCurrentPuyo();
-    if (!pieceBefore) return false;
-
-    // 回転 → 横移動 → ハードドロップ
-    rotateToTarget(plan.rotation);
-
-    // 回転キックで mainX が変わることがあるので、毎回再取得
-    moveToTargetX(plan.mainX);
-
-    pressKey(' ');
     return true;
   }
 
-  function thinkAndAct() {
-    if (searchBusy) return;
-    if (getGameState() !== 'playing') return;
-    if (!getCurrentPuyo()) return;
+  function runPuyoAIInternal() {
+    if (aiBusy) return false;
+    if (!isReady()) {
+      aiStatus('AI待機中');
+      return false;
+    }
+    if (gameState !== 'playing') {
+      aiStatus(gameState === 'gameover' ? 'ゲームオーバー' : 'AI待機中');
+      return false;
+    }
+    if (!currentPuyo) {
+      aiStatus('操作ぷよ待ち');
+      return false;
+    }
 
-    searchBusy = true;
+    aiBusy = true;
+    setStepButtonDisabled(true);
+    aiStatus('AI思考中...');
+
     try {
-      const plan = searchBestMove();
-      if (plan) {
-        executePlan(plan);
+      const plan = think();
+      if (!plan) {
+        aiStatus('手が見つかりませんでした');
+        return false;
       }
+
+      applyPlan(plan);
+      lastThinkAt = Date.now();
+      aiStatus(`AI完了 / 想定 ${plan.predictedChains}連 / ${plan.searchMs}ms`);
+      return true;
+    } catch (err) {
+      console.error('[PuyoAI] think failed:', err);
+      aiStatus('AIエラー');
+      return false;
     } finally {
-      searchBusy = false;
+      aiBusy = false;
+      setStepButtonDisabled(false);
     }
   }
 
-  function startAutoplay() {
-    stopAutoplay();
-    autoTimer = setInterval(() => {
-      if (getGameState() !== 'playing') return;
-      if (!getCurrentPuyo()) return;
-      thinkAndAct();
-    }, AI.AUTO_TICK_MS);
-  }
-
-  function stopAutoplay() {
+  function scheduleAutoTick() {
+    if (!autoEnabled) return;
     if (autoTimer) {
-      clearInterval(autoTimer);
+      clearTimeout(autoTimer);
       autoTimer = null;
     }
+
+    autoTimer = setTimeout(() => {
+      autoTimer = null;
+      if (!autoEnabled) return;
+
+      if (!isReady() || gameState !== 'playing') {
+        aiStatus(gameState === 'gameover' ? 'ゲームオーバー' : 'AI待機中');
+        scheduleAutoTick();
+        return;
+      }
+
+      if (!currentPuyo) {
+        aiStatus('操作ぷよ待ち');
+        scheduleAutoTick();
+        return;
+      }
+
+      const didRun = runPuyoAIInternal();
+      if (!didRun) {
+        scheduleAutoTick();
+        return;
+      }
+
+      scheduleAutoTick();
+    }, AI_CONFIG.AUTO_INTERVAL_MS);
   }
 
-  function toggleAutoplay() {
-    if (autoTimer) stopAutoplay();
-    else startAutoplay();
-  }
-
-  function resetCache() {
-    lastPlannedSignature = '';
-    cachedPlan = null;
-  }
-
-  // exposed API
   window.PuyoAI = {
-    settings: AI,
-    think: searchBestMove,
-    act: thinkAndAct,
-    startAutoplay,
-    stopAutoplay,
-    toggleAutoplay,
-    resetCache,
-    evaluateShape,
-    enumerateLandingPlacements,
-    simulatePlacementAndResolve,
+    think,
+    runOnce: runPuyoAIInternal,
+    config: AI_CONFIG,
   };
 
-  // helpers for buttons / console
-  window.startPuyoAIAutoplay = startAutoplay;
-  window.stopPuyoAIAutoplay = stopAutoplay;
-  window.togglePuyoAIAutoplay = toggleAutoplay;
-  window.puyoAIThink = searchBestMove;
+  window.runPuyoAI = function () {
+    return runPuyoAIInternal();
+  };
 
-  if (AI.ENABLE_AUTOPLAY) {
-    startAutoplay();
-  }
+  window.toggleAIAuto = function () {
+    autoEnabled = !autoEnabled;
+    setAutoButton(autoEnabled);
+
+    if (autoEnabled) {
+      aiStatus('AI自動実行中');
+      scheduleAutoTick();
+    } else {
+      if (autoTimer) {
+        clearTimeout(autoTimer);
+        autoTimer = null;
+      }
+      aiStatus('AI待機中');
+    }
+  };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    setAutoButton(false);
+    setStepButtonDisabled(false);
+    aiStatus('AI待機中');
+  });
 })();
-// ===== HTMLボタン対応用 =====
-function setAIStatus(text) {
-  const el = document.getElementById('ai-status');
-  if (el) el.textContent = text;
-}
-
-function setAIAutoButtonText(on) {
-  const btn = document.getElementById('ai-auto-button');
-  if (btn) btn.textContent = on ? 'AI自動: ON' : 'AI自動: OFF';
-}
-
-function setAIStepButtonState(disabled) {
-  const btn = document.getElementById('ai-step-button');
-  if (btn) btn.disabled = !!disabled;
-}
-
-function isAIReady() {
-  return !!window.PuyoAI && typeof window.PuyoAI.think === 'function';
-}
-
-function runPuyoAIInternal() {
-  if (!isAIReady()) {
-    setAIStatus('AIがまだ読み込まれていません');
-    return false;
-  }
-
-  if (typeof gameState !== 'undefined' && gameState !== 'playing') {
-    setAIStatus('プレイ中のみ実行できます');
-    return false;
-  }
-
-  if (typeof currentPuyo !== 'undefined' && !currentPuyo) {
-    setAIStatus('操作ぷよがありません');
-    return false;
-  }
-
-  setAIStatus('AI思考中...');
-  setAIStepButtonState(true);
-
-  try {
-    const plan = window.PuyoAI.think();
-    if (!plan) {
-      setAIStatus('手が見つかりませんでした');
-      return false;
-    }
-
-    const piece = typeof currentPuyo !== 'undefined' ? currentPuyo : null;
-    if (!piece) {
-      setAIStatus('操作ぷよがありません');
-      return false;
-    }
-
-    // 回転
-    const targetRotation = plan.rotation;
-    let nowRotation = piece.rotation;
-    const cw = (targetRotation - nowRotation + 4) % 4;
-    const ccw = (nowRotation - targetRotation + 4) % 4;
-
-    if (cw <= ccw) {
-      for (let i = 0; i < cw; i++) {
-        if (typeof window.rotatePuyoCW === 'function') window.rotatePuyoCW();
-      }
-    } else {
-      for (let i = 0; i < ccw; i++) {
-        if (typeof window.rotatePuyoCCW === 'function') window.rotatePuyoCCW();
-      }
-    }
-
-    // 横移動
-    const updatedPiece = typeof currentPuyo !== 'undefined' ? currentPuyo : null;
-    if (updatedPiece) {
-      let dx = plan.mainX - updatedPiece.mainX;
-      while (dx < 0) {
-        if (typeof window.handleInput === 'function') {
-          window.handleInput({ key: 'ArrowLeft' });
-        } else if (typeof movePuyo === 'function') {
-          movePuyo(-1, 0);
-        }
-        dx++;
-      }
-      while (dx > 0) {
-        if (typeof window.handleInput === 'function') {
-          window.handleInput({ key: 'ArrowRight' });
-        } else if (typeof movePuyo === 'function') {
-          movePuyo(1, 0);
-        }
-        dx--;
-      }
-    }
-
-    // ハードドロップ
-    if (typeof window.hardDrop === 'function') {
-      window.hardDrop();
-    } else {
-      const ev = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
-      document.dispatchEvent(ev);
-    }
-
-    setAIStatus('AI完了');
-    return true;
-  } catch (err) {
-    console.error('[PuyoAI] run failed:', err);
-    setAIStatus('AI実行エラー');
-    return false;
-  } finally {
-    setAIStepButtonState(false);
-  }
-}
-
-window.runPuyoAI = function() {
-  return runPuyoAIInternal();
-};
-
-window.toggleAIAuto = function() {
-  if (!isAIReady()) {
-    setAIStatus('AIがまだ読み込まれていません');
-    return;
-  }
-
-  if (window.__puyoAIAutoTimer) {
-    clearInterval(window.__puyoAIAutoTimer);
-    window.__puyoAIAutoTimer = null;
-    setAIAutoButtonText(false);
-    setAIStatus('AI待機中');
-    return;
-  }
-
-  window.__puyoAIAutoTimer = setInterval(() => {
-    if (typeof gameState !== 'undefined' && gameState !== 'playing') return;
-    if (typeof currentPuyo !== 'undefined' && !currentPuyo) return;
-    if (typeof document === 'undefined') return;
-    runPuyoAIInternal();
-  }, 120);
-
-  setAIAutoButtonText(true);
-  setAIStatus('AI自動実行中');
-};
-
-// 起動時の表示整備
-document.addEventListener('DOMContentLoaded', () => {
-  const ready = isAIReady();
-  setAIAutoButtonText(false);
-  setAIStepButtonState(false);
-  setAIStatus(ready ? 'AI待機中' : 'AI読み込み中');
-});
