@@ -1,33 +1,48 @@
 // puyoAI.js
-// 3-ply beam search + chain-building heuristics
-// - targets longer chains by preferring future potential over small immediate clears
-// - works with the current puyoSim.js globals
-// - compatible with the HTML buttons:
-//   <button onclick="runPuyoAI()">AIで1手</button>
-//   <button onclick="toggleAIAuto()">AI自動</button>
+// Future-seed oriented beam search AI
+// Goals:
+// - maximize long chains, especially 8~10+ chains
+// - prefer board shapes that contain "almost-complete" future seeds
+// - strongly penalize short immediate clears unless they build strong potential
+//
+// Compatible with the current HTML buttons:
+//   <button id="ai-step-button" onclick="runPuyoAI()">AIで1手</button>
+//   <button id="ai-auto-button" onclick="toggleAIAuto()">AI自動: OFF</button>
 
 (function () {
   'use strict';
 
   const AI_CONFIG = {
-    SEARCH_DEPTH: 3,            // current + NEXT1 + NEXT2
-    BEAM_WIDTH: 60,             // beam width per ply
-    TIME_LIMIT_MS: 1800,        // search budget per move
-    AUTO_INTERVAL_MS: 160,      // polling interval for auto mode
-    NO_MOVE_RETRY_MS: 120,
-    // Heavy bias toward building long chains.
-    TARGET_CHAIN_BONUS: 65000,
-    SMALL_CHAIN_PENALTY: 45000, // penalty when a move resolves only 1-5 chains
-    HEURISTIC_WEIGHT: 1,
+    SEARCH_DEPTH: 3,          // current + NEXT1 + NEXT2
+    BEAM_WIDTH: 100,          // wider beam = stronger, slower
+    TIME_LIMIT_MS: 3200,       // allow more thinking time
+    AUTO_INTERVAL_MS: 120,
+
+    // Long-chain bias
+    TARGET_CHAIN_BONUS: 90000,
+    SMALL_CHAIN_PENALTY: 65000,
+    LONG_CHAIN_THRESHOLD: 6,
+
+    // Board-shape / seed evaluation
+    HOLE_PENALTY: 4200,
+    HEIGHT_PENALTY: 650,
+    VARIANCE_PENALTY: 90,
+    TOP_PRESSURE_PENALTY: 1400,
+    SMOOTHNESS_BONUS: 220,
+    COLOR_DIVERSITY_BONUS: 900,
+
+    // Future chain seed bonuses
+    JOIN3_BONUS: 22000,       // empty cell with 3 same-color neighbors
+    JOIN2_BONUS: 5200,        // empty cell with 2 same-color neighbors
+    COMPONENT3_BONUS: 12000,   // 3-cell same-color component
+    COMPONENT2_BONUS: 3400,   // 2-cell same-color component
+    VERTICAL_PAIR_BONUS: 180,
+    HORIZONTAL_PAIR_BONUS: 120,
+    ALL_CLEAR_BONUS: 26000,
+
+    // Scoring weight
     SCORE_WEIGHT: 0.35,
-    HOLE_PENALTY: 2600,
-    HEIGHT_PENALTY: 420,
-    VARIANCE_PENALTY: 55,
-    SMOOTHNESS_BONUS: 210,
-    COMPONENT2_BONUS: 1400,
-    COMPONENT3_BONUS: 3200,
-    TOTALFILLED_BONUS: 26,
-    ALL_CLEAR_BONUS: 22000,
+
     FAIL_SCORE: -1e18,
   };
 
@@ -35,6 +50,7 @@
   const HEIGHT = typeof window.HEIGHT === 'number' ? window.HEIGHT : 14;
   const HIDDEN_ROWS = typeof window.HIDDEN_ROWS === 'number' ? window.HIDDEN_ROWS : 2;
   const VISIBLE_ROWS = Math.max(0, HEIGHT - HIDDEN_ROWS);
+
   const COLORS = window.COLORS || {
     EMPTY: 0,
     RED: 1,
@@ -43,29 +59,36 @@
     YELLOW: 4,
     GARBAGE: 5,
   };
+
   const BONUS_TABLE = window.BONUS_TABLE || {
     CHAIN: [0, 8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512],
     GROUP: [0, 0, 0, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     COLOR: [0, 0, 3, 6, 12],
   };
-  const ALL_CLEAR_SCORE_BONUS = typeof window.ALL_CLEAR_SCORE_BONUS === 'number' ? window.ALL_CLEAR_SCORE_BONUS : 2100;
+
+  const ALL_CLEAR_SCORE_BONUS =
+    typeof window.ALL_CLEAR_SCORE_BONUS === 'number' ? window.ALL_CLEAR_SCORE_BONUS : 2100;
 
   const OFFSETS = [
     [0, 1],   // rotation 0: sub above main
-    [-1, 0],  // rotation 1: sub left of main
-    [0, -1],  // rotation 2: sub below main
-    [1, 0],   // rotation 3: sub right of main
+    [-1, 0],  // rotation 1: sub left
+    [0, -1],  // rotation 2: sub below
+    [1, 0],   // rotation 3: sub right
   ];
 
   let autoEnabled = false;
   let autoTimer = null;
   let aiBusy = false;
-  let lastThinkAt = 0;
 
   function isReady() {
-    return typeof board !== 'undefined' && Array.isArray(board) &&
-      typeof currentPuyo !== 'undefined' && typeof nextQueue !== 'undefined' &&
-      typeof queueIndex !== 'undefined' && typeof gameState !== 'undefined';
+    return (
+      typeof board !== 'undefined' &&
+      Array.isArray(board) &&
+      typeof currentPuyo !== 'undefined' &&
+      typeof nextQueue !== 'undefined' &&
+      typeof queueIndex !== 'undefined' &&
+      typeof gameState !== 'undefined'
+    );
   }
 
   function aiStatus(text) {
@@ -118,21 +141,18 @@
   }
 
   function placePiece(targetBoard, piece, placement) {
+    const placed = cloneBoard(targetBoard);
     const { mainX, mainY, rotation } = placement;
     const coords = getPieceCoords(mainX, mainY, rotation);
-    const next = cloneBoard(targetBoard);
-
-    const mainColor = piece.mainColor;
-    const subColor = piece.subColor;
 
     for (const p of coords) {
       if (!isInside(p.x, p.y)) return null;
-      if (next[p.y][p.x] !== COLORS.EMPTY) return null;
+      if (placed[p.y][p.x] !== COLORS.EMPTY) return null;
     }
 
-    next[coords[0].y][coords[0].x] = mainColor;
-    next[coords[1].y][coords[1].x] = subColor;
-    return next;
+    placed[coords[0].y][coords[0].x] = piece.mainColor;
+    placed[coords[1].y][coords[1].x] = piece.subColor;
+    return placed;
   }
 
   function gravityOnBoard(targetBoard) {
@@ -164,10 +184,7 @@
           const cur = stack.pop();
           group.push(cur);
 
-          const neigh = [
-            [0, 1], [0, -1], [1, 0], [-1, 0],
-          ];
-          for (const [dx, dy] of neigh) {
+          for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
             const nx = cur.x + dx;
             const ny = cur.y + dy;
             if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= VISIBLE_ROWS) continue;
@@ -178,7 +195,9 @@
           }
         }
 
-        if (group.length >= 4) groups.push({ color, group });
+        if (group.length >= 4) {
+          groups.push({ color, group });
+        }
       }
     }
 
@@ -244,8 +263,11 @@
     while (true) {
       gravityOnBoard(targetBoard);
       const groups = findConnectedPuyosOnBoard(targetBoard);
+
       if (groups.length === 0) {
-        if (isBoardEmpty(targetBoard)) totalScore += ALL_CLEAR_SCORE_BONUS;
+        if (isBoardEmpty(targetBoard)) {
+          totalScore += ALL_CLEAR_SCORE_BONUS;
+        }
         break;
       }
 
@@ -267,54 +289,80 @@
     return { board: targetBoard, totalScore, totalChains };
   }
 
+  function countSameNeighbors(boardState, x, y, color) {
+    let count = 0;
+    for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (!isInside(nx, ny)) continue;
+      if (boardState[ny][nx] === color) count += 1;
+    }
+    return count;
+  }
+
   function analyzeBoard(targetBoard) {
     const heights = Array(WIDTH).fill(0);
     let totalFilled = 0;
     let holes = 0;
+    let topPressure = 0;
+    const colorCounts = [0, 0, 0, 0, 0];
 
     for (let x = 0; x < WIDTH; x++) {
       let seenFilled = false;
       let h = 0;
+
       for (let y = 0; y < HEIGHT; y++) {
         const cell = targetBoard[y][x];
         if (cell !== COLORS.EMPTY) {
           seenFilled = true;
           h += 1;
           totalFilled += 1;
+          if (cell >= COLORS.RED && cell <= COLORS.YELLOW) colorCounts[cell] += 1;
+          if (y >= VISIBLE_ROWS - 4) topPressure += 1;
         } else if (seenFilled) {
           holes += 1;
         }
       }
+
       heights[x] = h;
     }
 
-    let maxHeight = 0;
-    let minHeight = HEIGHT;
-    let variance = 0;
-    let smoothness = 0;
-    let midHeightBonus = 0;
-
-    for (const h of heights) {
-      if (h > maxHeight) maxHeight = h;
-      if (h < minHeight) minHeight = h;
-      if (h >= 2 && h <= 9) midHeightBonus += 1;
-    }
-
+    const maxHeight = Math.max(...heights);
+    const minHeight = Math.min(...heights);
     const avg = heights.reduce((a, b) => a + b, 0) / WIDTH;
-    variance = heights.reduce((sum, h) => sum + (h - avg) * (h - avg), 0) / WIDTH;
+    const variance = heights.reduce((sum, h) => sum + (h - avg) * (h - avg), 0) / WIDTH;
+
+    let smoothness = 0;
     for (let i = 0; i < WIDTH - 1; i++) {
       smoothness -= Math.abs(heights[i] - heights[i + 1]);
     }
 
+    let colorDiversity = 0;
+    for (let c = 1; c <= 4; c++) {
+      if (colorCounts[c] > 0) colorDiversity += 1;
+    }
+
+    let verticalPairs = 0;
+    let horizontalPairs = 0;
+    let join2 = 0;
+    let join3 = 0;
     const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
     let component2 = 0;
     let component3 = 0;
-    let component4 = 0;
 
     for (let y = 0; y < VISIBLE_ROWS; y++) {
       for (let x = 0; x < WIDTH; x++) {
-        const color = targetBoard[y][x];
-        if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
+        const cell = targetBoard[y][x];
+        if (cell === COLORS.EMPTY) {
+          for (let color = 1; color <= 4; color++) {
+            const same = countSameNeighbors(targetBoard, x, y, color);
+            if (same === 2) join2 += 1;
+            else if (same === 3) join3 += 1;
+          }
+          continue;
+        }
+
+        if (cell === COLORS.GARBAGE || visited[y][x]) continue;
 
         const stack = [{ x, y }];
         visited[y][x] = true;
@@ -323,12 +371,13 @@
         while (stack.length) {
           const cur = stack.pop();
           size += 1;
+
           for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
             const nx = cur.x + dx;
             const ny = cur.y + dy;
             if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= VISIBLE_ROWS) continue;
             if (visited[ny][nx]) continue;
-            if (targetBoard[ny][nx] !== color) continue;
+            if (targetBoard[ny][nx] !== cell) continue;
             visited[ny][nx] = true;
             stack.push({ x: nx, y: ny });
           }
@@ -336,7 +385,16 @@
 
         if (size === 2) component2 += 1;
         else if (size === 3) component3 += 1;
-        else if (size >= 4) component4 += 1;
+      }
+    }
+
+    for (let y = 0; y < VISIBLE_ROWS; y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        const cell = targetBoard[y][x];
+        if (cell === COLORS.EMPTY || cell === COLORS.GARBAGE) continue;
+
+        if (x + 1 < WIDTH && targetBoard[y][x + 1] === cell) horizontalPairs += 1;
+        if (y + 1 < VISIBLE_ROWS && targetBoard[y + 1][x] === cell) verticalPairs += 1;
       }
     }
 
@@ -348,52 +406,71 @@
       minHeight,
       variance,
       smoothness,
-      midHeightBonus,
+      topPressure,
+      colorDiversity,
+      verticalPairs,
+      horizontalPairs,
+      join2,
+      join3,
       component2,
       component3,
-      component4,
     };
   }
 
   function evaluateState(result) {
     const metrics = analyzeBoard(result.board);
-
     let value = 0;
 
+    // Actual score from simulated chain.
     value += result.totalScore * AI_CONFIG.SCORE_WEIGHT;
 
+    // Strongly prefer longer immediate chains.
     if (result.totalChains > 0) {
       value += result.totalChains * result.totalChains * AI_CONFIG.TARGET_CHAIN_BONUS;
 
-      if (result.totalChains < 6) {
-        value -= (6 - result.totalChains) * AI_CONFIG.SMALL_CHAIN_PENALTY;
+      if (result.totalChains < AI_CONFIG.LONG_CHAIN_THRESHOLD) {
+        value -= (AI_CONFIG.LONG_CHAIN_THRESHOLD - result.totalChains) * AI_CONFIG.SMALL_CHAIN_PENALTY;
       } else {
-        value += result.totalChains * 50000;
+        // Once the move already builds a decent chain, reward it aggressively.
+        value += result.totalChains * 65000;
       }
-    } else {
-      value += metrics.component3 * AI_CONFIG.COMPONENT3_BONUS;
-      value += metrics.component2 * AI_CONFIG.COMPONENT2_BONUS;
-      value += metrics.midHeightBonus * 800;
     }
 
+    // Future seed evaluation:
+    // - empty cells that could complete 3-of-a-kind are very valuable
+    // - 3-cell and 2-cell clusters are strong seeds
+    value += metrics.join3 * AI_CONFIG.JOIN3_BONUS;
+    value += metrics.join2 * AI_CONFIG.JOIN2_BONUS;
     value += metrics.component3 * AI_CONFIG.COMPONENT3_BONUS;
     value += metrics.component2 * AI_CONFIG.COMPONENT2_BONUS;
-    value += metrics.midHeightBonus * 400;
-    value += metrics.smoothness * AI_CONFIG.SMOOTHNESS_BONUS;
-    value += metrics.totalFilled * AI_CONFIG.TOTALFILLED_BONUS;
 
+    // Compact, smooth, and low-hole board is easier to extend into long chains.
+    value += metrics.smoothness * AI_CONFIG.SMOOTHNESS_BONUS;
+    value += metrics.colorDiversity * AI_CONFIG.COLOR_DIVERSITY_BONUS;
+    value += metrics.verticalPairs * AI_CONFIG.VERTICAL_PAIR_BONUS;
+    value += metrics.horizontalPairs * AI_CONFIG.HORIZONTAL_PAIR_BONUS;
+
+    // Keep some room for future drops.
+    value += metrics.totalFilled * 18;
+
+    // Penalties
     value -= metrics.holes * AI_CONFIG.HOLE_PENALTY;
     value -= metrics.maxHeight * AI_CONFIG.HEIGHT_PENALTY;
     value -= metrics.variance * AI_CONFIG.VARIANCE_PENALTY;
+    value -= metrics.topPressure * AI_CONFIG.TOP_PRESSURE_PENALTY;
 
     if (metrics.maxHeight >= HEIGHT - 2) {
-      value -= 40000;
+      value -= 60000;
     }
+
+    // Mild preference for having 4 colors on the board, but not too sparse.
+    if (metrics.colorDiversity === 4) value += 2500;
+    if (metrics.colorDiversity <= 2) value -= 3000;
 
     return value;
   }
 
-  function enumeratePlacements(targetBoard, piece) {
+  function enumeratePlacements(targetBoard) {
     const placements = [];
     const seen = new Set();
 
@@ -408,9 +485,10 @@
       }
     }
 
+    // Prefer central placements slightly.
     placements.sort((a, b) => {
-      const ca = Math.abs(a.mainX - 2.5) + (HEIGHT - 2 - a.mainY) * 0.25;
-      const cb = Math.abs(b.mainX - 2.5) + (HEIGHT - 2 - b.mainY) * 0.25;
+      const ca = Math.abs(a.mainX - 2.5) + (HEIGHT - 2 - a.mainY) * 0.18;
+      const cb = Math.abs(b.mainX - 2.5) + (HEIGHT - 2 - b.mainY) * 0.18;
       return ca - cb;
     });
 
@@ -426,8 +504,9 @@
   }
 
   function pieceFromQueue(index) {
-    if (!Array.isArray(nextQueue) || index < 0 || index >= nextQueue.length) return null;
-    const pair = nextQueue[index];
+    const q = Array.isArray(nextQueue) ? nextQueue : [];
+    if (index < 0 || index >= q.length) return null;
+    const pair = q[index];
     if (!pair || pair.length < 2) return null;
     return {
       mainColor: pair[1],
@@ -451,9 +530,9 @@
   function simulateOneMove(baseBoard, piece, placement) {
     const placed = placePiece(baseBoard, piece, placement);
     if (!placed) return null;
+
     gravityOnBoard(placed);
-    const resolved = resolveChains(placed);
-    return resolved;
+    return resolveChains(placed);
   }
 
   function betterOf(a, b) {
@@ -491,7 +570,7 @@
       for (const node of beam) {
         if (performance.now() - startTime > AI_CONFIG.TIME_LIMIT_MS) break;
 
-        const placements = enumeratePlacements(node.board, piece);
+        const placements = enumeratePlacements(node.board);
         for (const placement of placements) {
           if (performance.now() - startTime > AI_CONFIG.TIME_LIMIT_MS) break;
 
@@ -529,20 +608,15 @@
       bestLeaf = betterOf(bestLeaf, beam[0]);
     }
 
-    if (!bestLeaf || !bestLeaf.path.length) {
-      return null;
-    }
+    if (!bestLeaf || !bestLeaf.path.length) return null;
 
     const first = bestLeaf.path[0];
-    const predictedChains = bestLeaf.totalChains;
-    const predictedScore = bestLeaf.totalScore;
-
     return {
       rotation: first.rotation,
       mainX: first.mainX,
       mainY: first.mainY,
-      predictedChains,
-      predictedScore,
+      predictedChains: bestLeaf.totalChains,
+      predictedScore: bestLeaf.totalScore,
       evalScore: bestLeaf.evalScore,
       searchMs: Math.round(performance.now() - startTime),
     };
@@ -557,6 +631,7 @@
     currentPuyo.rotation = plan.rotation;
 
     if (typeof renderBoard === 'function') renderBoard();
+
     if (typeof hardDrop === 'function') {
       hardDrop();
     } else if (typeof lockPuyo === 'function') {
@@ -593,7 +668,6 @@
       }
 
       applyPlan(plan);
-      lastThinkAt = Date.now();
       aiStatus(`AI完了 / 想定 ${plan.predictedChains}連 / ${plan.searchMs}ms`);
       return true;
     } catch (err) {
@@ -608,6 +682,7 @@
 
   function scheduleAutoTick() {
     if (!autoEnabled) return;
+
     if (autoTimer) {
       clearTimeout(autoTimer);
       autoTimer = null;
