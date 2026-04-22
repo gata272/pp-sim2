@@ -605,6 +605,8 @@
         s -= holes * 38;
         s -= bumpiness * 10;
         s -= maxH * 30;
+        
+        s -= dangerPenalty(boardState);
 
         // Near-top penalty
         if (maxH >= getHeight() - 3) s -= 120;
