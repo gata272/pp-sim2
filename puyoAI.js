@@ -29,7 +29,7 @@
         let penalty = 0;
         // そのマス自体が埋まっていたら、最優先で避ける
         if (boardState[DANGER_CELL_Y][DANGER_CELL_X] !== C.EMPTY) {
-            penalty += 500000;
+            penalty += 1000000;
         }
         // その列が gameover ラインまで到達しているだけでも強く減点
         if (heights[DANGER_CELL_X] >= DANGER_CELL_Y + 1) {
