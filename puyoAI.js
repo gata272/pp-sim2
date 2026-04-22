@@ -19,6 +19,34 @@
         PSEUDO_BRANCH_LIMIT: 6,
         VISUALIZE_DELAY_MS: 0
     };
+    // ゲームオーバー直結マス（左から3列目・下から12段目）
+    const DANGER_CELL_X = 2;
+    const DANGER_CELL_Y = 11; // board[11][2]
+    // この列が危険域に入ったときの強ペナルティ
+    function dangerPenalty(boardState) {
+        const C = getColors();
+        const heights = columnHeights(boardState);
+        let penalty = 0;
+        // そのマス自体が埋まっていたら、最優先で避ける
+        if (boardState[DANGER_CELL_Y][DANGER_CELL_X] !== C.EMPTY) {
+            penalty += 500000;
+        }
+        // その列が gameover ラインまで到達しているだけでも強く減点
+        if (heights[DANGER_CELL_X] >= DANGER_CELL_Y + 1) {
+            penalty += 250000;
+        }
+        // その列の上部が高いほどさらに減点
+        if (heights[DANGER_CELL_X] >= DANGER_CELL_Y - 1) {
+            penalty += 80000;
+        }
+        // 近傍も少しだけ嫌う
+        for (let y = Math.max(0, DANGER_CELL_Y - 2); y <= DANGER_CELL_Y; y++) {
+            if (boardState[y][DANGER_CELL_X] !== C.EMPTY) {
+                penalty += 25000;
+            }
+        }
+        return penalty;
+    }
 
     // Approximate board templates inspired by common chain structures
     const TEMPLATE_LIBRARY = [
