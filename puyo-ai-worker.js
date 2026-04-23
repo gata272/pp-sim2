@@ -479,7 +479,7 @@ function dangerPenalty(boardState) {
     let penalty = 0;
 
     if (boardState[BOARD_GAMEOVER_Y]?.[BOARD_GAMEOVER_X] !== COLORS.EMPTY) {
-        penalty += 1500000;
+        penalty += 2000000;
     }
 
     if (heights[BOARD_GAMEOVER_X] >= BOARD_GAMEOVER_Y + 1) {
