@@ -48,6 +48,104 @@ const NEXT_QUEUE_COLORS = [COLORS.RED, COLORS.BLUE, COLORS.GREEN, COLORS.YELLOW]
 // ゲームオーバー表示用
 const BOARD_GAMEOVER_CLASS = 'board-gameover';
 
+// ===== Debug stats (?debug=1 のときだけ表示) =====
+const DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === '1';
+
+const DEBUG_STATS = {
+    startedAt: performance.now(),
+    turns: 0,              // 経過ターン数
+    maxChain: 0,           // 最大連鎖数
+    chainSum: 0,           // 連鎖長の合計
+    chainEpisodes: 0,      // 連鎖が発生した回数
+    hist: Array(20).fill(0) // 10～19 を使う
+};
+
+function debugEnsurePanel() {
+    if (!DEBUG_MODE) return;
+    if (document.getElementById('debug-stats-panel')) return;
+
+    const panel = document.createElement('div');
+    panel.id = 'debug-stats-panel';
+    panel.style.cssText = [
+        'position:fixed',
+        'top:8px',
+        'right:8px',
+        'z-index:99999',
+        'background:rgba(0,0,0,0.82)',
+        'color:#fff',
+        'border:1px solid #555',
+        'border-radius:8px',
+        'padding:10px',
+        'font-size:12px',
+        'line-height:1.5',
+        'min-width:180px',
+        'pointer-events:none',
+        'white-space:nowrap'
+    ].join(';');
+
+    const histRows = [];
+    for (let n = 10; n <= 19; n++) {
+        histRows.push(`<div>${n}: <span id="dbg-chain-${n}">0</span></div>`);
+    }
+
+    panel.innerHTML = `
+        <div style="font-weight:bold;margin-bottom:6px;">AI debug</div>
+        <div>最大連鎖数: <span id="dbg-max-chain">0</span></div>
+        <div>経過ターン数: <span id="dbg-turns">0</span></div>
+        <div>平均連鎖長: <span id="dbg-avg-chain">0.00</span></div>
+        <div style="margin-top:6px;">10～19連鎖回数</div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:2px 8px;margin-top:4px;">
+            ${histRows.join('')}
+        </div>
+    `;
+
+    document.body.appendChild(panel);
+    debugUpdatePanel();
+}
+
+function debugUpdatePanel() {
+    if (!DEBUG_MODE) return;
+
+    const maxEl = document.getElementById('dbg-max-chain');
+    const turnsEl = document.getElementById('dbg-turns');
+    const avgEl = document.getElementById('dbg-avg-chain');
+
+    if (maxEl) maxEl.textContent = String(DEBUG_STATS.maxChain);
+    if (turnsEl) turnsEl.textContent = String(DEBUG_STATS.turns);
+
+    const avg = DEBUG_STATS.chainEpisodes > 0
+        ? (DEBUG_STATS.chainSum / DEBUG_STATS.chainEpisodes)
+        : 0;
+
+    if (avgEl) avgEl.textContent = avg.toFixed(2);
+
+    for (let n = 10; n <= 19; n++) {
+        const el = document.getElementById(`dbg-chain-${n}`);
+        if (el) el.textContent = String(DEBUG_STATS.hist[n]);
+    }
+}
+
+function debugRecordTurn() {
+    if (!DEBUG_MODE) return;
+    DEBUG_STATS.turns++;
+    debugUpdatePanel();
+}
+
+function debugRecordChainEpisode(chainLength) {
+    if (!DEBUG_MODE) return;
+    if (!Number.isFinite(chainLength) || chainLength <= 0) return;
+
+    DEBUG_STATS.maxChain = Math.max(DEBUG_STATS.maxChain, chainLength);
+    DEBUG_STATS.chainSum += chainLength;
+    DEBUG_STATS.chainEpisodes++;
+
+    if (chainLength >= 10 && chainLength <= 19) {
+        DEBUG_STATS.hist[chainLength]++;
+    }
+
+    debugUpdatePanel();
+}
+
 // ゲームの状態管理
 let board = [];
 let currentPuyo = null;
@@ -832,6 +930,8 @@ function initializeGame() {
 
     checkMobileControlsVisibility();
     renderBoard();
+    
+    debugEnsurePanel();
 
     if (!_initializedOnce) {
         saveState(false);
@@ -1048,6 +1148,7 @@ function hardDrop() {
 // lockPuyo: 設置 -> gravity -> 上端行クリア -> 連鎖開始
 function lockPuyo() {
     if (gameState !== 'playing' || !currentPuyo) return;
+    debugRecordTurn();
     const coords = getPuyoCoords();
     coords.forEach(p => {
         if (p.y >= 0 && p.y < HEIGHT && p.x >= 0 && p.x < WIDTH) {
@@ -1171,6 +1272,7 @@ async function runChain() {
     const groups = findConnectedPuyos();
 
     if (groups.length === 0) {
+        debugRecordChainEpisode(chainCount);
         if (checkBoardEmpty()) {
             score += ALL_CLEAR_SCORE_BONUS;
             chainAttackScoreBuffer += ALL_CLEAR_SCORE_BONUS;
@@ -1235,6 +1337,7 @@ async function runChain() {
 
     const nextGroups = findConnectedPuyos();
     if (nextGroups.length === 0) {
+        debugRecordChainEpisode(chainCount);
         gameState = 'playing';
 
         flushChainOjamaBuffer();
