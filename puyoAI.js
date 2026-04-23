@@ -1,50 +1,60 @@
 /* puyoAI.js
- * Robust AI wrapper
- * - module worker if available
- * - WASM optional inside worker
- * - JS fallback to avoid AI error loops
- * - uses current piece + NEXT1 + NEXT2
+ * WASM + Worker AI wrapper with JS fallback
+ * - Works with current puyoSim.js globals
+ * - Uses current piece + NEXT1 + NEXT2
+ * - Falls back to JS search if worker/WASM fails
  */
 (function () {
     'use strict';
 
     const AI_CONFIG = {
-        AUTO_TICK_MS: 140,
-        THINK_TIMEOUT_MS: 12000,
-        DANGER_X: 2,
-        DANGER_Y: 11,
-        LOCAL_BEAM_WIDTH: 8
+        AUTO_TICK_MS: 120,
+        WORKER_TIMEOUT_MS: 5000,
+        BEAM_WIDTH: 8,
+        SEARCH_DEPTH: 3
     };
 
-    const W = typeof WIDTH !== 'undefined' ? WIDTH : 6;
-    const H = typeof HEIGHT !== 'undefined' ? HEIGHT : 14;
-    const C = () => (typeof COLORS !== 'undefined'
-        ? COLORS
-        : { EMPTY: 0, RED: 1, BLUE: 2, GREEN: 3, YELLOW: 4, GARBAGE: 5 });
+    const BOARD_W = typeof WIDTH !== 'undefined' ? WIDTH : 6;
+    const BOARD_H = typeof HEIGHT !== 'undefined' ? HEIGHT : 14;
+    const DANGER_CELL_X = 2;
+    const DANGER_CELL_Y = 11;
 
     let worker = null;
+    let pendingJob = null;
     let autoEnabled = false;
     let autoTimer = null;
     let busy = false;
-    let uiInitialized = false;
+    let booted = false;
 
-    let requestSeq = 0;
-    let activeRequestId = 0;
-    let pendingResolve = null;
-    let requestTimeoutId = null;
+    const TEMPLATE_LIBRARY = [
+        { mask: [1, 1, 1, 1, 0, 0], profile: [0, 1, 2, 3, 0, 0], weight: 1.00 },
+        { mask: [0, 0, 1, 1, 1, 1], profile: [0, 0, 3, 2, 1, 0], weight: 1.00 },
+        { mask: [1, 1, 1, 1, 1, 0], profile: [0, 1, 2, 2, 1, 0], weight: 1.20 },
+        { mask: [0, 1, 1, 1, 1, 1], profile: [0, 1, 2, 2, 1, 0], weight: 1.20 },
+        { mask: [1, 1, 1, 1, 1, 1], profile: [2, 1, 0, 0, 1, 2], weight: 1.05 },
+        { mask: [0, 1, 1, 1, 1, 0], profile: [0, 1, 2, 3, 2, 1], weight: 1.00 }
+    ];
+
+    const C = () => (typeof COLORS !== 'undefined' ? COLORS : {
+        EMPTY: 0,
+        RED: 1,
+        BLUE: 2,
+        GREEN: 3,
+        YELLOW: 4,
+        GARBAGE: 5
+    });
+
+    const cloneBoard = (src) => src.map((row) => row.slice());
+    const boardToKey = (boardState) => boardState.map((row) => row.join('')).join('|');
 
     function setStatus(text) {
         const el = document.getElementById('ai-status');
         if (el) el.textContent = text;
     }
 
-    function setAutoButton() {
+    function updateAutoButton() {
         const btn = document.getElementById('ai-auto-button');
         if (btn) btn.textContent = autoEnabled ? 'AI自動: ON' : 'AI自動: OFF';
-    }
-
-    function cloneBoard(src) {
-        return src.map(row => row.slice());
     }
 
     function safeBoard() {
@@ -60,120 +70,152 @@
     function safeQueue() {
         if (typeof window.getNextQueue === 'function') {
             const q = window.getNextQueue();
-            if (Array.isArray(q)) return q;
+            return Array.isArray(q) ? q : [];
         }
-        if (typeof nextQueue !== 'undefined' && Array.isArray(nextQueue)) return nextQueue;
+        if (typeof nextQueue !== 'undefined' && Array.isArray(nextQueue)) {
+            return nextQueue.map((p) => p.slice());
+        }
         return [];
     }
 
     function safeQueueIndex() {
-        if (typeof queueIndex !== 'undefined' && Number.isFinite(queueIndex)) return queueIndex;
-        return 0;
+        return typeof queueIndex === 'number' ? queueIndex : 0;
     }
 
-    function buildSnapshot() {
-        const cur = safeCurrentPuyo();
+    function getBoardFlat() {
         const b = safeBoard();
-        if (!cur || !b) return null;
+        if (!b) return null;
 
-        const q = safeQueue();
-        const idx = safeQueueIndex();
-
-        const pieces = [
-            { mainColor: cur.mainColor | 0, subColor: cur.subColor | 0 }
-        ];
-
-        for (let i = 0; i < 2; i++) {
-            const p = q[idx + i];
-            if (Array.isArray(p) && p.length >= 2) {
-                pieces.push({ mainColor: p[1] | 0, subColor: p[0] | 0 });
+        const flat = new Int32Array(BOARD_W * BOARD_H);
+        for (let y = 0; y < BOARD_H; y++) {
+            for (let x = 0; x < BOARD_W; x++) {
+                flat[y * BOARD_W + x] = b[y]?.[x] ?? 0;
             }
         }
-
-        return {
-            board: cloneBoard(b),
-            pieces,
-            width: W,
-            height: H,
-            hiddenRows: typeof HIDDEN_ROWS !== 'undefined' ? HIDDEN_ROWS : 2,
-            dangerX: AI_CONFIG.DANGER_X,
-            dangerY: AI_CONFIG.DANGER_Y,
-            allClearBonus: typeof ALL_CLEAR_SCORE_BONUS !== 'undefined' ? ALL_CLEAR_SCORE_BONUS : 2100
-        };
+        return flat;
     }
 
-    function pieceCoords(piece, x, y, rotation) {
-        let sx = x;
-        let sy = y;
-        if (rotation === 0) sy = y + 1;
-        else if (rotation === 1) sx = x - 1;
-        else if (rotation === 2) sy = y - 1;
-        else if (rotation === 3) sx = x + 1;
+    function pieceFromPair(pair) {
+        if (!Array.isArray(pair) || pair.length < 2) return null;
+        return { subColor: pair[0] | 0, mainColor: pair[1] | 0 };
+    }
+
+    function getPiecePayload() {
+        const cur = safeCurrentPuyo();
+        if (!cur) return null;
+
+        const q = safeQueue();
+        if (q.length < 2) return null;
+
+        const idx = safeQueueIndex();
+        const p1 = q[idx] || [0, 0];
+        const p2 = q[idx + 1] || [0, 0];
+
+        return new Int32Array([
+            cur.subColor || 0,
+            cur.mainColor || 0,
+            p1[0] || 0,
+            p1[1] || 0,
+            p2[0] || 0,
+            p2[1] || 0
+        ]);
+    }
+
+    function getCoordsFromState(puyoState) {
+        const { mainX, mainY, rotation } = puyoState;
+        let subX = mainX;
+        let subY = mainY;
+
+        if (rotation === 0) subY = mainY + 1;
+        else if (rotation === 1) subX = mainX - 1;
+        else if (rotation === 2) subY = mainY - 1;
+        else if (rotation === 3) subX = mainX + 1;
 
         return [
-            { x, y, color: piece.mainColor },
-            { x: sx, y: sy, color: piece.subColor }
+            { x: mainX, y: mainY, color: puyoState.mainColor },
+            { x: subX, y: subY, color: puyoState.subColor }
         ];
+    }
+
+    function checkCollisionLocal(coords, boardState) {
+        const colors = C();
+        for (const p of coords) {
+            if (p.x < 0 || p.x >= BOARD_W || p.y < 0 || p.y >= BOARD_H) return true;
+            if (boardState[p.y][p.x] !== colors.EMPTY) return true;
+        }
+        return false;
     }
 
     function canPlace(boardState, piece, x, y, rotation) {
-        const coords = pieceCoords(piece, x, y, rotation);
-        for (const c of coords) {
-            if (c.x < 0 || c.x >= W || c.y < 0 || c.y >= H) return false;
-            if (boardState[c.y][c.x] !== C().EMPTY) return false;
-        }
-        return true;
+        const coords = getCoordsFromState({
+            mainX: x,
+            mainY: y,
+            rotation,
+            mainColor: piece.mainColor,
+            subColor: piece.subColor
+        });
+        return !checkCollisionLocal(coords, boardState);
     }
 
-    function findRestY(boardState, piece, x, rotation) {
-        let y = H - 2;
-        if (!canPlace(boardState, piece, x, y, rotation)) return null;
+    function dropY(boardState, piece, x, rotation) {
+        if (!canPlace(boardState, piece, x, BOARD_H - 2, rotation)) return null;
+
+        let y = BOARD_H - 2;
         while (y > 0 && canPlace(boardState, piece, x, y - 1, rotation)) y--;
         return y;
     }
 
-    function placementsFor(boardState, piece) {
+    function placements(boardState, piece) {
         const out = [];
-        for (let rot = 0; rot < 4; rot++) {
-            for (let x = 0; x < W; x++) {
-                const y = findRestY(boardState, piece, x, rot);
-                if (y !== null) out.push({ x, y, rotation: rot });
+        for (let rotation = 0; rotation < 4; rotation++) {
+            for (let x = 0; x < BOARD_W; x++) {
+                const y = dropY(boardState, piece, x, rotation);
+                if (y !== null) out.push({ x, y, rotation });
             }
         }
         return out;
     }
 
-    function placePiece(boardState, piece, x, y, rotation) {
+    function placePiece(boardState, piece, placement) {
         const next = cloneBoard(boardState);
-        const coords = pieceCoords(piece, x, y, rotation);
-        for (const c of coords) {
-            if (c.x >= 0 && c.x < W && c.y >= 0 && c.y < H) {
-                next[c.y][c.x] = c.color;
+        const coords = getCoordsFromState({
+            mainX: placement.x,
+            mainY: placement.y,
+            rotation: placement.rotation,
+            mainColor: piece.mainColor,
+            subColor: piece.subColor
+        });
+
+        for (const p of coords) {
+            if (p.x >= 0 && p.x < BOARD_W && p.y >= 0 && p.y < BOARD_H) {
+                next[p.y][p.x] = p.color;
             }
         }
         return next;
     }
 
     function gravityOn(boardState) {
-        for (let x = 0; x < W; x++) {
+        const colors = C();
+        for (let x = 0; x < BOARD_W; x++) {
             const col = [];
-            for (let y = 0; y < H; y++) {
-                if (boardState[y][x] !== C().EMPTY) col.push(boardState[y][x]);
+            for (let y = 0; y < BOARD_H; y++) {
+                if (boardState[y][x] !== colors.EMPTY) col.push(boardState[y][x]);
             }
-            for (let y = 0; y < H; y++) {
-                boardState[y][x] = y < col.length ? col[y] : C().EMPTY;
+            for (let y = 0; y < BOARD_H; y++) {
+                boardState[y][x] = y < col.length ? col[y] : colors.EMPTY;
             }
         }
     }
 
     function findGroups(boardState) {
-        const visited = Array.from({ length: H }, () => Array(W).fill(false));
+        const colors = C();
+        const visited = Array.from({ length: BOARD_H }, () => Array(BOARD_W).fill(false));
         const groups = [];
 
-        for (let y = 0; y < H; y++) {
-            for (let x = 0; x < W; x++) {
+        for (let y = 0; y < BOARD_H; y++) {
+            for (let x = 0; x < BOARD_W; x++) {
                 const color = boardState[y][x];
-                if (color === C().EMPTY || color === C().GARBAGE || visited[y][x]) continue;
+                if (color === colors.EMPTY || color === colors.GARBAGE || visited[y][x]) continue;
 
                 const stack = [{ x, y }];
                 visited[y][x] = true;
@@ -182,11 +224,17 @@
                 while (stack.length) {
                     const cur = stack.pop();
                     group.push(cur);
-                    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+
+                    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
                     for (const [dx, dy] of dirs) {
                         const nx = cur.x + dx;
                         const ny = cur.y + dy;
-                        if (nx >= 0 && nx < W && ny >= 0 && ny < H && !visited[ny][nx] && boardState[ny][nx] === color) {
+                        if (
+                            nx >= 0 && nx < BOARD_W &&
+                            ny >= 0 && ny < BOARD_H &&
+                            !visited[ny][nx] &&
+                            boardState[ny][nx] === color
+                        ) {
                             visited[ny][nx] = true;
                             stack.push({ x: nx, y: ny });
                         }
@@ -201,33 +249,35 @@
     }
 
     function clearGarbageNeighbors(boardState, erasedCoords) {
+        const colors = C();
         const toClear = new Set();
+
         for (const { x, y } of erasedCoords) {
-            const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+            const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
             for (const [dx, dy] of dirs) {
                 const nx = x + dx;
                 const ny = y + dy;
-                if (nx >= 0 && nx < W && ny >= 0 && ny < H && boardState[ny][nx] === C().GARBAGE) {
-                    toClear.add(`${nx},${ny}`);
+                if (nx >= 0 && nx < BOARD_W && ny >= 0 && ny < BOARD_H) {
+                    if (boardState[ny][nx] === colors.GARBAGE) toClear.add(`${nx},${ny}`);
                 }
             }
         }
 
         for (const key of toClear) {
             const [x, y] = key.split(',').map(Number);
-            boardState[y][x] = C().EMPTY;
+            boardState[y][x] = colors.EMPTY;
         }
     }
 
     function groupBonus(size) {
-        const table = (typeof BONUS_TABLE !== 'undefined' && BONUS_TABLE.GROUP)
+        const table = typeof BONUS_TABLE !== 'undefined' && BONUS_TABLE.GROUP
             ? BONUS_TABLE.GROUP
             : [0, 0, 0, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         return table[Math.min(size, table.length - 1)] || 0;
     }
 
     function chainBonus(chainNo) {
-        const table = (typeof BONUS_TABLE !== 'undefined' && BONUS_TABLE.CHAIN)
+        const table = typeof BONUS_TABLE !== 'undefined' && BONUS_TABLE.CHAIN
             ? BONUS_TABLE.CHAIN
             : [0, 8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512];
         const idx = Math.max(0, Math.min(chainNo - 1, table.length - 1));
@@ -235,7 +285,7 @@
     }
 
     function colorBonus(colorCount) {
-        const table = (typeof BONUS_TABLE !== 'undefined' && BONUS_TABLE.COLOR)
+        const table = typeof BONUS_TABLE !== 'undefined' && BONUS_TABLE.COLOR
             ? BONUS_TABLE.COLOR
             : [0, 0, 3, 6, 12];
         return table[Math.min(colorCount, table.length - 1)] || 0;
@@ -246,7 +296,7 @@
         const colorSet = new Set();
         let bonusTotal = 0;
 
-        for (const { group, color } of groups) {
+        for (const { color, group } of groups) {
             totalPuyos += group.length;
             colorSet.add(color);
             bonusTotal += groupBonus(group.length);
@@ -254,93 +304,115 @@
 
         bonusTotal += chainBonus(chainNo);
         bonusTotal += colorBonus(colorSet.size);
-        if (bonusTotal <= 0) bonusTotal = 1;
 
+        if (bonusTotal <= 0) bonusTotal = 1;
         return 10 * totalPuyos * bonusTotal;
     }
 
+    function isBoardEmpty(boardState) {
+        const colors = C();
+        for (let y = 0; y < BOARD_H; y++) {
+            for (let x = 0; x < BOARD_W; x++) {
+                if (boardState[y][x] !== colors.EMPTY) return false;
+            }
+        }
+        return true;
+    }
+
     function resolveBoard(boardState) {
-        const next = cloneBoard(boardState);
-        let chains = 0;
-        let score = 0;
-        let attack = 0;
+        const colors = C();
+        const acBonus = typeof ALL_CLEAR_SCORE_BONUS !== 'undefined' ? ALL_CLEAR_SCORE_BONUS : 2100;
+
+        let totalChains = 0;
+        let totalScore = 0;
+        let totalAttack = 0;
 
         while (true) {
-            gravityOn(next);
-            const groups = findGroups(next);
+            gravityOn(boardState);
+            const groups = findGroups(boardState);
             if (groups.length === 0) break;
 
-            chains++;
-            const chainScore = calculateScore(groups, chains);
-            score += chainScore;
-            attack += Math.floor(Math.max(0, chainScore) / 70);
+            totalChains++;
+            const chainScore = calculateScore(groups, totalChains);
+            totalScore += chainScore;
+            totalAttack += Math.floor(Math.max(0, chainScore) / 70);
 
             const erased = [];
             for (const { group } of groups) {
                 for (const p of group) {
-                    next[p.y][p.x] = C().EMPTY;
+                    boardState[p.y][p.x] = colors.EMPTY;
                     erased.push(p);
                 }
             }
-            clearGarbageNeighbors(next, erased);
+            clearGarbageNeighbors(boardState, erased);
         }
 
-        gravityOn(next);
+        gravityOn(boardState);
 
-        let allClear = true;
-        for (let y = 0; y < H; y++) {
-            for (let x = 0; x < W; x++) {
-                if (next[y][x] !== C().EMPTY) {
-                    allClear = false;
-                    break;
-                }
-            }
-            if (!allClear) break;
+        let allClear = false;
+        if (isBoardEmpty(boardState)) {
+            allClear = true;
+            totalScore += acBonus;
+            totalAttack += Math.floor(Math.max(0, acBonus) / 70);
         }
 
-        if (allClear) {
-            score += (typeof ALL_CLEAR_SCORE_BONUS !== 'undefined' ? ALL_CLEAR_SCORE_BONUS : 2100);
-            attack += Math.floor((typeof ALL_CLEAR_SCORE_BONUS !== 'undefined' ? ALL_CLEAR_SCORE_BONUS : 2100) / 70);
-        }
-
-        return { board: next, chains, score, attack, allClear };
+        return {
+            board: boardState,
+            chains: totalChains,
+            score: totalScore,
+            attack: totalAttack,
+            allClear
+        };
     }
 
     function columnHeights(boardState) {
-        const heights = Array(W).fill(0);
-        for (let x = 0; x < W; x++) {
-            for (let y = H - 1; y >= 0; y--) {
-                if (boardState[y][x] !== C().EMPTY) {
-                    heights[x] = y + 1;
+        const colors = C();
+        const heights = Array(BOARD_W).fill(0);
+
+        for (let x = 0; x < BOARD_W; x++) {
+            let h = 0;
+            for (let y = BOARD_H - 1; y >= 0; y--) {
+                if (boardState[y][x] !== colors.EMPTY) {
+                    h = y + 1;
                     break;
                 }
             }
+            heights[x] = h;
         }
         return heights;
     }
 
     function countHoles(boardState, heights) {
+        const colors = C();
         let holes = 0;
-        for (let x = 0; x < W; x++) {
+        for (let x = 0; x < BOARD_W; x++) {
             for (let y = 0; y < heights[x]; y++) {
-                if (boardState[y][x] === C().EMPTY) holes++;
+                if (boardState[y][x] === colors.EMPTY) holes++;
             }
         }
         return holes;
     }
 
+    function bumpiness(heights) {
+        let sum = 0;
+        for (let i = 1; i < heights.length; i++) sum += Math.abs(heights[i] - heights[i - 1]);
+        return sum;
+    }
+
     function openNeighborCount(boardState, cells) {
+        const colors = C();
         const seen = new Set();
         let count = 0;
+
         for (const { x, y } of cells) {
-            const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+            const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
             for (const [dx, dy] of dirs) {
                 const nx = x + dx;
                 const ny = y + dy;
-                if (nx >= 0 && nx < W && ny >= 0 && ny < H && boardState[ny][nx] === C().EMPTY) {
-                    const k = `${nx},${ny}`;
-                    if (!seen.has(k)) {
-                        seen.add(k);
+                if (nx >= 0 && nx < BOARD_W && ny >= 0 && ny < BOARD_H && boardState[ny][nx] === colors.EMPTY) {
+                    const key = `${nx},${ny}`;
+                    if (!seen.has(key)) {
+                        seen.add(key);
                         count++;
                     }
                 }
@@ -349,14 +421,15 @@
         return count;
     }
 
-    function findGroupsLoose(boardState) {
-        const visited = Array.from({ length: H }, () => Array(W).fill(false));
+    function findLooseComponents(boardState) {
+        const colors = C();
+        const visited = Array.from({ length: BOARD_H }, () => Array(BOARD_W).fill(false));
         const out = [];
 
-        for (let y = 0; y < H; y++) {
-            for (let x = 0; x < W; x++) {
+        for (let y = 0; y < BOARD_H; y++) {
+            for (let x = 0; x < BOARD_W; x++) {
                 const color = boardState[y][x];
-                if (color === C().EMPTY || color === C().GARBAGE || visited[y][x]) continue;
+                if (color === colors.EMPTY || color === colors.GARBAGE || visited[y][x]) continue;
 
                 const stack = [{ x, y }];
                 visited[y][x] = true;
@@ -365,12 +438,16 @@
                 while (stack.length) {
                     const cur = stack.pop();
                     cells.push(cur);
-
-                    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+                    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
                     for (const [dx, dy] of dirs) {
                         const nx = cur.x + dx;
                         const ny = cur.y + dy;
-                        if (nx >= 0 && nx < W && ny >= 0 && ny < H && !visited[ny][nx] && boardState[ny][nx] === color) {
+                        if (
+                            nx >= 0 && nx < BOARD_W &&
+                            ny >= 0 && ny < BOARD_H &&
+                            !visited[ny][nx] &&
+                            boardState[ny][nx] === color
+                        ) {
                             visited[ny][nx] = true;
                             stack.push({ x: nx, y: ny });
                         }
@@ -384,31 +461,48 @@
         return out;
     }
 
-    function dangerPenalty(boardState) {
-        const x = AI_CONFIG.DANGER_X;
-        const y = AI_CONFIG.DANGER_Y;
-        if (!boardState[y]) return 0;
+    function seedScore(boardState) {
+        const comps = findLooseComponents(boardState);
+        let s = 0;
 
-        let penalty = 0;
-        if (boardState[y][x] !== C().EMPTY) penalty += 1000000;
-
-        const heights = columnHeights(boardState);
-        if (heights[x] >= y + 1) penalty += 260000;
-        if (heights[x] >= y - 1) penalty += 90000;
-
-        for (let yy = Math.max(0, y - 2); yy <= y; yy++) {
-            if (boardState[yy][x] !== C().EMPTY) penalty += 25000;
+        for (const comp of comps) {
+            const size = comp.cells.length;
+            if (size === 1) s += 1;
+            else if (size === 2) s += 12 + openNeighborCount(boardState, comp.cells) * 2;
+            else if (size === 3) s += 35 + openNeighborCount(boardState, comp.cells) * 4;
         }
-        return penalty;
-    }
 
-    const TEMPLATE_LIBRARY = [
-        { mask: [1, 1, 1, 1, 1, 1], profile: [0, 1, 2, 2, 1, 0], weight: 1.30 },
-        { mask: [1, 1, 1, 1, 1, 1], profile: [0, 1, 2, 3, 2, 1], weight: 1.15 },
-        { mask: [1, 1, 1, 1, 1, 1], profile: [2, 1, 0, 0, 1, 2], weight: 1.08 },
-        { mask: [1, 1, 1, 1, 0, 0], profile: [0, 1, 2, 3, 0, 0], weight: 0.92 },
-        { mask: [0, 0, 1, 1, 1, 1], profile: [0, 0, 3, 2, 1, 0], weight: 0.92 }
-    ];
+        for (let y = 0; y < BOARD_H; y++) {
+            for (let x = 0; x < BOARD_W; x++) {
+                const c = boardState[y][x];
+                if (c === 0 || c === 5) continue;
+
+                if (x + 2 < BOARD_W && boardState[y][x + 1] === c && boardState[y][x + 2] === c) {
+                    if ((x - 1 >= 0 && boardState[y][x - 1] === 0) || (x + 3 < BOARD_W && boardState[y][x + 3] === 0)) {
+                        s += 16;
+                    }
+                }
+
+                if (y + 2 < BOARD_H && boardState[y + 1][x] === c && boardState[y + 2][x] === c) {
+                    if ((y - 1 >= 0 && boardState[y - 1][x] === 0) || (y + 3 < BOARD_H && boardState[y + 3][x] === 0)) {
+                        s += 16;
+                    }
+                }
+
+                if (x + 1 < BOARD_W && y + 1 < BOARD_H) {
+                    if (
+                        boardState[y][x] === c &&
+                        boardState[y][x + 1] === c &&
+                        boardState[y + 1][x] === c
+                    ) {
+                        s += 20;
+                    }
+                }
+            }
+        }
+
+        return s;
+    }
 
     function templateScore(boardState) {
         const heights = columnHeights(boardState);
@@ -416,20 +510,20 @@
         let best2 = 0;
 
         for (const t of TEMPLATE_LIBRARY) {
-            const cols = [];
-            for (let x = 0; x < W; x++) if (t.mask[x]) cols.push(x);
-            if (!cols.length) continue;
+            const masked = [];
+            for (let x = 0; x < BOARD_W; x++) if (t.mask[x]) masked.push(x);
+            if (!masked.length) continue;
 
             let base = Infinity;
-            for (const x of cols) base = Math.min(base, heights[x] - t.profile[x]);
+            for (const x of masked) base = Math.min(base, heights[x] - t.profile[x]);
             if (!Number.isFinite(base)) continue;
 
             let s = 0;
             let occupied = 0;
-            for (const x of cols) {
+            for (const x of masked) {
                 const target = base + t.profile[x];
                 const diff = Math.abs(heights[x] - target);
-                s += Math.max(0, 10 - diff * 3);
+                s += Math.max(0, 8 - diff * 3);
                 if (heights[x] > 0) occupied++;
             }
 
@@ -447,340 +541,385 @@
         return best1 + best2 * 0.5;
     }
 
-    function seedPotential(boardState) {
-        const comps = findGroupsLoose(boardState);
-        let s = 0;
+    function dangerPenalty(boardState) {
+        const heights = columnHeights(boardState);
+        let penalty = 0;
 
-        for (const g of comps) {
-            const size = g.cells.length;
-            const open = openNeighborCount(boardState, g.cells);
+        if (boardState[DANGER_CELL_Y]?.[DANGER_CELL_X] !== 0) penalty += 1000000;
+        if (heights[DANGER_CELL_X] >= DANGER_CELL_Y + 1) penalty += 250000;
+        if (heights[DANGER_CELL_X] >= DANGER_CELL_Y - 1) penalty += 80000;
 
-            if (size === 1) s += 1;
-            else if (size === 2) s += 24 + open * 4;
-            else if (size === 3) s += 80 + open * 8;
-            else if (size >= 5) s += Math.min(140, size * 12);
+        for (let y = Math.max(0, DANGER_CELL_Y - 2); y <= DANGER_CELL_Y; y++) {
+            if (boardState[y]?.[DANGER_CELL_X] !== 0) penalty += 25000;
         }
 
-        for (let y = 0; y < H; y++) {
-            for (let x = 0; x < W; x++) {
-                const c = boardState[y][x];
-                if (c === C().EMPTY || c === C().GARBAGE) continue;
-
-                if (x + 2 < W && boardState[y][x + 1] === c && boardState[y][x + 2] === c) {
-                    if ((x - 1 >= 0 && boardState[y][x - 1] === C().EMPTY) || (x + 3 < W && boardState[y][x + 3] === C().EMPTY)) {
-                        s += 18;
-                    }
-                }
-
-                if (y + 2 < H && boardState[y + 1][x] === c && boardState[y + 2][x] === c) {
-                    if ((y - 1 >= 0 && boardState[y - 1][x] === C().EMPTY) || (y + 3 < H && boardState[y + 3][x] === C().EMPTY)) {
-                        s += 18;
-                    }
-                }
-
-                if (x + 1 < W && y + 1 < H) {
-                    if (boardState[y][x] === c && boardState[y][x + 1] === c && boardState[y + 1][x] === c) {
-                        s += 22;
-                    }
-                }
-            }
-        }
-
-        return s;
+        return penalty;
     }
 
     function evaluateBoard(boardState) {
         const heights = columnHeights(boardState);
         const holes = countHoles(boardState, heights);
         const maxH = Math.max(...heights);
-        const bumpiness = heights.reduce((sum, h, i) => sum + (i > 0 ? Math.abs(h - heights[i - 1]) : 0), 0);
+        const rough = bumpiness(heights);
 
         let s = 0;
-        s += seedPotential(boardState) * 18;
-        s += templateScore(boardState) * 22;
-        s -= holes * 44;
-        s -= bumpiness * 12;
-        s -= maxH * 34;
+        s += templateScore(boardState) * 20;
+        s += seedScore(boardState) * 18;
+
+        const comps = findLooseComponents(boardState);
+        for (const comp of comps) {
+            const size = comp.cells.length;
+            if (size === 2) s += 10;
+            else if (size === 3) s += 30 + openNeighborCount(boardState, comp.cells) * 3;
+            else if (size >= 5) s += Math.min(80, size * 8);
+        }
+
+        s -= holes * 50;
+        s -= rough * 12;
+        s -= maxH * 30;
         s -= dangerPenalty(boardState);
 
-        if (maxH >= 11) s -= 150;
-        if (maxH >= 12) s -= 320;
+        if (maxH >= BOARD_H - 3) s -= 120;
+        if (maxH >= BOARD_H - 2) s -= 260;
 
         const counts = [0, 0, 0, 0, 0];
-        for (let y = 0; y < H; y++) {
-            for (let x = 0; x < W; x++) {
+        for (let y = 0; y < BOARD_H; y++) {
+            for (let x = 0; x < BOARD_W; x++) {
                 const v = boardState[y][x];
                 if (v >= 1 && v <= 4) counts[v]++;
             }
         }
         const sorted = counts.slice(1).sort((a, b) => b - a);
         s += (sorted[0] + sorted[1]) * 0.6;
-        s -= (sorted[2] + sorted[3]) * 1.0;
+        s -= (sorted[2] + sorted[3]) * 0.8;
 
         return s;
     }
 
     function chainOutcomeValue(sim) {
-        const chainPart = Math.pow(sim.chains, 2.25) * 42000;
-        const scorePart = sim.score * 1.8;
-        const attackPart = sim.attack * 1500;
-        const allClearPart = sim.allClear ? 160000 : 0;
+        const chainPart = Math.pow(sim.chains, 2.1) * 35000;
+        const scorePart = sim.score * 8;
+        const attackPart = sim.attack * 1800;
+        const allClearPart = sim.allClear ? 250000 : 0;
         return chainPart + scorePart + attackPart + allClearPart;
     }
 
-    function pseudoForecast(boardState, depth) {
-        let best = evaluateBoard(boardState) * 0.6 + seedPotential(boardState) * 8;
-        if (depth <= 0) return best;
-
-        const pseudoPieces = [
-            { mainColor: 1, subColor: 1 },
-            { mainColor: 2, subColor: 2 },
-            { mainColor: 3, subColor: 3 },
-            { mainColor: 4, subColor: 4 },
-            { mainColor: 1, subColor: 2 },
-            { mainColor: 2, subColor: 3 },
-            { mainColor: 3, subColor: 4 },
-            { mainColor: 4, subColor: 1 }
-        ];
-
-        for (const piece of pseudoPieces) {
-            const placements = placementsFor(boardState, piece);
-            if (!placements.length) continue;
-
-            const nodes = [];
-            for (const p of placements) {
-                const sim = simulateMove(boardState, piece, p.x, p.y, p.rotation);
-                nodes.push({ sim, quick: placementQuickValue(sim) });
-            }
-
-            nodes.sort((a, b) => b.quick - a.quick);
-            const beam = nodes.slice(0, 4);
-
-            for (const node of beam) {
-                const value =
-                    (node.sim.chains > 0 ? chainOutcomeValue(node.sim) : 0) +
-                    evaluateBoard(node.sim.board) * 0.35 +
-                    seedPotential(node.sim.board) * 14 +
-                    pseudoForecast(node.sim.board, depth - 1) * 0.75;
-
-                if (value > best) best = value;
-            }
-        }
-
-        return best;
-    }
-
-    function simulateMove(boardState, piece, x, y, rotation) {
-        const placed = placePiece(boardState, piece, x, y, rotation);
+    function simulatePlacement(boardState, piece, placement) {
+        const placed = placePiece(boardState, piece, placement);
         return resolveBoard(placed);
     }
 
-    function placementQuickValue(sim) {
-        if (sim.chains > 0) {
-            return chainOutcomeValue(sim) * 1.0 + seedPotential(sim.board) * 10 + evaluateBoard(sim.board) * 0.15;
-        }
-        return evaluateBoard(sim.board) * 1.0 + seedPotential(sim.board) * 18 + templateScore(sim.board) * 8;
-    }
-
-    function leafScore(boardState) {
-        return evaluateBoard(boardState) * 1.0 + pseudoForecast(boardState, 2);
-    }
-
-    function searchBest(boardState, pieces, depth, memo, rootMove) {
-        const key = `${depth}|${boardState.map(row => row.join('')).join('|')}|${pieces.map(p => `${p.mainColor},${p.subColor}`).join('|')}`;
+    function searchBest(boardState, pieces, depth, rootMove, memo) {
+        const key = `${depth}|${boardToKey(boardState)}|${pieces.map((p) => `${p.mainColor}${p.subColor}`).join(',')}`;
         if (memo.has(key)) return memo.get(key);
 
         if (depth >= pieces.length) {
-            const ret = { score: leafScore(boardState), move: rootMove || null };
+            const ret = { score: evaluateBoard(boardState), move: rootMove };
             memo.set(key, ret);
             return ret;
         }
 
         const piece = pieces[depth];
-        const placements = placementsFor(boardState, piece);
-        if (!placements.length) {
-            const ret = { score: -1e15, move: rootMove || null };
+        const allPlacements = placements(boardState, piece);
+        if (!allPlacements.length) {
+            const ret = { score: -1e15, move: rootMove };
             memo.set(key, ret);
             return ret;
         }
 
-        const candidates = [];
-        for (const p of placements) {
-            const sim = simulateMove(boardState, piece, p.x, p.y, p.rotation);
-            candidates.push({ ...p, sim, quick: placementQuickValue(sim) });
-        }
+        const candidates = allPlacements.map((p) => {
+            const sim = simulatePlacement(boardState, piece, p);
+            const quick = evaluateBoard(sim.board) + chainOutcomeValue(sim) * 0.01;
+            return { ...p, sim, quick };
+        }).sort((a, b) => b.quick - a.quick).slice(0, AI_CONFIG.BEAM_WIDTH);
 
-        candidates.sort((a, b) => b.quick - a.quick);
-        const beam = candidates.slice(0, 14);
+        let best = { score: -1e15, move: rootMove };
 
-        let best = { score: -1e15, move: rootMove || null };
+        for (const c of candidates) {
+            const nextRoot = depth === 0 ? { x: c.x, y: c.y, rotation: c.rotation } : rootMove;
+            let total = c.sim.chains > 0
+                ? chainOutcomeValue(c.sim) + evaluateBoard(c.sim.board) * 0.15
+                : evaluateBoard(c.sim.board) * 0.35;
 
-        for (const c of beam) {
-            const nextMove = depth === 0 ? { x: c.x, y: c.y, rotation: c.rotation } : rootMove;
-            const tail = depth + 1 < pieces.length
-                ? searchBest(c.sim.board, pieces, depth + 1, memo, nextMove)
-                : { score: leafScore(c.sim.board), move: nextMove };
-
-            let total;
-            if (c.sim.chains > 0) {
-                total =
-                    chainOutcomeValue(c.sim) * 0.85 +
-                    seedPotential(c.sim.board) * 22 +
-                    templateScore(c.sim.board) * 10 +
-                    evaluateBoard(c.sim.board) * 0.10 +
-                    tail.score * 0.95;
+            if (depth + 1 < pieces.length) {
+                const child = searchBest(c.sim.board, pieces, depth + 1, nextRoot, memo);
+                total += child.score * 0.85;
             } else {
-                total =
-                    evaluateBoard(c.sim.board) * 1.10 +
-                    seedPotential(c.sim.board) * 24 +
-                    templateScore(c.sim.board) * 12 +
-                    tail.score * 1.05;
+                total += evaluateBoard(c.sim.board) * 0.25;
             }
 
-            if (total > best.score) best = { score: total, move: nextMove };
+            if (total > best.score) {
+                best = { score: total, move: nextRoot };
+            }
         }
 
         memo.set(key, best);
         return best;
     }
 
-    function chooseBestMove(snapshot) {
-        const boardState = snapshot.board;
-        const pieces = snapshot.pieces;
-        if (!boardState || !pieces || !pieces.length) return null;
+    function chooseBestMoveFallback() {
+        const cur = safeCurrentPuyo();
+        const b = safeBoard();
+        if (!cur || !b) return null;
+        if (typeof gameState !== 'undefined' && gameState !== 'playing') return null;
+
+        const q = safeQueue();
+        const idx = safeQueueIndex();
+        const pieces = [
+            { mainColor: cur.mainColor || 0, subColor: cur.subColor || 0 }
+        ];
+
+        const p1 = pieceFromPair(q[idx]);
+        const p2 = pieceFromPair(q[idx + 1]);
+        if (p1) pieces.push(p1);
+        if (p2) pieces.push(p2);
 
         const memo = new Map();
-        const result = searchBest(cloneBoard(boardState), pieces, 0, memo, null);
-        return result.move || null;
+        const snapshot = cloneBoard(b);
+        const result = searchBest(snapshot, pieces, 0, null, memo);
+        return result.move;
     }
 
-    async function tryWasmSolve(snapshot) {
-        try {
-            const mod = await import('./puyoAI_wasm.mjs');
-            const factory = mod.default || mod;
-            const wasm = await factory({ noInitialRun: true });
+    function applyMove(move) {
+        const cur = safeCurrentPuyo();
+        const b = safeBoard();
+        if (!cur || !move || !b) return false;
 
-            if (!wasm || typeof wasm.cwrap !== 'function') return null;
-            const chooseMove = wasm.cwrap('ai_choose_move', 'number', ['number', 'number']);
-            if (typeof chooseMove !== 'function') return null;
+        const test = {
+            mainX: move.x,
+            mainY: move.y,
+            rotation: move.rotation,
+            mainColor: cur.mainColor,
+            subColor: cur.subColor
+        };
+        const coords = getCoordsFromState(test);
+        if (checkCollisionLocal(coords, b)) return false;
 
-            const boardFlat = new Int32Array(W * H);
-            for (let y = 0; y < H; y++) {
-                for (let x = 0; x < W; x++) {
-                    boardFlat[y * W + x] = snapshot.board[y][x] | 0;
-                }
-            }
+        cur.mainX = move.x;
+        cur.mainY = move.y;
+        cur.rotation = move.rotation;
 
-            const piecesFlat = new Int32Array([
-                snapshot.pieces[0]?.subColor || 0,
-                snapshot.pieces[0]?.mainColor || 0,
-                snapshot.pieces[1]?.subColor || 0,
-                snapshot.pieces[1]?.mainColor || 0,
-                snapshot.pieces[2]?.subColor || 0,
-                snapshot.pieces[2]?.mainColor || 0
-            ]);
+        if (typeof renderBoard === 'function') renderBoard();
+        return true;
+    }
 
-            const boardPtr = wasm._malloc(boardFlat.length * 4);
-            const piecesPtr = wasm._malloc(piecesFlat.length * 4);
+    function terminateWorker() {
+        if (worker) {
+            try { worker.terminate(); } catch (_) {}
+        }
+        worker = null;
+    }
 
-            try {
-                wasm.HEAP32.set(boardFlat, boardPtr >> 2);
-                wasm.HEAP32.set(piecesFlat, piecesPtr >> 2);
-                const packed = chooseMove(boardPtr, piecesPtr) | 0;
-                const move = {
-                    rotation: packed & 0xff,
-                    x: (packed >> 8) & 0xff,
-                    y: (packed >> 16) & 0xff
-                };
-                if (move && Number.isFinite(move.x) && Number.isFinite(move.y) && Number.isFinite(move.rotation)) {
-                    return move;
-                }
-            } finally {
-                wasm._free(boardPtr);
-                wasm._free(piecesPtr);
-            }
-
-            return null;
-        } catch (err) {
-            console.warn('WASM path failed, falling back to JS solver:', err);
-            return null;
+    function clearPendingJob(reason) {
+        if (!pendingJob) return;
+        if (pendingJob.timer) clearTimeout(pendingJob.timer);
+        const job = pendingJob;
+        pendingJob = null;
+        if (reason instanceof Error) {
+            job.reject(reason);
+        } else if (reason) {
+            job.reject(new Error(String(reason)));
         }
     }
 
-    async function solveSnapshot(snapshot, allowWasm) {
-        if (allowWasm) {
-            const wasmMove = await tryWasmSolve(snapshot);
-            if (wasmMove) return wasmMove;
-        }
-        return chooseBestMove(snapshot);
-    }
-
-    function localSolve(snapshot) {
-        if (!snapshot || !snapshot.board || !snapshot.pieces || !snapshot.pieces.length) return null;
-
-        const current = snapshot.pieces[0];
-        const placements = placementsFor(snapshot.board, current);
-        if (!placements.length) return null;
-
-        let best = null;
-        let bestScore = -Infinity;
-
-        for (const p of placements) {
-            const sim = simulateMove(snapshot.board, current, p.x, p.y, p.rotation);
-            let score = evaluateBoard(sim.board) + chainOutcomeValue(sim) * 0.002 + seedPotential(sim.board) * 4;
-
-            const next = snapshot.pieces[1];
-            if (next) {
-                const nextPlacements = placementsFor(sim.board, next).slice(0, 6);
-                let childBest = -Infinity;
-                for (const np of nextPlacements) {
-                    const child = simulateMove(sim.board, next, np.x, np.y, np.rotation);
-                    const childScore = evaluateBoard(child.board) + chainOutcomeValue(child) * 0.003 + seedPotential(child.board) * 4;
-                    if (childScore > childBest) childBest = childScore;
-                }
-                if (Number.isFinite(childBest)) score += childBest * 0.55;
-            }
-
-            if (score > bestScore) {
-                bestScore = score;
-                best = { x: p.x, y: p.y, rotation: p.rotation };
-            }
-        }
-
-        return best;
-    }
-
-    self.onmessage = async (event) => {
-        const data = event.data;
-        if (!data || data.type !== 'solve') return;
+    function ensureWorker() {
+        if (worker) return worker;
 
         try {
-            const snapshot = data.snapshot;
-            let move = await solveSnapshot(snapshot, data.useWasm !== false);
-            if (!move) move = localSolve(snapshot);
+            worker = new Worker('./puyo-ai-worker.js', { type: 'module' });
 
-            self.postMessage({
-                type: 'result',
-                id: data.id,
-                move: move || null
-            });
+            worker.onmessage = (event) => {
+                const data = event.data || {};
+                if (data.type === 'ready') return;
+                if (!pendingJob) return;
+
+                if (pendingJob.timer) clearTimeout(pendingJob.timer);
+                const job = pendingJob;
+                pendingJob = null;
+
+                if (data.type === 'result') {
+                    job.resolve(data.move || null);
+                } else {
+                    job.reject(new Error(data.message || 'AI worker error'));
+                }
+            };
+
+            worker.onerror = (err) => {
+                console.error('AI worker error:', err);
+                clearPendingJob(err instanceof Error ? err : new Error('AI worker error'));
+                terminateWorker();
+                setStatus('AIエラー');
+            };
+
+            worker.onmessageerror = (err) => {
+                console.error('AI worker message error:', err);
+                clearPendingJob(new Error('AI worker message error'));
+                terminateWorker();
+                setStatus('AIエラー');
+            };
         } catch (err) {
-            try {
-                const move = localSolve(data.snapshot);
-                self.postMessage({
-                    type: 'result',
-                    id: data.id,
-                    move: move || null,
-                    fallback: true
-                });
-            } catch (fallbackErr) {
-                self.postMessage({
-                    type: 'result',
-                    id: data.id,
-                    move: null,
-                    error: fallbackErr && fallbackErr.message ? fallbackErr.message : String(fallbackErr)
-                });
+            console.error('Failed to create AI worker:', err);
+            terminateWorker();
+        }
+
+        return worker;
+    }
+
+    function requestMoveFromWorker(timeoutMs = AI_CONFIG.WORKER_TIMEOUT_MS) {
+        return new Promise((resolve, reject) => {
+            if (typeof gameState !== 'undefined' && gameState !== 'playing') {
+                reject(new Error('not playing'));
+                return;
             }
+
+            const w = ensureWorker();
+            const b = getBoardFlat();
+            const pieces = getPiecePayload();
+
+            if (!w) {
+                reject(new Error('worker unavailable'));
+                return;
+            }
+            if (!b || !pieces) {
+                reject(new Error('snapshot unavailable'));
+                return;
+            }
+
+            const timer = setTimeout(() => {
+                if (pendingJob) pendingJob = null;
+                terminateWorker();
+                reject(new Error('worker timeout'));
+            }, timeoutMs);
+
+            pendingJob = { resolve, reject, timer };
+
+            try {
+                w.postMessage(
+                    { type: 'solve', board: b, pieces },
+                    [b.buffer, pieces.buffer]
+                );
+            } catch (err) {
+                clearTimeout(timer);
+                pendingJob = null;
+                reject(err);
+            }
+        });
+    }
+
+    async function runOnce() {
+        if (busy) return;
+
+        if (typeof gameState !== 'undefined' && gameState !== 'playing') {
+            setStatus('AI待機中');
+            return;
+        }
+
+        if (!safeCurrentPuyo()) {
+            setStatus('AI待機中');
+            return;
+        }
+
+        busy = true;
+        setStatus('AI思考中...');
+
+        try {
+            let move = null;
+
+            try {
+                move = await requestMoveFromWorker();
+            } catch (err) {
+                console.warn('Falling back to JS AI:', err);
+                move = chooseBestMoveFallback();
+            }
+
+            if (!move) {
+                setStatus('手なし');
+                return;
+            }
+
+            if (!applyMove(move)) {
+                const fallbackMove = chooseBestMoveFallback();
+                if (!fallbackMove || !applyMove(fallbackMove)) {
+                    setStatus('手なし');
+                    return;
+                }
+            }
+
+            if (typeof hardDrop === 'function') {
+                hardDrop();
+            }
+
+            setStatus('AI実行完了');
+        } catch (err) {
+            console.error('AI error:', err);
+            setStatus('AIエラー');
+        } finally {
+            busy = false;
+        }
+    }
+
+    function tickAuto() {
+        if (!autoEnabled || busy) return;
+        if (typeof gameState !== 'undefined' && gameState !== 'playing') {
+            setStatus('AI待機中');
+            return;
+        }
+        if (!safeCurrentPuyo()) {
+            setStatus('AI待機中');
+            return;
+        }
+        runOnce();
+    }
+
+    function startAutoLoop() {
+        stopAutoLoop();
+        autoTimer = setInterval(tickAuto, AI_CONFIG.AUTO_TICK_MS);
+    }
+
+    function stopAutoLoop() {
+        if (autoTimer) {
+            clearInterval(autoTimer);
+            autoTimer = null;
+        }
+    }
+
+    function boot() {
+        if (booted) return;
+        booted = true;
+        updateAutoButton();
+        setStatus('AI待機中');
+        ensureWorker();
+    }
+
+    window.runPuyoAI = function () {
+        runOnce();
+    };
+
+    window.toggleAIAuto = function () {
+        autoEnabled = !autoEnabled;
+        updateAutoButton();
+
+        if (autoEnabled) {
+            setStatus('AI自動起動');
+            startAutoLoop();
+            runOnce();
+        } else {
+            stopAutoLoop();
+            setStatus('AI待機中');
         }
     };
+
+    window.PuyoAI = {
+        chooseBestMove: chooseBestMoveFallback,
+        evaluateBoard,
+        resolveBoard,
+        requestMoveFromWorker,
+        runOnce
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
+    }
 })();
