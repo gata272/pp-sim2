@@ -1,11 +1,9 @@
 /* puyoAI.js
- * Long-chain oriented AI for Puyo Puyo Simulator
+ * Robust long-chain AI for Puyo Puyo Simulator
  * - Current + NEXT1 + NEXT2
- * - Beam search with quiescence-like extension
- * - Future chain seed evaluation
- * - Template matching (GTR-ish / stagger / valley)
- * - Danger-cell avoidance
- * - Works with existing puyoSim.js globals
+ * - Uses module worker + wasm when available
+ * - Falls back to pure JS search when worker/wasm fails
+ * - Avoids the load-time HIDDEN_ROWS self-reference bug
  */
 (function () {
     'use strict';
@@ -15,17 +13,17 @@
         AUTO_TICK_MS: 120,
         SEARCH_BEAM_WIDTH: 12,
         LEAF_BEAM_WIDTH: 6,
-        ROOT_CANDIDATE_LIMIT: 24,
         SEARCH_DEPTH: 3,        // current + NEXT1 + NEXT2
-        QUIESCENCE_DEPTH: 1,    // extra look when the field is "alive"
-        PSEUDO_DELAY_MS: 0,
+        PSEUDO_EXTENSION: 1,
+        WORKER_TIMEOUT_MS: 12000,
         DANGER_X: 2,
-        DANGER_Y: 11
+        DANGER_Y: 11,
+        PSEUDO_DELAY_MS: 0
     };
 
     const BOARD_W = typeof WIDTH !== 'undefined' ? WIDTH : 6;
     const BOARD_H = typeof HEIGHT !== 'undefined' ? HEIGHT : 14;
-    const HIDDEN_ROWS = typeof HIDDEN_ROWS !== 'undefined' ? HIDDEN_ROWS : 2;
+    const HIDDEN_ROWS = 2; // fixed in puyoSim.js, do not self-reference here
 
     const C = typeof COLORS !== 'undefined'
         ? COLORS
@@ -44,6 +42,14 @@
     let autoTimer = null;
     let busy = false;
     let uiInitialized = false;
+
+    // Worker / wasm acceleration
+    let worker = null;
+    let workerReady = false;
+    let workerInitAttempted = false;
+    let pendingResolve = null;
+    let pendingReject = null;
+    let workerTimeout = null;
 
     // ---------- Helpers ----------
     function setStatus(text) {
@@ -88,16 +94,6 @@
         return src.map(row => row.join('')).join('|');
     }
 
-    function toFlatBoard(src) {
-        const flat = new Int32Array(BOARD_W * BOARD_H);
-        for (let y = 0; y < BOARD_H; y++) {
-            for (let x = 0; x < BOARD_W; x++) {
-                flat[y * BOARD_W + x] = src[y]?.[x] ?? C.EMPTY;
-            }
-        }
-        return flat;
-    }
-
     function getPieceList() {
         const cur = safeCurrentPuyo();
         if (!cur) return [];
@@ -106,17 +102,17 @@
         const idx = safeQueueIndex();
 
         const pieces = [
-            { mainColor: cur.mainColor, subColor: cur.subColor }
+            { mainColor: cur.mainColor | 0, subColor: cur.subColor | 0 }
         ];
 
         const p1 = q[idx];
         const p2 = q[idx + 1];
 
         if (Array.isArray(p1) && p1.length >= 2) {
-            pieces.push({ mainColor: p1[1], subColor: p1[0] });
+            pieces.push({ mainColor: p1[1] | 0, subColor: p1[0] | 0 });
         }
         if (Array.isArray(p2) && p2.length >= 2) {
-            pieces.push({ mainColor: p2[1], subColor: p2[0] });
+            pieces.push({ mainColor: p2[1] | 0, subColor: p2[0] | 0 });
         }
 
         return pieces;
@@ -143,14 +139,13 @@
             if (c.x < 0 || c.x >= BOARD_W) return false;
             if (c.y < 0 || c.y >= BOARD_H) return false;
 
-            // Hidden rows are treated like the simulator: they do not block movement.
+            // Hidden rows do not block movement in the simulator.
             if (c.y < BOARD_H - HIDDEN_ROWS && boardState[c.y][c.x] !== C.EMPTY) return false;
         }
         return true;
     }
 
     function dropY(boardState, piece, x, rotation) {
-        // Puyo spawn is near the top hidden rows.
         let y = BOARD_H - 2;
         if (!canPlace(boardState, piece, x, y, rotation)) return null;
 
@@ -258,6 +253,19 @@
         }
     }
 
+    function groupBonus(size) {
+        return BONUS_TABLE.GROUP[Math.min(size, BONUS_TABLE.GROUP.length - 1)] || 0;
+    }
+
+    function chainBonus(chainNo) {
+        const idx = Math.max(0, Math.min(chainNo - 1, BONUS_TABLE.CHAIN.length - 1));
+        return BONUS_TABLE.CHAIN[idx] || 0;
+    }
+
+    function colorBonus(colorCount) {
+        return BONUS_TABLE.COLOR[Math.min(colorCount, BONUS_TABLE.COLOR.length - 1)] || 0;
+    }
+
     function calculateScore(groups, chainNo) {
         let totalPuyos = 0;
         const colorSet = new Set();
@@ -266,15 +274,11 @@
         for (const { color, group } of groups) {
             totalPuyos += group.length;
             colorSet.add(color);
-            bonusTotal += BONUS_TABLE.GROUP[Math.min(group.length, BONUS_TABLE.GROUP.length - 1)] || 0;
+            bonusTotal += groupBonus(group.length);
         }
 
-        // 1連鎖目は CHAIN[0] を使う
-        const chainIdx = Math.max(0, Math.min(chainNo - 1, BONUS_TABLE.CHAIN.length - 1));
-        bonusTotal += BONUS_TABLE.CHAIN[chainIdx] || 0;
-
-        const colorIdx = Math.min(colorSet.size, BONUS_TABLE.COLOR.length - 1);
-        bonusTotal += BONUS_TABLE.COLOR[colorIdx] || 0;
+        bonusTotal += chainBonus(chainNo);
+        bonusTotal += colorBonus(colorSet.size);
 
         const finalBonus = Math.max(1, Math.min(999, bonusTotal));
         return (10 * totalPuyos) * finalBonus;
@@ -320,7 +324,7 @@
         }
 
         if (allClear) {
-            const ac = typeof window.ALL_CLEAR_SCORE_BONUS !== 'undefined' ? window.ALL_CLEAR_SCORE_BONUS : 2100;
+            const ac = typeof ALL_CLEAR_SCORE_BONUS !== 'undefined' ? ALL_CLEAR_SCORE_BONUS : 2100;
             score += ac;
             attack += Math.floor(Math.max(0, ac) / 70);
         }
@@ -433,8 +437,6 @@
 
     function templateScore(boardState) {
         const heights = columnHeights(boardState);
-
-        // GTR-ish / valley-ish / center trigger-ish profiles.
         const templates = [
             { mask: [1, 1, 1, 1, 1, 1], profile: [0, 1, 2, 2, 1, 0], weight: 1.30 },
             { mask: [1, 1, 1, 1, 1, 1], profile: [0, 1, 2, 3, 2, 1], weight: 1.10 },
@@ -496,7 +498,6 @@
             }
         }
 
-        // Small pattern bonuses: horizontal/vertical triples and L-shape-like clusters.
         for (let y = 0; y < BOARD_H; y++) {
             for (let x = 0; x < BOARD_W; x++) {
                 const c = boardState[y][x];
@@ -515,11 +516,7 @@
                 }
 
                 if (x + 1 < BOARD_W && y + 1 < BOARD_H) {
-                    if (
-                        boardState[y][x] === c &&
-                        boardState[y][x + 1] === c &&
-                        boardState[y + 1][x] === c
-                    ) {
+                    if (boardState[y][x] === c && boardState[y][x + 1] === c && boardState[y + 1][x] === c) {
                         s += 22;
                     }
                 }
@@ -538,12 +535,10 @@
             0
         );
 
-        // Favor future chain seeds and template-like long-term structures.
         let score = 0;
         score += seedPotential(boardState) * 16;
         score += templateScore(boardState) * 20;
 
-        // Encourage trigger building around mid columns.
         const centerCols = [1, 2, 3, 4];
         let trigger = 0;
         for (const x of centerCols) {
@@ -552,7 +547,6 @@
         }
         score += trigger * 8;
 
-        // Penalties.
         score -= holes * 44;
         score -= bumpiness * 12;
         score -= maxH * 34;
@@ -561,7 +555,6 @@
         if (maxH >= BOARD_H - 3) score -= 150;
         if (maxH >= BOARD_H - 2) score -= 320;
 
-        // Color balance: prefer 2 dominant colors, avoid 4-color clutter.
         const counts = [0, 0, 0, 0, 0];
         for (let y = 0; y < BOARD_H; y++) {
             for (let x = 0; x < BOARD_W; x++) {
@@ -577,7 +570,6 @@
     }
 
     function chainOutcomeValue(sim) {
-        // Big chains should dominate.
         const chainPart = Math.pow(sim.chains, 2.35) * 65000;
         const scorePart = sim.score * 7;
         const attackPart = sim.attack * 2000;
@@ -586,9 +578,7 @@
     }
 
     function quiescenceScore(boardState, remainingPieces) {
-        // Extend a little when the board is "alive" or has obvious seeds.
         let best = evaluateBoard(boardState);
-
         if (!remainingPieces.length) return best;
 
         const piece = remainingPieces[0];
@@ -641,12 +631,9 @@
             const placed = placePiece(boardState, piece, p.x, p.y, p.rotation);
             const sim = resolveBoard(placed);
 
-            let quick;
-            if (sim.chains > 0) {
-                quick = chainOutcomeValue(sim);
-            } else {
-                quick = evaluateBoard(sim.board) + seedPotential(sim.board) * 3;
-            }
+            const quick = sim.chains > 0
+                ? chainOutcomeValue(sim)
+                : evaluateBoard(sim.board) + seedPotential(sim.board) * 3;
 
             candidates.push({ ...p, sim, quick });
         }
@@ -661,14 +648,12 @@
 
             let total;
             if (c.sim.chains > 0) {
-                // If we can already make a chain, keep it, but still care about what remains.
                 total = chainOutcomeValue(c.sim) + evaluateBoard(c.sim.board) * 0.12;
                 if (depth + 1 < pieces.length) {
                     const child = searchBest(c.sim.board, pieces, depth + 1, nextMove, memo);
                     total += child.score * 0.35;
                 }
             } else {
-                // No immediate chain: strongly favor future chain structure.
                 const local = evaluateBoard(c.sim.board);
                 const child = (depth + 1 < pieces.length)
                     ? searchBest(c.sim.board, pieces, depth + 1, nextMove, memo)
@@ -686,42 +671,7 @@
         return best;
     }
 
-    function isLegalMove(move) {
-        const cur = safeCurrentPuyo();
-        const b = safeBoard();
-        if (!cur || !b || !move) return false;
-
-        const piece = {
-            mainColor: cur.mainColor,
-            subColor: cur.subColor
-        };
-
-        return canPlace(b, piece, move.x, move.y, move.rotation);
-    }
-
-    function applyMove(move) {
-        const cur = safeCurrentPuyo();
-        if (!cur || !move) return false;
-
-        const b = safeBoard();
-        if (!b) return false;
-
-        const piece = {
-            mainColor: cur.mainColor,
-            subColor: cur.subColor
-        };
-
-        if (!canPlace(b, piece, move.x, move.y, move.rotation)) return false;
-
-        cur.mainX = move.x;
-        cur.mainY = move.y;
-        cur.rotation = move.rotation;
-
-        if (typeof renderBoard === 'function') renderBoard();
-        return true;
-    }
-
-    function chooseBestMove() {
+    function localChooseBestMove() {
         const cur = safeCurrentPuyo();
         const b = safeBoard();
         if (!cur || !b) return null;
@@ -736,16 +686,164 @@
         return result.move;
     }
 
+    function applyMove(move) {
+        const cur = safeCurrentPuyo();
+        const b = safeBoard();
+        if (!cur || !move || !b) return false;
+
+        const piece = { mainColor: cur.mainColor, subColor: cur.subColor };
+        if (!canPlace(b, piece, move.x, move.y, move.rotation)) return false;
+
+        cur.mainX = move.x;
+        cur.mainY = move.y;
+        cur.rotation = move.rotation;
+
+        if (typeof renderBoard === 'function') renderBoard();
+        return true;
+    }
+
     function hardDropCurrent() {
         if (typeof hardDrop === 'function') {
             hardDrop();
-            return;
-        }
-        if (typeof lockPuyo === 'function') {
+        } else if (typeof lockPuyo === 'function') {
             lockPuyo();
         }
     }
 
+    // ---------- Worker acceleration ----------
+    function ensureWorker() {
+        if (worker) return worker;
+        if (workerInitAttempted) return null;
+        workerInitAttempted = true;
+
+        try {
+            worker = new Worker('./puyo-ai-worker.js', { type: 'module' });
+            worker.onmessage = (event) => {
+                const data = event.data;
+                if (!data) return;
+
+                if (data.type === 'result') {
+                    workerReady = true;
+                    if (workerTimeout) {
+                        clearTimeout(workerTimeout);
+                        workerTimeout = null;
+                    }
+                    if (pendingResolve) {
+                        pendingResolve(data.move || null);
+                        pendingResolve = null;
+                        pendingReject = null;
+                    }
+                } else if (data.type === 'error') {
+                    if (workerTimeout) {
+                        clearTimeout(workerTimeout);
+                        workerTimeout = null;
+                    }
+                    if (pendingReject) {
+                        pendingReject(new Error(data.message || 'AI worker error'));
+                        pendingResolve = null;
+                        pendingReject = null;
+                    } else {
+                        setStatus('AIエラー');
+                        console.error(data.message);
+                    }
+                }
+            };
+
+            worker.onerror = (err) => {
+                console.error('AI worker error:', err);
+                workerReady = false;
+                if (workerTimeout) {
+                    clearTimeout(workerTimeout);
+                    workerTimeout = null;
+                }
+                if (pendingReject) {
+                    pendingReject(err);
+                    pendingResolve = null;
+                    pendingReject = null;
+                } else {
+                    setStatus('AIエラー');
+                }
+            };
+
+            return worker;
+        } catch (err) {
+            console.warn('Worker unavailable, falling back to local solver:', err);
+            worker = null;
+            workerReady = false;
+            return null;
+        }
+    }
+
+    function requestWorkerMove() {
+        return new Promise((resolve, reject) => {
+            const cur = safeCurrentPuyo();
+            const b = safeBoard();
+            if (!cur || !b) {
+                reject(new Error('snapshot unavailable'));
+                return;
+            }
+
+            const w = ensureWorker();
+            if (!w) {
+                reject(new Error('worker unavailable'));
+                return;
+            }
+
+            const pieces = getPieceList();
+            if (pieces.length < 1) {
+                reject(new Error('no pieces'));
+                return;
+            }
+
+            const flatBoard = new Int32Array(BOARD_W * BOARD_H);
+            for (let y = 0; y < BOARD_H; y++) {
+                for (let x = 0; x < BOARD_W; x++) {
+                    flatBoard[y * BOARD_W + x] = b[y]?.[x] ?? C.EMPTY;
+                }
+            }
+
+            const flatPieces = new Int32Array([
+                cur.subColor || 0,
+                cur.mainColor || 0,
+                pieces[1]?.subColor || 0,
+                pieces[1]?.mainColor || 0,
+                pieces[2]?.subColor || 0,
+                pieces[2]?.mainColor || 0
+            ]);
+
+            pendingResolve = resolve;
+            pendingReject = reject;
+
+            workerTimeout = setTimeout(() => {
+                workerTimeout = null;
+                if (pendingReject) {
+                    pendingReject(new Error('worker timeout'));
+                    pendingResolve = null;
+                    pendingReject = null;
+                }
+            }, AI_CONFIG.WORKER_TIMEOUT_MS);
+
+            worker.postMessage(
+                { type: 'solve', board: flatBoard, pieces: flatPieces },
+                [flatBoard.buffer, flatPieces.buffer]
+            );
+        });
+    }
+
+    async function chooseBestMove() {
+        try {
+            const move = await requestWorkerMove();
+            if (move && Number.isFinite(move.x) && Number.isFinite(move.y) && Number.isFinite(move.rotation)) {
+                return move;
+            }
+        } catch (err) {
+            // fall back to JS solver
+            console.warn('Worker solve failed, using local solver:', err);
+        }
+        return localChooseBestMove();
+    }
+
+    // ---------- Main action ----------
     async function runOnce() {
         if (busy) return;
 
@@ -764,15 +862,19 @@
         setStatus('AI思考中...');
 
         try {
-            const move = chooseBestMove();
+            const move = await chooseBestMove();
             if (!move) {
                 setStatus('手なし');
                 return;
             }
 
-            if (!applyMove(move) || !isLegalMove(move)) {
-                setStatus('AIエラー');
-                return;
+            if (!applyMove(move)) {
+                // fallback once with local solver if worker returned a bad move
+                const fallback = localChooseBestMove();
+                if (!fallback || !applyMove(fallback)) {
+                    setStatus('AIエラー');
+                    return;
+                }
             }
 
             if (AI_CONFIG.PSEUDO_DELAY_MS > 0) {
@@ -791,6 +893,7 @@
 
     function tickAuto() {
         if (!autoEnabled || busy) return;
+
         if (typeof gameState !== 'undefined' && gameState !== 'playing') {
             setStatus('AI待機中');
             return;
@@ -799,6 +902,7 @@
             setStatus('AI待機中');
             return;
         }
+
         runOnce();
     }
 
@@ -842,6 +946,7 @@
 
     window.PuyoAI = {
         chooseBestMove,
+        localChooseBestMove,
         evaluateBoard,
         resolveBoard,
         searchBest,
