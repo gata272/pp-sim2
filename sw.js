@@ -1,4 +1,4 @@
-const CACHE_NAME = 'puyo-sim-v3';
+const CACHE_NAME = 'puyo-sim-v4';
 
 const urlsToCache = [
     './',
@@ -17,26 +17,20 @@ const urlsToCache = [
     './android-icon-512x512.png'
 ];
 
-// インストール時にキャッシュを作成
-self.addEventListener('install', function(event) {
+self.addEventListener('install', function (event) {
     event.waitUntil(
-        caches.open(CACHE_NAME)
-            .then(function(cache) {
-                return cache.addAll(urlsToCache);
-            })
-            .catch(function(error) {
-                console.log('Cache addAll failed:', error);
-            })
+        caches.open(CACHE_NAME).then(function (cache) {
+            return cache.addAll(urlsToCache);
+        })
     );
     self.skipWaiting();
 });
 
-// アクティベート時に古いキャッシュを削除
-self.addEventListener('activate', function(event) {
+self.addEventListener('activate', function (event) {
     event.waitUntil(
-        caches.keys().then(function(cacheNames) {
+        caches.keys().then(function (cacheNames) {
             return Promise.all(
-                cacheNames.map(function(cacheName) {
+                cacheNames.map(function (cacheName) {
                     if (cacheName !== CACHE_NAME) {
                         return caches.delete(cacheName);
                     }
@@ -47,37 +41,30 @@ self.addEventListener('activate', function(event) {
     self.clients.claim();
 });
 
-// フェッチイベントのハンドリング（キャッシュ優先戦略）
-self.addEventListener('fetch', function(event) {
-    if (event.request.method !== 'GET') {
-        return;
-    }
+self.addEventListener('fetch', function (event) {
+    if (event.request.method !== 'GET') return;
 
     event.respondWith(
-        caches.match(event.request)
-            .then(function(response) {
-                if (response) {
+        caches.match(event.request).then(function (response) {
+            if (response) return response;
+
+            return fetch(event.request).then(function (response) {
+                if (!response || response.status !== 200 || response.type !== 'basic') {
                     return response;
                 }
 
-                return fetch(event.request).then(function(response) {
-                    if (!response || response.status !== 200 || response.type !== 'basic') {
-                        return response;
-                    }
-
-                    const responseToCache = response.clone();
-                    caches.open(CACHE_NAME)
-                        .then(function(cache) {
-                            cache.put(event.request, responseToCache);
-                        });
-
-                    return response;
-                }).catch(function() {
-                    return new Response('Network error happened', {
-                        status: 408,
-                        headers: new Headers({ 'Content-Type': 'text/plain' })
-                    });
+                const responseToCache = response.clone();
+                caches.open(CACHE_NAME).then(function (cache) {
+                    cache.put(event.request, responseToCache);
                 });
-            })
+
+                return response;
+            }).catch(function () {
+                return new Response('Network error happened', {
+                    status: 408,
+                    headers: new Headers({ 'Content-Type': 'text/plain' })
+                });
+            });
+        })
     );
 });
