@@ -1,17 +1,22 @@
 /* puyoAI.js
- * Worker-based Puyo AI
- * - current piece + NEXT1 + NEXT2 exact search
- * - beam search + pseudo leaf rollout
- * - GTR / key-stack / fron / stair / valley template scoring
- * - Worker snapshot uses transferable ArrayBuffers
+ * Worker-backed Puyo AI for pp-sim2
+ * - current piece + NEXT1 + NEXT2
+ * - beam search + future seed evaluation
+ * - tolerant worker loader for GitHub Pages
  */
 (function () {
     'use strict';
 
     const AI_CONFIG = {
-        WORKER_URL: 'puyoAI.worker.js',
+        WORKER_CANDIDATES: [
+            './puyo-ai-worker.js?v=4',
+            './puyo-ai-worker.js',
+            './puyoAI.worker.js?v=4',
+            './puyoAI.worker.js'
+        ],
         AUTO_TICK_MS: 140,
-        THINK_TIMEOUT_MS: 12000
+        THINK_TIMEOUT_MS: 12000,
+        READY_TIMEOUT_MS: 8000
     };
 
     const AI_STATE = {
@@ -25,12 +30,12 @@
         autoTimer: null,
         jobSeq: 0,
         pendingJobs: new Map(),
-        booted: false
+        booted: false,
+        currentWorkerUrl: null
     };
 
     const getWidth = () => (typeof WIDTH !== 'undefined' ? WIDTH : 6);
     const getHeight = () => (typeof HEIGHT !== 'undefined' ? HEIGHT : 14);
-    const getHiddenRows = () => (typeof HIDDEN_ROWS !== 'undefined' ? HIDDEN_ROWS : 2);
 
     function updateStatus(text) {
         const el = document.getElementById('ai-status');
@@ -77,9 +82,7 @@
         const H = getHeight();
         const out = new Uint8Array(W * H);
 
-        if (typeof board === 'undefined' || !Array.isArray(board)) {
-            return out;
-        }
+        if (typeof board === 'undefined' || !Array.isArray(board)) return out;
 
         for (let y = 0; y < H; y++) {
             const row = Array.isArray(board[y]) ? board[y] : [];
@@ -113,71 +116,134 @@
         return pieces;
     }
 
-    function ensureWorker() {
-        if (AI_STATE.worker) return AI_STATE.readyPromise || Promise.resolve();
+    function parseMovePayload(msg) {
+        if (!msg) return null;
+        if (msg.move && Number.isFinite(msg.move.x) && Number.isFinite(msg.move.y) && Number.isFinite(msg.move.rotation)) {
+            return msg.move;
+        }
+        return null;
+    }
 
-        AI_STATE.readyPromise = new Promise((resolve, reject) => {
-            AI_STATE.readyResolve = resolve;
-            AI_STATE.readyReject = reject;
-
+    function createWorkerFromUrl(url) {
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            let worker = null;
             try {
-                const worker = new Worker(AI_CONFIG.WORKER_URL);
-                AI_STATE.worker = worker;
-
-                worker.onmessage = (ev) => {
-                    const msg = ev.data || {};
-                    if (msg.type === 'ready') {
-                        AI_STATE.ready = true;
-                        updateStatus('AI待機中');
-                        if (AI_STATE.readyResolve) AI_STATE.readyResolve(true);
-                        AI_STATE.readyResolve = null;
-                        AI_STATE.readyReject = null;
-                        return;
-                    }
-
-                    if (msg.type === 'result') {
-                        const job = AI_STATE.pendingJobs.get(msg.jobId);
-                        if (!job) return;
-                        AI_STATE.pendingJobs.delete(msg.jobId);
-                        job.resolve(msg);
-                        return;
-                    }
-
-                    if (msg.type === 'error') {
-                        const job = AI_STATE.pendingJobs.get(msg.jobId);
-                        if (job) {
-                            AI_STATE.pendingJobs.delete(msg.jobId);
-                            job.reject(new Error(msg.message || 'AI worker error'));
-                        }
-                        updateStatus('AIエラー');
-                    }
-                };
-
-                worker.onerror = (err) => {
-                    console.error('AI worker error:', err);
-                    AI_STATE.ready = false;
-                    if (AI_STATE.readyReject) AI_STATE.readyReject(err);
-                    AI_STATE.readyResolve = null;
-                    AI_STATE.readyReject = null;
-                    updateStatus('AI worker初期化失敗');
-                };
+                worker = new Worker(url);
             } catch (err) {
-                console.error('Failed to create worker:', err);
-                AI_STATE.ready = false;
-                if (AI_STATE.readyReject) AI_STATE.readyReject(err);
-                AI_STATE.readyResolve = null;
-                AI_STATE.readyReject = null;
-                updateStatus('AI worker初期化失敗');
+                reject(err);
+                return;
             }
-        });
 
-        return AI_STATE.readyPromise;
+            const cleanup = () => {
+                if (worker) {
+                    worker.onmessage = null;
+                    worker.onerror = null;
+                }
+            };
+
+            const readyTimer = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                try { worker.terminate(); } catch (_) {}
+                reject(new Error(`Worker ready timeout: ${url}`));
+            }, AI_CONFIG.READY_TIMEOUT_MS);
+
+            worker.onmessage = (ev) => {
+                const msg = ev.data || {};
+                if (msg.type === 'ready') {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(readyTimer);
+                    cleanup();
+                    resolve(worker);
+                }
+            };
+
+            worker.onerror = (err) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(readyTimer);
+                cleanup();
+                try { worker.terminate(); } catch (_) {}
+                reject(err instanceof Error ? err : new Error(String(err)));
+            };
+        });
+    }
+
+    async function ensureWorker() {
+        if (AI_STATE.worker && AI_STATE.ready) return true;
+        if (AI_STATE.readyPromise) return AI_STATE.readyPromise;
+
+        AI_STATE.readyPromise = (async () => {
+            let lastErr = null;
+
+            for (const url of AI_CONFIG.WORKER_CANDIDATES) {
+                try {
+                    const worker = await createWorkerFromUrl(url);
+                    AI_STATE.worker = worker;
+                    AI_STATE.ready = true;
+                    AI_STATE.currentWorkerUrl = url;
+
+                    worker.onmessage = (ev) => {
+                        const msg = ev.data || {};
+
+                        if (msg.type === 'result') {
+                            const job = AI_STATE.pendingJobs.get(msg.jobId);
+                            if (!job) return;
+                            AI_STATE.pendingJobs.delete(msg.jobId);
+                            job.resolve(msg);
+                            return;
+                        }
+
+                        if (msg.type === 'error') {
+                            const job = AI_STATE.pendingJobs.get(msg.jobId);
+                            if (job) {
+                                AI_STATE.pendingJobs.delete(msg.jobId);
+                                job.reject(new Error(msg.message || 'AI worker error'));
+                            }
+                            updateStatus('AIエラー');
+                        }
+                    };
+
+                    worker.onerror = (err) => {
+                        console.error('AI worker runtime error:', err);
+                        AI_STATE.ready = false;
+                        updateStatus('AI workerエラー');
+                    };
+
+                    updateStatus('AI待機中');
+                    return true;
+                } catch (err) {
+                    lastErr = err;
+                }
+            }
+
+            AI_STATE.ready = false;
+            throw lastErr || new Error('All worker candidates failed');
+        })();
+
+        try {
+            await AI_STATE.readyPromise;
+            return true;
+        } catch (err) {
+            console.error('Failed to initialize AI worker:', err);
+            updateStatus('AI worker初期化失敗');
+            AI_STATE.readyPromise = null;
+            throw err;
+        } finally {
+            if (!AI_STATE.ready) {
+                AI_STATE.readyPromise = null;
+            }
+        }
     }
 
     function packState() {
         const boardBuffer = flattenBoard();
         const pieces = readVisiblePieces();
-        const pieceBuffer = new Uint8Array(6); // current + NEXT1 + NEXT2, each [main, sub]
+        const pieceBuffer = new Uint8Array(6);
+
         for (let i = 0; i < Math.min(3, pieces.length); i++) {
             pieceBuffer[i * 2] = pieces[i].mainColor | 0;
             pieceBuffer[i * 2 + 1] = pieces[i].subColor | 0;
@@ -186,7 +252,6 @@
         return {
             width: getWidth(),
             height: getHeight(),
-            hiddenRows: getHiddenRows(),
             boardBuffer,
             pieceBuffer,
             pendingOjama: getPendingOjama()
@@ -268,12 +333,13 @@
 
         try {
             const result = await requestBestMove();
-            if (!result || !result.move) {
+            const move = parseMovePayload(result);
+            if (!move) {
                 updateStatus('手が見つかりません');
                 return;
             }
 
-            applyMove(result.move);
+            applyMove(move);
             hardDropCurrent();
             updateStatus('AI実行完了');
         } catch (err) {
