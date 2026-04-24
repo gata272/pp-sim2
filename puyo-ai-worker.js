@@ -1,673 +1,712 @@
-/* puyo-ai-worker.js
- * Pure-JS worker solver
- * - Same heuristic tables / search shape as the pasted AI
- * - No main-thread blocking
+/* puyoAI.worker.js
+ * Search core for Puyo AI
+ * - beam search over current + NEXT1 + NEXT2
+ * - pseudo leaf rollout for one extra unknown step
+ * - exact simulator score / ojama conversion sync
  */
-'use strict';
+(() => {
+    'use strict';
 
-const W = 6;
-const H = 14;
-const HIDDEN_ROWS = 2;
-const BOARD_GAMEOVER_X = 2;
-const BOARD_GAMEOVER_Y = 11;
+    const WIDTH = 6;
+    const HEIGHT = 14;
+    const HIDDEN_ROWS = 2;
+    const SEARCH_VISIBLE_HEIGHT = HEIGHT - HIDDEN_ROWS;
 
-const COLORS = {
-    EMPTY: 0,
-    RED: 1,
-    BLUE: 2,
-    GREEN: 3,
-    YELLOW: 4,
-    GARBAGE: 5
-};
-
-const BONUS_TABLE = {
-    CHAIN: [0, 8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512],
-    GROUP: [0, 0, 0, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-    COLOR: [0, 0, 3, 6, 12]
-};
-
-const AI_CONFIG = {
-    SEARCH_DEPTH: 3,
-    BEAM_WIDTH: 10,
-    PSEUDO_COLORS: [1, 2, 3, 4],
-    PSEUDO_BRANCH_LIMIT: 6
-};
-
-const TEMPLATE_LIBRARY = [
-    { name: 'left_stair',   mask: [1, 1, 1, 1, 0, 0], profile: [0, 1, 2, 3, 0, 0], weight: 1.00 },
-    { name: 'right_stair',  mask: [0, 0, 1, 1, 1, 1], profile: [0, 0, 3, 2, 1, 0], weight: 1.00 },
-    { name: 'left_gtr',     mask: [1, 1, 1, 1, 1, 0], profile: [0, 1, 2, 2, 1, 0], weight: 1.25 },
-    { name: 'right_gtr',    mask: [0, 1, 1, 1, 1, 1], profile: [0, 1, 2, 2, 1, 0], weight: 1.25 },
-    { name: 'valley',       mask: [1, 1, 1, 1, 1, 1], profile: [2, 1, 0, 0, 1, 2], weight: 1.10 },
-    { name: 'center_tower', mask: [0, 1, 1, 1, 1, 0], profile: [0, 1, 2, 3, 2, 1], weight: 1.05 },
-    { name: 'bridge',       mask: [1, 1, 1, 1, 1, 1], profile: [1, 2, 1, 1, 2, 1], weight: 0.95 }
-];
-
-function cloneBoard(src) {
-    return src.map(row => row.slice());
-}
-
-function flatToBoard(flat) {
-    const board = [];
-    for (let y = 0; y < H; y++) {
-        board.push(Array.from(flat.slice(y * W, (y + 1) * W)));
-    }
-    return board;
-}
-
-function piecesFromFlat(flat) {
-    const arr = flat instanceof Int32Array ? flat : Int32Array.from(flat || []);
-    return [
-        { subColor: arr[0] | 0, mainColor: arr[1] | 0 },
-        { subColor: arr[2] | 0, mainColor: arr[3] | 0 },
-        { subColor: arr[4] | 0, mainColor: arr[5] | 0 }
-    ].filter(p => Number.isFinite(p.subColor) && Number.isFinite(p.mainColor));
-}
-
-function boardToKey(boardState) {
-    return boardState.map(row => row.join('')).join('|');
-}
-
-function getCoordsFromState(puyoState) {
-    const { mainX, mainY, rotation } = puyoState;
-    let subX = mainX;
-    let subY = mainY;
-
-    if (rotation === 0) subY = mainY + 1;
-    else if (rotation === 1) subX = mainX - 1;
-    else if (rotation === 2) subY = mainY - 1;
-    else if (rotation === 3) subX = mainX + 1;
-
-    return [
-        { x: mainX, y: mainY, color: puyoState.mainColor },
-        { x: subX, y: subY, color: puyoState.subColor }
-    ];
-}
-
-function checkCollision(coords, boardState) {
-    for (const p of coords) {
-        if (p.x < 0 || p.x >= W || p.y < 0 || p.y >= H) return true;
-        if (boardState[p.y][p.x] !== COLORS.EMPTY) return true;
-    }
-    return false;
-}
-
-function canPlace(boardState, piece, x, y, rotation) {
-    return !checkCollision(getCoordsFromState({
-        mainX: x,
-        mainY: y,
-        rotation,
-        mainColor: piece.mainColor,
-        subColor: piece.subColor
-    }), boardState);
-}
-
-function findRestY(boardState, piece, x, rotation) {
-    let y = H - 2;
-    if (!canPlace(boardState, piece, x, y, rotation)) return null;
-    while (y > 0 && canPlace(boardState, piece, x, y - 1, rotation)) y--;
-    return y;
-}
-
-function dropPlacements(boardState, piece) {
-    const out = [];
-    for (let rot = 0; rot < 4; rot++) {
-        for (let x = 0; x < W; x++) {
-            const y = findRestY(boardState, piece, x, rot);
-            if (y !== null) out.push({ x, y, rotation: rot });
-        }
-    }
-    return out;
-}
-
-function placePiece(boardState, piece, x, y, rotation) {
-    const next = cloneBoard(boardState);
-    const coords = getCoordsFromState({
-        mainX: x,
-        mainY: y,
-        rotation,
-        mainColor: piece.mainColor,
-        subColor: piece.subColor
-    });
-    for (const c of coords) {
-        if (c.x >= 0 && c.x < W && c.y >= 0 && c.y < H) {
-            next[c.y][c.x] = c.color;
-        }
-    }
-    return next;
-}
-
-function gravityOn(boardState) {
-    for (let x = 0; x < W; x++) {
-        const col = [];
-        for (let y = 0; y < H; y++) {
-            if (boardState[y][x] !== COLORS.EMPTY) col.push(boardState[y][x]);
-        }
-        for (let y = 0; y < H; y++) {
-            boardState[y][x] = y < col.length ? col[y] : COLORS.EMPTY;
-        }
-    }
-}
-
-function findGroups(boardState) {
-    const visited = Array.from({ length: H }, () => Array(W).fill(false));
-    const groups = [];
-
-    for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-            const color = boardState[y][x];
-            if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
-
-            const stack = [{ x, y }];
-            visited[y][x] = true;
-            const group = [];
-
-            while (stack.length) {
-                const cur = stack.pop();
-                group.push(cur);
-
-                const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-                for (const [dx, dy] of dirs) {
-                    const nx = cur.x + dx;
-                    const ny = cur.y + dy;
-                    if (
-                        nx >= 0 && nx < W &&
-                        ny >= 0 && ny < H &&
-                        !visited[ny][nx] &&
-                        boardState[ny][nx] === color
-                    ) {
-                        visited[ny][nx] = true;
-                        stack.push({ x: nx, y: ny });
-                    }
-                }
-            }
-
-            if (group.length >= 4) groups.push({ color, group });
-        }
-    }
-
-    return groups;
-}
-
-function clearGarbageNeighbors(boardState, erasedCoords) {
-    const toClear = new Set();
-
-    for (const { x, y } of erasedCoords) {
-        const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-        for (const [dx, dy] of dirs) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx >= 0 && nx < W && ny >= 0 && ny < H) {
-                if (boardState[ny][nx] === COLORS.GARBAGE) toClear.add(`${nx},${ny}`);
-            }
-        }
-    }
-
-    for (const key of toClear) {
-        const [x, y] = key.split(',').map(Number);
-        boardState[y][x] = COLORS.EMPTY;
-    }
-}
-
-function groupBonus(size) {
-    return BONUS_TABLE.GROUP[Math.min(size, BONUS_TABLE.GROUP.length - 1)] || 0;
-}
-
-function chainBonus(chainNo) {
-    const idx = Math.max(0, Math.min(chainNo - 1, BONUS_TABLE.CHAIN.length - 1));
-    return BONUS_TABLE.CHAIN[idx] || 0;
-}
-
-function colorBonus(colorCount) {
-    return BONUS_TABLE.COLOR[Math.min(colorCount, BONUS_TABLE.COLOR.length - 1)] || 0;
-}
-
-function calculateScore(groups, chainNo) {
-    let totalPuyos = 0;
-    const colorSet = new Set();
-    let bonusTotal = 0;
-
-    for (const { color, group } of groups) {
-        totalPuyos += group.length;
-        colorSet.add(color);
-        bonusTotal += groupBonus(group.length);
-    }
-
-    bonusTotal += chainBonus(chainNo);
-    bonusTotal += colorBonus(colorSet.size);
-
-    if (bonusTotal <= 0) bonusTotal = 1;
-    return 10 * totalPuyos * bonusTotal;
-}
-
-function isBoardEmpty(boardState) {
-    for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-            if (boardState[y][x] !== COLORS.EMPTY) return false;
-        }
-    }
-    return true;
-}
-
-function resolveBoard(boardState) {
-    const acBonus = typeof ALL_CLEAR_SCORE_BONUS !== 'undefined' ? ALL_CLEAR_SCORE_BONUS : 2100;
-
-    let totalChains = 0;
-    let totalScore = 0;
-    let totalAttack = 0;
-
-    while (true) {
-        gravityOn(boardState);
-        const groups = findGroups(boardState);
-        if (groups.length === 0) break;
-
-        totalChains++;
-        const chainScore = calculateScore(groups, totalChains);
-        totalScore += chainScore;
-        totalAttack += Math.floor(Math.max(0, chainScore) / 70);
-
-        const erased = [];
-        for (const { group } of groups) {
-            for (const p of group) {
-                boardState[p.y][p.x] = COLORS.EMPTY;
-                erased.push(p);
-            }
-        }
-        clearGarbageNeighbors(boardState, erased);
-    }
-
-    gravityOn(boardState);
-
-    let allClear = false;
-    if (isBoardEmpty(boardState)) {
-        allClear = true;
-        totalScore += acBonus;
-        totalAttack += Math.floor(Math.max(0, acBonus) / 70);
-    }
-
-    return {
-        board: boardState,
-        chains: totalChains,
-        score: totalScore,
-        attack: totalAttack,
-        allClear
+    const COLORS = {
+        EMPTY: 0,
+        RED: 1,
+        BLUE: 2,
+        GREEN: 3,
+        YELLOW: 4,
+        GARBAGE: 5
     };
-}
 
-function columnHeights(boardState) {
-    const heights = Array(W).fill(0);
+    const BONUS_TABLE = {
+        CHAIN: [0, 8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512],
+        GROUP: [0, 0, 0, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        COLOR: [0, 0, 3, 6, 12]
+    };
 
-    for (let x = 0; x < W; x++) {
-        let h = 0;
-        for (let y = H - 1; y >= 0; y--) {
-            if (boardState[y][x] !== COLORS.EMPTY) {
-                h = y + 1;
-                break;
+    const CONFIG = {
+        BEAM_WIDTH: 16,
+        LEAF_BEAM_WIDTH: 6,
+        PSEUDO_BRANCH_LIMIT: 6
+    };
+
+    const TEMPLATES = [
+        { name: 'gtr_left',   mask: [1, 1, 1, 1, 0, 0], profile: [0, 1, 2, 2, 0, 0], weight: 1.45 },
+        { name: 'gtr_right',  mask: [0, 0, 1, 1, 1, 1], profile: [0, 0, 2, 2, 1, 0], weight: 1.45 },
+        { name: 'key_stack',  mask: [1, 1, 1, 1, 1, 0], profile: [0, 1, 2, 3, 2, 0], weight: 1.25 },
+        { name: 'fron',       mask: [1, 1, 1, 1, 1, 1], profile: [1, 2, 1, 1, 2, 1], weight: 1.10 },
+        { name: 'valley',     mask: [1, 1, 1, 1, 1, 1], profile: [2, 1, 0, 0, 1, 2], weight: 1.05 },
+        { name: 'stair_left', mask: [1, 1, 1, 0, 0, 0], profile: [0, 1, 2, 0, 0, 0], weight: 0.95 },
+        { name: 'stair_right',mask: [0, 0, 0, 1, 1, 1], profile: [0, 0, 0, 2, 1, 0], weight: 0.95 }
+    ];
+
+    const TRANS_TABLE = new Map();
+
+    const idx = (x, y) => y * WIDTH + x;
+    const get = (board, x, y) => board[idx(x, y)];
+
+    function cloneBoard(board) {
+        return new Uint8Array(board);
+    }
+
+    function boardKey(board) {
+        return board.join('');
+    }
+
+    function pieceFromBuffer(buffer, offset) {
+        if (!buffer || offset + 1 >= buffer.length) return null;
+        const mainColor = buffer[offset] | 0;
+        const subColor = buffer[offset + 1] | 0;
+        if (!mainColor && !subColor) return null;
+        return { mainColor, subColor };
+    }
+
+    function pieceCoords(piece, x, y, rotation) {
+        let sx = x;
+        let sy = y;
+
+        if (rotation === 0) sy = y + 1;
+        else if (rotation === 1) sx = x - 1;
+        else if (rotation === 2) sy = y - 1;
+        else if (rotation === 3) sx = x + 1;
+
+        return [
+            { x, y, color: piece.mainColor },
+            { x: sx, y: sy, color: piece.subColor }
+        ];
+    }
+
+    function canPlace(board, piece, x, y, rotation) {
+        const coords = pieceCoords(piece, x, y, rotation);
+
+        for (const c of coords) {
+            if (c.x < 0 || c.x >= WIDTH || c.y < 0 || c.y >= HEIGHT) return false;
+            if (c.y < SEARCH_VISIBLE_HEIGHT && get(board, c.x, c.y) !== COLORS.EMPTY) return false;
+        }
+        return true;
+    }
+
+    function findRestY(board, piece, x, rotation) {
+        let y = HEIGHT - 2;
+        if (!canPlace(board, piece, x, y, rotation)) return null;
+
+        while (y > 0 && canPlace(board, piece, x, y - 1, rotation)) {
+            y--;
+        }
+        return y;
+    }
+
+    function placements(board, piece) {
+        const out = [];
+        for (let rot = 0; rot < 4; rot++) {
+            for (let x = 0; x < WIDTH; x++) {
+                const y = findRestY(board, piece, x, rot);
+                if (y !== null) out.push({ x, y, rotation: rot });
             }
         }
-        heights[x] = h;
+        return out;
     }
-    return heights;
-}
 
-function countHoles(boardState, heights) {
-    let holes = 0;
-    for (let x = 0; x < W; x++) {
-        for (let y = 0; y < heights[x]; y++) {
-            if (boardState[y][x] === COLORS.EMPTY) holes++;
+    function placePiece(board, piece, x, y, rotation) {
+        const next = cloneBoard(board);
+        const coords = pieceCoords(piece, x, y, rotation);
+
+        for (const c of coords) {
+            if (c.x >= 0 && c.x < WIDTH && c.y >= 0 && c.y < HEIGHT) {
+                next[idx(c.x, c.y)] = c.color;
+            }
+        }
+        return next;
+    }
+
+    function gravity(board) {
+        for (let x = 0; x < WIDTH; x++) {
+            const col = [];
+            for (let y = 0; y < HEIGHT; y++) {
+                const v = get(board, x, y);
+                if (v !== COLORS.EMPTY) col.push(v);
+            }
+            for (let y = 0; y < HEIGHT; y++) {
+                board[idx(x, y)] = y < col.length ? col[y] : COLORS.EMPTY;
+            }
         }
     }
-    return holes;
-}
 
-function bumpiness(heights) {
-    let sum = 0;
-    for (let i = 1; i < heights.length; i++) sum += Math.abs(heights[i] - heights[i - 1]);
-    return sum;
-}
+    function findGroups(board) {
+        const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+        const out = [];
 
-function openNeighborCount(boardState, cells) {
-    const seen = new Set();
-    let count = 0;
+        for (let y = 0; y < SEARCH_VISIBLE_HEIGHT; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                const color = get(board, x, y);
+                if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
 
-    for (const { x, y } of cells) {
-        const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-        for (const [dx, dy] of dirs) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx >= 0 && nx < W && ny >= 0 && ny < H && boardState[ny][nx] === COLORS.EMPTY) {
-                const key = `${nx},${ny}`;
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    count++;
+                const stack = [{ x, y }];
+                visited[y][x] = true;
+                const group = [];
+
+                while (stack.length) {
+                    const cur = stack.pop();
+                    group.push(cur);
+
+                    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+                    for (const [dx, dy] of dirs) {
+                        const nx = cur.x + dx;
+                        const ny = cur.y + dy;
+                        if (
+                            nx >= 0 && nx < WIDTH &&
+                            ny >= 0 && ny < SEARCH_VISIBLE_HEIGHT &&
+                            !visited[ny][nx] &&
+                            get(board, nx, ny) === color
+                        ) {
+                            visited[ny][nx] = true;
+                            stack.push({ x: nx, y: ny });
+                        }
+                    }
+                }
+
+                if (group.length >= 4) out.push({ color, group });
+            }
+        }
+
+        return out;
+    }
+
+    function clearGarbageNeighbors(board, erased) {
+        const toClear = new Set();
+        for (const p of erased) {
+            const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            for (const [dx, dy] of dirs) {
+                const nx = p.x + dx;
+                const ny = p.y + dy;
+                if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT) {
+                    if (get(board, nx, ny) === COLORS.GARBAGE) toClear.add(`${nx},${ny}`);
                 }
             }
         }
+
+        for (const key of toClear) {
+            const [x, y] = key.split(',').map(Number);
+            board[idx(x, y)] = COLORS.EMPTY;
+        }
     }
-    return count;
-}
 
-function findGroupsLoose(boardState) {
-    const visited = Array.from({ length: H }, () => Array(W).fill(false));
-    const out = [];
+    function calculateScore(groups, chainNo) {
+        let totalPuyos = 0;
+        const colorSet = new Set();
+        let bonusTotal = 0;
 
-    for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-            const color = boardState[y][x];
-            if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
+        for (const { color, group } of groups) {
+            totalPuyos += group.length;
+            colorSet.add(color);
+            bonusTotal += BONUS_TABLE.GROUP[Math.min(group.length, BONUS_TABLE.GROUP.length - 1)] || 0;
+        }
 
-            const stack = [{ x, y }];
-            visited[y][x] = true;
-            const cells = [];
+        const chainIdx = Math.max(0, Math.min(chainNo - 1, BONUS_TABLE.CHAIN.length - 1));
+        bonusTotal += BONUS_TABLE.CHAIN[chainIdx] || 0;
+        bonusTotal += BONUS_TABLE.COLOR[Math.min(colorSet.size, BONUS_TABLE.COLOR.length - 1)] || 0;
 
-            while (stack.length) {
-                const cur = stack.pop();
-                cells.push(cur);
+        if (bonusTotal <= 0) bonusTotal = 1;
+        return 10 * totalPuyos * bonusTotal;
+    }
 
-                const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-                for (const [dx, dy] of dirs) {
-                    const nx = cur.x + dx;
-                    const ny = cur.y + dy;
-                    if (
-                        nx >= 0 && nx < W &&
-                        ny >= 0 && ny < H &&
-                        !visited[ny][nx] &&
-                        boardState[ny][nx] === color
-                    ) {
-                        visited[ny][nx] = true;
-                        stack.push({ x: nx, y: ny });
+    function scoreToOjama(score) {
+        return Math.floor(Math.max(0, score) / 70);
+    }
+
+    function isBoardEmpty(board) {
+        for (let i = 0; i < board.length; i++) {
+            if (board[i] !== COLORS.EMPTY) return false;
+        }
+        return true;
+    }
+
+    function resolveBoard(board) {
+        let chains = 0;
+        let totalScore = 0;
+        let totalAttack = 0;
+        let allClear = false;
+
+        while (true) {
+            gravity(board);
+            const groups = findGroups(board);
+            if (!groups.length) break;
+
+            chains++;
+            const chainScore = calculateScore(groups, chains);
+            totalScore += chainScore;
+            totalAttack += scoreToOjama(chainScore);
+
+            const erased = [];
+            for (const { group } of groups) {
+                for (const p of group) {
+                    board[idx(p.x, p.y)] = COLORS.EMPTY;
+                    erased.push(p);
+                }
+            }
+            clearGarbageNeighbors(board, erased);
+        }
+
+        gravity(board);
+
+        if (isBoardEmpty(board)) {
+            allClear = true;
+            totalScore += 2100;
+            totalAttack += scoreToOjama(2100);
+        }
+
+        return { board, chains, score: totalScore, attack: totalAttack, allClear };
+    }
+
+    function computeHeights(board) {
+        const heights = new Int16Array(WIDTH);
+        for (let x = 0; x < WIDTH; x++) {
+            let h = 0;
+            for (let y = HEIGHT - 1; y >= 0; y--) {
+                if (get(board, x, y) !== COLORS.EMPTY) {
+                    h = y + 1;
+                    break;
+                }
+            }
+            heights[x] = h;
+        }
+        return heights;
+    }
+
+    function countHoles(board, heights) {
+        let holes = 0;
+        for (let x = 0; x < WIDTH; x++) {
+            for (let y = 0; y < heights[x]; y++) {
+                if (get(board, x, y) === COLORS.EMPTY) holes++;
+            }
+        }
+        return holes;
+    }
+
+    function bumpiness(heights) {
+        let total = 0;
+        for (let i = 1; i < WIDTH; i++) {
+            total += Math.abs(heights[i] - heights[i - 1]);
+        }
+        return total;
+    }
+
+    function dangerPenalty(board) {
+        let penalty = 0;
+        const dangerX = 2;
+        const dangerY = 11;
+
+        if (get(board, dangerX, dangerY) !== COLORS.EMPTY) {
+            penalty += 1000000;
+        }
+
+        const heights = computeHeights(board);
+        if (heights[dangerX] >= dangerY + 1) penalty += 250000;
+        if (heights[dangerX] >= dangerY - 1) penalty += 80000;
+
+        for (let y = Math.max(0, dangerY - 2); y <= dangerY; y++) {
+            if (get(board, dangerX, y) !== COLORS.EMPTY) penalty += 25000;
+        }
+
+        return penalty;
+    }
+
+    function openNeighborCount(board, cells) {
+        const seen = new Set();
+        let count = 0;
+        for (const { x, y } of cells) {
+            const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            for (const [dx, dy] of dirs) {
+                const nx = x + dx;
+                const ny = y + dy;
+                if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT && get(board, nx, ny) === COLORS.EMPTY) {
+                    const k = `${nx},${ny}`;
+                    if (!seen.has(k)) {
+                        seen.add(k);
+                        count++;
                     }
                 }
             }
-
-            out.push({ color, cells });
         }
+        return count;
     }
 
-    return out;
-}
+    function connectedComponents(board) {
+        const visited = Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(false));
+        const out = [];
 
-function seedScore(boardState) {
-    const groups = findGroupsLoose(boardState);
-    let s = 0;
+        for (let y = 0; y < HEIGHT; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                const color = get(board, x, y);
+                if (color === COLORS.EMPTY || color === COLORS.GARBAGE || visited[y][x]) continue;
 
-    for (const g of groups) {
-        const size = g.cells.length;
-        if (size === 1) s += 1;
-        else if (size === 2) s += 12 + openNeighborCount(boardState, g.cells) * 2;
-        else if (size === 3) s += 35 + openNeighborCount(boardState, g.cells) * 4;
-    }
+                const stack = [{ x, y }];
+                visited[y][x] = true;
+                const cells = [];
 
-    for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-            const c = boardState[y][x];
-            if (c === COLORS.EMPTY || c === COLORS.GARBAGE) continue;
+                while (stack.length) {
+                    const cur = stack.pop();
+                    cells.push(cur);
 
-            if (x + 2 < W && boardState[y][x + 1] === c && boardState[y][x + 2] === c) {
-                if (
-                    (x - 1 >= 0 && boardState[y][x - 1] === COLORS.EMPTY) ||
-                    (x + 3 < W && boardState[y][x + 3] === COLORS.EMPTY)
-                ) {
-                    s += 16;
+                    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+                    for (const [dx, dy] of dirs) {
+                        const nx = cur.x + dx;
+                        const ny = cur.y + dy;
+                        if (
+                            nx >= 0 && nx < WIDTH &&
+                            ny >= 0 && ny < HEIGHT &&
+                            !visited[ny][nx] &&
+                            get(board, nx, ny) === color
+                        ) {
+                            visited[ny][nx] = true;
+                            stack.push({ x: nx, y: ny });
+                        }
+                    }
                 }
-            }
 
-            if (y + 2 < H && boardState[y + 1][x] === c && boardState[y + 2][x] === c) {
-                if (
-                    (y - 1 >= 0 && boardState[y - 1][x] === COLORS.EMPTY) ||
-                    (y + 3 < H && boardState[y + 3][x] === COLORS.EMPTY)
-                ) {
-                    s += 16;
-                }
-            }
-
-            if (x + 1 < W && y + 1 < H) {
-                const a = boardState[y][x];
-                const b = boardState[y][x + 1];
-                const d = boardState[y + 1][x];
-                if (a === c && b === c && d === c) s += 20;
+                out.push({ color, cells });
             }
         }
+
+        return out;
     }
 
-    return s;
-}
+    function templateScore(board) {
+        const heights = computeHeights(board);
+        let best = 0;
+        let second = 0;
 
-function templateScore(boardState) {
-    const heights = columnHeights(boardState);
-    let best1 = 0;
-    let best2 = 0;
+        for (const t of TEMPLATES) {
+            const masked = [];
+            for (let x = 0; x < WIDTH; x++) {
+                if (t.mask[x]) masked.push(x);
+            }
+            if (!masked.length) continue;
 
-    for (const t of TEMPLATE_LIBRARY) {
-        const masked = [];
-        for (let x = 0; x < W; x++) {
-            if (t.mask[x]) masked.push(x);
+            let base = Infinity;
+            for (const x of masked) {
+                base = Math.min(base, heights[x] - t.profile[x]);
+            }
+            if (!Number.isFinite(base)) continue;
+
+            let score = 0;
+            let coverage = 0;
+            for (const x of masked) {
+                const target = base + t.profile[x];
+                const diff = Math.abs(heights[x] - target);
+                score += Math.max(0, 12 - diff * 4);
+                if (heights[x] > 0) coverage++;
+            }
+
+            score += coverage * 3;
+            score *= t.weight;
+
+            if (score > best) {
+                second = best;
+                best = score;
+            } else if (score > second) {
+                second = score;
+            }
         }
-        if (!masked.length) continue;
 
-        let base = Infinity;
-        for (const x of masked) {
-            base = Math.min(base, heights[x] - t.profile[x]);
-        }
-        if (!Number.isFinite(base)) continue;
+        return best + second * 0.5;
+    }
 
+    function seedScore(board) {
+        const comps = connectedComponents(board);
         let s = 0;
-        let occupied = 0;
-        for (const x of masked) {
-            const target = base + t.profile[x];
-            const diff = Math.abs(heights[x] - target);
-            s += Math.max(0, 8 - diff * 3);
-            if (heights[x] > 0) occupied++;
+        const colorComponentCounts = [0, 0, 0, 0, 0];
+
+        for (const comp of comps) {
+            const size = comp.cells.length;
+            const open = openNeighborCount(board, comp.cells);
+
+            if (comp.color >= 1 && comp.color <= 4) {
+                colorComponentCounts[comp.color]++;
+            }
+
+            if (size === 1) {
+                s += 1;
+            } else if (size === 2) {
+                s += 15 + open * 2;
+            } else if (size === 3) {
+                s += 45 + open * 4;
+            } else if (size === 4) {
+                s += 28 + open * 2;
+            } else {
+                s += Math.min(120, size * 9);
+            }
         }
 
-        s += occupied * 2;
-        s *= t.weight;
-
-        if (s > best1) {
-            best2 = best1;
-            best1 = s;
-        } else if (s > best2) {
-            best2 = s;
+        let fragmentation = 0;
+        for (let c = 1; c <= 4; c++) {
+            if (colorComponentCounts[c] > 2) fragmentation += (colorComponentCounts[c] - 2) * 6;
         }
+
+        return s - fragmentation;
     }
 
-    return best1 + best2 * 0.5;
-}
-
-function dangerPenalty(boardState) {
-    const heights = columnHeights(boardState);
-    let penalty = 0;
-
-    if (boardState[BOARD_GAMEOVER_Y]?.[BOARD_GAMEOVER_X] !== COLORS.EMPTY) {
-        penalty += 2000000;
-    }
-
-    if (heights[BOARD_GAMEOVER_X] >= BOARD_GAMEOVER_Y + 1) {
-        penalty += 250000;
-    }
-
-    if (heights[BOARD_GAMEOVER_X] >= BOARD_GAMEOVER_Y - 1) {
-        penalty += 80000;
-    }
-
-    for (let y = Math.max(0, BOARD_GAMEOVER_Y - 2); y <= BOARD_GAMEOVER_Y; y++) {
-        if (boardState[y]?.[BOARD_GAMEOVER_X] !== COLORS.EMPTY) {
-            penalty += 25000;
-        }
-    }
-
-    return penalty;
-}
-
-function evaluateBoard(boardState) {
-    const heights = columnHeights(boardState);
-    const holes = countHoles(boardState, heights);
-    const maxH = Math.max(...heights);
-    const rough = bumpiness(heights);
-
-    let s = 0;
-
-    s += templateScore(boardState) * 18;
-    s += seedScore(boardState) * 10;
-
-    const comps = findGroupsLoose(boardState);
-    for (const g of comps) {
-        const size = g.cells.length;
-        if (size === 2) s += 10;
-        else if (size === 3) s += 30 + openNeighborCount(boardState, g.cells) * 3;
-        else if (size >= 5) s += Math.min(80, size * 8);
-    }
-
-    s -= holes * 38;
-    s -= rough * 10;
-    s -= maxH * 30;
-    s -= dangerPenalty(boardState);
-
-    if (maxH >= H - 3) s -= 120;
-    if (maxH >= H - 2) s -= 260;
-
-    const counts = [0, 0, 0, 0, 0];
-    for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-            const v = boardState[y][x];
+    function colorBalanceScore(board) {
+        const counts = [0, 0, 0, 0, 0];
+        for (let i = 0; i < board.length; i++) {
+            const v = board[i];
             if (v >= 1 && v <= 4) counts[v]++;
         }
+
+        const sorted = counts.slice(1).sort((a, b) => b - a);
+        return (sorted[0] + sorted[1]) * 0.4 - (sorted[2] + sorted[3]) * 0.7;
     }
-    const sorted = counts.slice(1).sort((a, b) => b - a);
-    s += (sorted[0] + sorted[1]) * 0.6;
-    s -= (sorted[2] + sorted[3]) * 0.8;
 
-    return s;
-}
-
-function chainOutcomeValue(sim) {
-    const chainPart = Math.pow(sim.chains, 2.1) * 35000;
-    const scorePart = sim.score * 8;
-    const attackPart = sim.attack * 1800;
-    const allClearPart = sim.allClear ? 250000 : 0;
-    return chainPart + scorePart + attackPart + allClearPart;
-}
-
-function simulateMove(boardState, piece, placement) {
-    const placed = placePiece(boardState, piece, placement.x, placement.y, placement.rotation);
-    return resolveBoard(placed);
-}
-
-function quickPlacementValue(boardState, sim) {
-    return evaluateBoard(boardState) + chainOutcomeValue(sim) * 0.01;
-}
-
-function leafPseudoDepth4(boardState) {
-    let best = evaluateBoard(boardState);
-
-    const allPlays = [];
-    for (const color of AI_CONFIG.PSEUDO_COLORS) {
-        const dummy = { mainColor: color, subColor: color };
-        const ps = dropPlacements(boardState, dummy);
-
-        for (const p of ps) {
-            const sim = simulateMove(boardState, dummy, p);
-            const value = sim.chains > 0
-                ? chainOutcomeValue(sim) + evaluateBoard(sim.board) * 0.1
-                : evaluateBoard(sim.board) + seedScore(sim.board) * 3;
-            allPlays.push({ value, sim });
+    function fragmentationPenalty(board) {
+        const comps = connectedComponents(board);
+        let p = 0;
+        for (const comp of comps) {
+            if (comp.color === COLORS.GARBAGE || comp.color === COLORS.EMPTY) continue;
+            if (comp.cells.length === 1) p += 14;
+            else if (comp.cells.length === 2) p += 4;
         }
+        return p;
     }
 
-    allPlays.sort((a, b) => b.value - a.value);
-    const limit = Math.min(AI_CONFIG.PSEUDO_BRANCH_LIMIT, allPlays.length);
+    function evaluateBoard(board, pendingOjama) {
+        const heights = computeHeights(board);
+        const holes = countHoles(board, heights);
+        const maxH = Math.max(...heights);
 
-    for (let i = 0; i < limit; i++) {
-        const node = allPlays[i];
-        let v = node.value;
-        if (node.sim.chains === 0) {
-            v += evaluateBoard(node.sim.board) * 0.3;
-        }
-        if (v > best) best = v;
+        let s = 0;
+        s += templateScore(board) * 28;
+        s += seedScore(board) * 12;
+        s += colorBalanceScore(board) * 10;
+
+        s -= holes * 70;
+        s -= bumpiness(heights) * 16;
+        s -= maxH * 30;
+        s -= dangerPenalty(board);
+        s -= fragmentationPenalty(board) * 6;
+        s -= pendingOjama * 60;
+
+        if (maxH >= HEIGHT - 3) s -= 120;
+        if (maxH >= HEIGHT - 2) s -= 260;
+
+        return s;
     }
 
-    return best;
-}
-
-function searchBest(boardState, pieces, depth, memo, rootMove) {
-    const key = `${depth}|${boardToKey(boardState)}|${pieces.map(p => `${p.mainColor}${p.subColor}`).join(',')}`;
-    if (memo.has(key)) return memo.get(key);
-
-    if (depth >= pieces.length) {
-        const ret = { score: leafPseudoDepth4(boardState), move: rootMove || null };
-        memo.set(key, ret);
-        return ret;
-    }
-
-    const piece = pieces[depth];
-    const allPlacements = dropPlacements(boardState, piece);
-
-    if (!allPlacements.length) {
-        const ret = { score: -1e15, move: rootMove || null };
-        memo.set(key, ret);
-        return ret;
-    }
-
-    const candidates = allPlacements.map(p => {
-        const sim = simulateMove(boardState, piece, p);
-        const quick = quickPlacementValue(sim.board, sim);
-        return { ...p, sim, quick };
-    }).sort((a, b) => b.quick - a.quick).slice(0, AI_CONFIG.BEAM_WIDTH);
-
-    let best = { score: -1e15, move: rootMove || null };
-
-    for (const c of candidates) {
-        const nextRoot = depth === 0 ? { x: c.x, y: c.y, rotation: c.rotation } : rootMove;
-
-        let total;
-        if (c.sim.chains > 0) {
-            total = chainOutcomeValue(c.sim) + evaluateBoard(c.sim.board) * 0.1;
-        } else if (depth + 1 >= pieces.length) {
-            total = evaluateBoard(c.sim.board) * 0.25 + leafPseudoDepth4(c.sim.board);
-        } else {
-            const child = searchBest(c.sim.board, pieces, depth + 1, memo, nextRoot);
-            total = evaluateBoard(c.sim.board) * 0.25 + child.score;
+    function buildPseudoPieces(board) {
+        const counts = [0, 0, 0, 0, 0];
+        for (let i = 0; i < board.length; i++) {
+            const v = board[i];
+            if (v >= 1 && v <= 4) counts[v]++;
         }
 
-        if (total > best.score) {
-            best = { score: total, move: nextRoot };
+        const colors = [1, 2, 3, 4]
+            .sort((a, b) => counts[b] - counts[a])
+            .filter(c => counts[c] > 0);
+
+        while (colors.length < 3) {
+            for (let c = 1; c <= 4 && colors.length < 3; c++) {
+                if (!colors.includes(c)) colors.push(c);
+            }
         }
+
+        const out = [];
+        const push = (a, b) => {
+            const k = `${a},${b}`;
+            if (!out.some(p => p.k === k)) out.push({ k, mainColor: a, subColor: b });
+        };
+
+        const pool = colors.slice(0, 3);
+        for (const a of pool) {
+            push(a, a);
+            for (const b of pool) {
+                push(a, b);
+            }
+        }
+
+        for (let a = 1; a <= 4; a++) {
+            for (let b = 1; b <= 4; b++) {
+                if (out.length >= 6) break;
+                push(a, b);
+            }
+            if (out.length >= 6) break;
+        }
+
+        return out.slice(0, 6);
     }
 
-    memo.set(key, best);
-    return best;
-}
+    function chainOutcomeValue(sim, pendingOjama) {
+        const chainPart = sim.chains > 0 ? Math.pow(sim.chains, 2.7) * 40000 : 0;
+        const scorePart = sim.score * 6;
+        const attackLeft = Math.max(0, sim.attack - pendingOjama);
+        const cancelPart = Math.min(sim.attack, pendingOjama) * 1200;
+        const attackPart = attackLeft * 2600;
+        const allClearPart = sim.allClear ? 180000 : 0;
+        return chainPart + scorePart + attackPart + cancelPart + allClearPart;
+    }
 
-function chooseBestMove(boardFlat, piecesFlat) {
-    const b = flatToBoard(boardFlat);
-    const pieces = piecesFromFlat(piecesFlat);
+    function leafRollout(board, pendingOjama) {
+        let best = evaluateBoard(board, pendingOjama);
+        const pseudos = buildPseudoPieces(board);
 
-    if (!pieces.length) return null;
+        for (const piece of pseudos) {
+            const placeList = placements(board, piece).slice(0, CONFIG.LEAF_BEAM_WIDTH);
+            for (const p of placeList) {
+                const sim = simulateMove(board, piece, p.x, p.y, p.rotation, pendingOjama);
+                const v = chainOutcomeValue(sim, pendingOjama) + evaluateBoard(sim.board, pendingOjama) * 0.2 + seedScore(sim.board) * 3;
+                if (v > best) best = v;
+            }
+        }
 
-    const memo = new Map();
-    const result = searchBest(b, pieces, 0, memo, null);
-    return result.move || null;
-}
+        return best;
+    }
 
-self.onmessage = (event) => {
-    const data = event.data || {};
-    if (data.type !== 'solve') return;
+    function simulateMove(board, piece, x, y, rotation, pendingOjama) {
+        const placed = placePiece(board, piece, x, y, rotation);
+        const resolved = resolveBoard(placed, pendingOjama);
+        return resolved;
+    }
 
-    try {
-        const boardFlat = data.board instanceof Int32Array ? data.board : Int32Array.from(data.board || []);
-        const piecesFlat = data.pieces instanceof Int32Array ? data.pieces : Int32Array.from(data.pieces || []);
-        const move = chooseBestMove(boardFlat, piecesFlat);
+    function search(board, pieces, depth, pendingOjama, memo, stats) {
+        const key = `${depth}|${pendingOjama}|${boardKey(board)}|${pieces.map(p => `${p.mainColor}${p.subColor}`).join('|')}`;
+        const cached = TRANS_TABLE.get(key);
+        if (cached !== undefined) return cached;
 
-        self.postMessage({
-            type: 'result',
-            move
+        if (depth >= pieces.length) {
+            const leaf = leafRollout(board, pendingOjama);
+            TRANS_TABLE.set(key, leaf);
+            return leaf;
+        }
+
+        const piece = pieces[depth];
+        const list = placements(board, piece);
+        if (!list.length) {
+            const fail = -1e18;
+            TRANS_TABLE.set(key, fail);
+            return fail;
+        }
+
+        const nodes = [];
+        for (const p of list) {
+            const sim = simulateMove(board, piece, p.x, p.y, p.rotation, pendingOjama);
+            stats.nodes++;
+
+            const quick =
+                chainOutcomeValue(sim, pendingOjama) * 1.0 +
+                evaluateBoard(sim.board, pendingOjama) * 0.20 +
+                seedScore(sim.board) * 0.10;
+
+            nodes.push({ p, sim, quick });
+        }
+
+        nodes.sort((a, b) => b.quick - a.quick);
+
+        const beam = nodes.slice(0, CONFIG.BEAM_WIDTH);
+        let best = -1e18;
+
+        for (const node of beam) {
+            const child = search(node.sim.board, pieces, depth + 1, pendingOjama, memo, stats);
+            const total =
+                chainOutcomeValue(node.sim, pendingOjama) +
+                child * 0.82 +
+                evaluateBoard(node.sim.board, pendingOjama) * 0.18;
+
+            if (total > best) best = total;
+        }
+
+        TRANS_TABLE.set(key, best);
+        return best;
+    }
+
+    function chooseBestMove(state) {
+        const board = state.board;
+        const pieces = state.pieces;
+        const pendingOjama = state.pendingOjama | 0;
+        const stats = { nodes: 0 };
+
+        if (!pieces.length || board.length !== WIDTH * HEIGHT) {
+            return { move: null, score: -1e18, stats };
+        }
+
+        TRANS_TABLE.clear();
+
+        const root = placements(board, pieces[0]);
+        if (!root.length) {
+            return { move: null, score: -1e18, stats };
+        }
+
+        const nodes = [];
+        for (const p of root) {
+            const sim = simulateMove(board, pieces[0], p.x, p.y, p.rotation, pendingOjama);
+            stats.nodes++;
+
+            const child = search(sim.board, pieces, 1, pendingOjama, TRANS_TABLE, stats);
+            const total =
+                chainOutcomeValue(sim, pendingOjama) +
+                child * 0.82 +
+                evaluateBoard(sim.board, pendingOjama) * 0.18;
+
+            nodes.push({
+                move: { x: p.x, y: p.y, rotation: p.rotation },
+                score: total
+            });
+        }
+
+        nodes.sort((a, b) => b.score - a.score);
+        const best = nodes[0] || { move: null, score: -1e18 };
+
+        return {
+            move: best.move,
+            score: best.score,
+            stats
+        };
+    }
+
+    function simulateSearch(state) {
+        const board = state.boardBuffer instanceof Uint8Array ? state.boardBuffer : new Uint8Array(state.boardBuffer);
+        const pieceBuffer = state.pieceBuffer instanceof Uint8Array ? state.pieceBuffer : new Uint8Array(state.pieceBuffer);
+
+        const pieces = [];
+        for (let i = 0; i < 3; i++) {
+            const p = pieceFromBuffer(pieceBuffer, i * 2);
+            if (p) pieces.push(p);
+        }
+
+        return chooseBestMove({
+            board,
+            pieces,
+            pendingOjama: state.pendingOjama | 0
         });
-    } catch (err) {
-        self.postMessage({
-            type: 'error',
-            message: err?.message || String(err)
-        });
     }
-};
 
-self.postMessage({ type: 'ready' });
+    self.postMessage({ type: 'ready' });
+
+    self.onmessage = (ev) => {
+        const msg = ev.data || {};
+        if (msg.type !== 'search') return;
+
+        const start = performance.now();
+        try {
+            const result = simulateSearch(msg.state);
+            const elapsedMs = Math.round(performance.now() - start);
+
+            self.postMessage({
+                type: 'result',
+                jobId: msg.jobId,
+                move: result.move,
+                score: result.score,
+                stats: {
+                    nodes: result.stats.nodes,
+                    elapsedMs
+                }
+            });
+        } catch (err) {
+            self.postMessage({
+                type: 'error',
+                jobId: msg.jobId,
+                message: err && err.message ? err.message : String(err)
+            });
+        }
+    };
+})();
