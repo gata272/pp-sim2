@@ -1,328 +1,358 @@
 /* puyoAI.js
- * Worker-backed AI wrapper
- * - Uses current piece + NEXT1 + NEXT2
- * - Keeps the heuristic/search structure from your pasted AI
- * - Moves heavy work off the main thread
+ * Worker-based Puyo AI
+ * - current piece + NEXT1 + NEXT2 exact search
+ * - beam search + pseudo leaf rollout
+ * - GTR / key-stack / fron / stair / valley template scoring
+ * - Worker snapshot uses transferable ArrayBuffers
  */
 (function () {
     'use strict';
 
     const AI_CONFIG = {
-        AUTO_TICK_MS: 120,
-        WORKER_TIMEOUT_MS: 6000
+        WORKER_URL: 'puyoAI.worker.js',
+        AUTO_TICK_MS: 140,
+        THINK_TIMEOUT_MS: 12000
     };
 
-    const W = typeof WIDTH !== 'undefined' ? WIDTH : 6;
-    const H = typeof HEIGHT !== 'undefined' ? HEIGHT : 14;
+    const AI_STATE = {
+        worker: null,
+        ready: false,
+        readyPromise: null,
+        readyResolve: null,
+        readyReject: null,
+        busy: false,
+        autoEnabled: false,
+        autoTimer: null,
+        jobSeq: 0,
+        pendingJobs: new Map(),
+        booted: false
+    };
 
-    let worker = null;
-    let pendingJob = null;
-    let autoEnabled = false;
-    let autoTimer = null;
-    let busy = false;
-    let booted = false;
+    const getWidth = () => (typeof WIDTH !== 'undefined' ? WIDTH : 6);
+    const getHeight = () => (typeof HEIGHT !== 'undefined' ? HEIGHT : 14);
+    const getHiddenRows = () => (typeof HIDDEN_ROWS !== 'undefined' ? HIDDEN_ROWS : 2);
 
-    function setStatus(text) {
+    function updateStatus(text) {
         const el = document.getElementById('ai-status');
         if (el) el.textContent = text;
     }
 
     function updateAutoButton() {
         const btn = document.getElementById('ai-auto-button');
-        if (btn) btn.textContent = autoEnabled ? 'AI自動: ON' : 'AI自動: OFF';
+        if (btn) btn.textContent = AI_STATE.autoEnabled ? 'AI自動: ON' : 'AI自動: OFF';
     }
 
-    function safeBoard() {
-        if (typeof board === 'undefined' || !Array.isArray(board)) return null;
-        return board;
+    function getGameState() {
+        return typeof gameState !== 'undefined' ? gameState : 'playing';
     }
 
-    function safeCurrentPuyo() {
+    function getCurrentPuyo() {
         if (typeof currentPuyo === 'undefined' || !currentPuyo) return null;
         return currentPuyo;
     }
 
-    function getQueueSnapshot() {
+    function getQueueArray() {
         if (typeof window.getNextQueue === 'function') {
             const q = window.getNextQueue();
             return Array.isArray(q) ? q : [];
         }
         if (typeof nextQueue !== 'undefined' && Array.isArray(nextQueue)) {
-            return nextQueue.map(pair => pair.slice());
+            return nextQueue.map(pair => Array.isArray(pair) ? pair.slice() : [0, 0]);
         }
         return [];
     }
 
     function getQueueIndex() {
-        return (typeof queueIndex === 'number' && Number.isFinite(queueIndex)) ? queueIndex : 0;
+        if (typeof queueIndex !== 'undefined' && Number.isFinite(queueIndex)) return queueIndex;
+        return 0;
     }
 
-    function boardSnapshotFlat() {
-        const b = safeBoard();
-        if (!b) return null;
+    function getPendingOjama() {
+        if (typeof pendingOjama !== 'undefined' && Number.isFinite(pendingOjama)) return pendingOjama;
+        return 0;
+    }
 
-        const flat = new Int32Array(W * H);
+    function flattenBoard() {
+        const W = getWidth();
+        const H = getHeight();
+        const out = new Uint8Array(W * H);
+
+        if (typeof board === 'undefined' || !Array.isArray(board)) {
+            return out;
+        }
+
         for (let y = 0; y < H; y++) {
+            const row = Array.isArray(board[y]) ? board[y] : [];
             for (let x = 0; x < W; x++) {
-                flat[y * W + x] = b[y]?.[x] ?? 0;
+                out[y * W + x] = row[x] || 0;
             }
         }
-        return flat;
+        return out;
     }
 
-    function piecesSnapshotFlat() {
-        const cur = safeCurrentPuyo();
-        if (!cur) return null;
+    function readVisiblePieces() {
+        const cur = getCurrentPuyo();
+        const q = getQueueArray();
+        const qi = getQueueIndex();
 
-        const q = getQueueSnapshot();
-        if (!Array.isArray(q) || q.length < 2) return null;
-
-        const idx = getQueueIndex();
-        const p1 = q[idx] || [0, 0];
-        const p2 = q[idx + 1] || [0, 0];
-
-        return new Int32Array([
-            cur.subColor || 0,
-            cur.mainColor || 0,
-            p1[0] || 0,
-            p1[1] || 0,
-            p2[0] || 0,
-            p2[1] || 0
-        ]);
-    }
-
-    function terminateWorker() {
-        if (worker) {
-            try {
-                worker.terminate();
-            } catch (_) {}
+        const pieces = [];
+        if (cur) {
+            pieces.push({ mainColor: cur.mainColor | 0, subColor: cur.subColor | 0 });
         }
-        worker = null;
+
+        const p1 = q[qi];
+        const p2 = q[qi + 1];
+
+        if (Array.isArray(p1) && p1.length >= 2) {
+            pieces.push({ mainColor: p1[1] | 0, subColor: p1[0] | 0 });
+        }
+        if (Array.isArray(p2) && p2.length >= 2) {
+            pieces.push({ mainColor: p2[1] | 0, subColor: p2[0] | 0 });
+        }
+
+        return pieces;
     }
 
     function ensureWorker() {
-        if (worker) return worker;
+        if (AI_STATE.worker) return AI_STATE.readyPromise || Promise.resolve();
 
-        try {
-            worker = new Worker('./puyo-ai-worker.js', { type: 'module' });
+        AI_STATE.readyPromise = new Promise((resolve, reject) => {
+            AI_STATE.readyResolve = resolve;
+            AI_STATE.readyReject = reject;
 
-            worker.onmessage = (event) => {
-                const data = event.data || {};
-                if (data.type === 'ready') {
-                    setStatus('AI待機中');
+            try {
+                const worker = new Worker(AI_CONFIG.WORKER_URL);
+                AI_STATE.worker = worker;
+
+                worker.onmessage = (ev) => {
+                    const msg = ev.data || {};
+                    if (msg.type === 'ready') {
+                        AI_STATE.ready = true;
+                        updateStatus('AI待機中');
+                        if (AI_STATE.readyResolve) AI_STATE.readyResolve(true);
+                        AI_STATE.readyResolve = null;
+                        AI_STATE.readyReject = null;
+                        return;
+                    }
+
+                    if (msg.type === 'result') {
+                        const job = AI_STATE.pendingJobs.get(msg.jobId);
+                        if (!job) return;
+                        AI_STATE.pendingJobs.delete(msg.jobId);
+                        job.resolve(msg);
+                        return;
+                    }
+
+                    if (msg.type === 'error') {
+                        const job = AI_STATE.pendingJobs.get(msg.jobId);
+                        if (job) {
+                            AI_STATE.pendingJobs.delete(msg.jobId);
+                            job.reject(new Error(msg.message || 'AI worker error'));
+                        }
+                        updateStatus('AIエラー');
+                    }
+                };
+
+                worker.onerror = (err) => {
+                    console.error('AI worker error:', err);
+                    AI_STATE.ready = false;
+                    if (AI_STATE.readyReject) AI_STATE.readyReject(err);
+                    AI_STATE.readyResolve = null;
+                    AI_STATE.readyReject = null;
+                    updateStatus('AI worker初期化失敗');
+                };
+            } catch (err) {
+                console.error('Failed to create worker:', err);
+                AI_STATE.ready = false;
+                if (AI_STATE.readyReject) AI_STATE.readyReject(err);
+                AI_STATE.readyResolve = null;
+                AI_STATE.readyReject = null;
+                updateStatus('AI worker初期化失敗');
+            }
+        });
+
+        return AI_STATE.readyPromise;
+    }
+
+    function packState() {
+        const boardBuffer = flattenBoard();
+        const pieces = readVisiblePieces();
+        const pieceBuffer = new Uint8Array(6); // current + NEXT1 + NEXT2, each [main, sub]
+        for (let i = 0; i < Math.min(3, pieces.length); i++) {
+            pieceBuffer[i * 2] = pieces[i].mainColor | 0;
+            pieceBuffer[i * 2 + 1] = pieces[i].subColor | 0;
+        }
+
+        return {
+            width: getWidth(),
+            height: getHeight(),
+            hiddenRows: getHiddenRows(),
+            boardBuffer,
+            pieceBuffer,
+            pendingOjama: getPendingOjama()
+        };
+    }
+
+    function requestBestMove() {
+        return new Promise(async (resolve, reject) => {
+            try {
+                await ensureWorker();
+                if (!AI_STATE.worker || !AI_STATE.ready) {
+                    reject(new Error('AI worker not ready'));
                     return;
                 }
 
-                if (!pendingJob) return;
+                const jobId = ++AI_STATE.jobSeq;
+                const state = packState();
 
-                if (pendingJob.timer) clearTimeout(pendingJob.timer);
-                const job = pendingJob;
-                pendingJob = null;
+                AI_STATE.pendingJobs.set(jobId, { resolve, reject });
 
-                if (data.type === 'result') {
-                    job.resolve(data.move || null);
-                } else {
-                    setStatus('AIエラー');
-                    job.reject(new Error(data.message || 'AI worker error'));
-                }
-            };
-
-            worker.onerror = (err) => {
-                console.error('AI worker error:', err);
-                if (pendingJob) {
-                    if (pendingJob.timer) clearTimeout(pendingJob.timer);
-                    const job = pendingJob;
-                    pendingJob = null;
-                    job.reject(err instanceof Error ? err : new Error('AI worker error'));
-                }
-                setStatus('AIエラー');
-                terminateWorker();
-            };
-
-            worker.onmessageerror = (err) => {
-                console.error('AI worker message error:', err);
-                if (pendingJob) {
-                    if (pendingJob.timer) clearTimeout(pendingJob.timer);
-                    const job = pendingJob;
-                    pendingJob = null;
-                    job.reject(new Error('AI worker message error'));
-                }
-                setStatus('AIエラー');
-                terminateWorker();
-            };
-        } catch (err) {
-            console.error('Failed to create AI worker:', err);
-            setStatus('AIエラー');
-            terminateWorker();
-        }
-
-        return worker;
-    }
-
-    function requestMove() {
-        return new Promise((resolve, reject) => {
-            if (typeof gameState !== 'undefined' && gameState !== 'playing') {
-                reject(new Error('not playing'));
-                return;
-            }
-
-            const b = boardSnapshotFlat();
-            const pieces = piecesSnapshotFlat();
-
-            if (!b || !pieces) {
-                reject(new Error('snapshot unavailable'));
-                return;
-            }
-
-            const w = ensureWorker();
-            if (!w) {
-                reject(new Error('worker unavailable'));
-                return;
-            }
-
-            const timer = setTimeout(() => {
-                if (pendingJob && pendingJob.timer === timer) {
-                    pendingJob = null;
-                }
-                terminateWorker();
-                reject(new Error('worker timeout'));
-            }, AI_CONFIG.WORKER_TIMEOUT_MS);
-
-            pendingJob = { resolve, reject, timer };
-
-            try {
-                w.postMessage(
-                    { type: 'solve', board: b, pieces },
-                    [b.buffer, pieces.buffer]
+                AI_STATE.worker.postMessage(
+                    {
+                        type: 'search',
+                        jobId,
+                        state
+                    },
+                    [state.boardBuffer.buffer, state.pieceBuffer.buffer]
                 );
+
+                setTimeout(() => {
+                    const job = AI_STATE.pendingJobs.get(jobId);
+                    if (job) {
+                        AI_STATE.pendingJobs.delete(jobId);
+                        job.reject(new Error('AI search timeout'));
+                        updateStatus('AI思考タイムアウト');
+                    }
+                }, AI_CONFIG.THINK_TIMEOUT_MS);
             } catch (err) {
-                clearTimeout(timer);
-                pendingJob = null;
                 reject(err);
             }
         });
     }
 
     function applyMove(move) {
-        const cur = safeCurrentPuyo();
+        const cur = getCurrentPuyo();
         if (!cur || !move) return false;
 
-        cur.mainX = move.x;
-        cur.mainY = move.y;
-        cur.rotation = move.rotation;
+        cur.mainX = move.x | 0;
+        cur.mainY = move.y | 0;
+        cur.rotation = move.rotation | 0;
 
         if (typeof renderBoard === 'function') renderBoard();
         return true;
     }
 
-    async function runOnce() {
-        if (busy) return;
+    function hardDropCurrent() {
+        if (typeof hardDrop === 'function') {
+            hardDrop();
+            return;
+        }
+        if (typeof lockPuyo === 'function') {
+            lockPuyo();
+        }
+    }
 
-        if (typeof gameState !== 'undefined' && gameState !== 'playing') {
-            setStatus('AI待機中');
+    async function runOneMove() {
+        if (AI_STATE.busy) return;
+        if (getGameState() !== 'playing') {
+            updateStatus('AI待機中');
+            return;
+        }
+        if (!getCurrentPuyo()) {
+            updateStatus('AI待機中');
             return;
         }
 
-        if (!safeCurrentPuyo()) {
-            setStatus('AI待機中');
-            return;
-        }
-
-        busy = true;
-        setStatus('AI思考中...');
+        AI_STATE.busy = true;
+        updateStatus('AI思考中...');
 
         try {
-            const move = await requestMove();
-
-            if (!move) {
-                setStatus('手が見つかりません');
+            const result = await requestBestMove();
+            if (!result || !result.move) {
+                updateStatus('手が見つかりません');
                 return;
             }
 
-            if (!applyMove(move)) {
-                setStatus('AIエラー');
-                return;
-            }
-
-            if (typeof hardDrop === 'function') {
-                hardDrop();
-            }
-
-            setStatus('AI実行完了');
+            applyMove(result.move);
+            hardDropCurrent();
+            updateStatus('AI実行完了');
         } catch (err) {
             console.error('AI error:', err);
-            if (String(err?.message || err).includes('not playing')) {
-                setStatus('AI待機中');
-            } else {
-                setStatus('AIエラー');
-            }
+            updateStatus('AIエラー');
         } finally {
-            busy = false;
+            AI_STATE.busy = false;
         }
     }
 
-    function tickAuto() {
-        if (!autoEnabled || busy) return;
-
-        if (typeof gameState !== 'undefined' && gameState !== 'playing') {
-            setStatus('AI待機中');
-            return;
-        }
-
-        if (!safeCurrentPuyo()) {
-            setStatus('AI待機中');
-            return;
-        }
-
-        runOnce();
+    function startAutoLoop() {
+        stopAutoLoop();
+        AI_STATE.autoTimer = setInterval(() => {
+            if (!AI_STATE.autoEnabled || AI_STATE.busy) return;
+            if (getGameState() !== 'playing') return;
+            if (!getCurrentPuyo()) return;
+            runOneMove();
+        }, AI_CONFIG.AUTO_TICK_MS);
     }
 
-    function startAuto() {
-        stopAuto();
-        autoTimer = setInterval(tickAuto, AI_CONFIG.AUTO_TICK_MS);
-    }
-
-    function stopAuto() {
-        if (autoTimer) {
-            clearInterval(autoTimer);
-            autoTimer = null;
+    function stopAutoLoop() {
+        if (AI_STATE.autoTimer) {
+            clearInterval(AI_STATE.autoTimer);
+            AI_STATE.autoTimer = null;
         }
     }
 
-    function boot() {
-        if (booted) return;
-        booted = true;
+    function initUI() {
         updateAutoButton();
-        setStatus('AI待機中');
-        ensureWorker();
+        updateStatus('AI待機中');
     }
 
     window.runPuyoAI = function () {
-        runOnce();
+        runOneMove();
     };
 
     window.toggleAIAuto = function () {
-        autoEnabled = !autoEnabled;
+        AI_STATE.autoEnabled = !AI_STATE.autoEnabled;
         updateAutoButton();
 
-        if (autoEnabled) {
-            setStatus('AI自動起動');
-            startAuto();
-            runOnce();
+        if (AI_STATE.autoEnabled) {
+            updateStatus('AI自動起動');
+            startAutoLoop();
+            runOneMove();
         } else {
-            stopAuto();
-            setStatus('AI待機中');
+            stopAutoLoop();
+            updateStatus('AI待機中');
         }
     };
 
     window.PuyoAI = {
-        requestMove,
-        runOnce
+        requestBestMove,
+        applyMove,
+        ensureWorker,
+        startAutoLoop,
+        stopAutoLoop
     };
+
+    function boot() {
+        if (AI_STATE.booted) return;
+        AI_STATE.booted = true;
+        initUI();
+        ensureWorker().catch((err) => {
+            console.error(err);
+            updateStatus('AI worker初期化失敗');
+        });
+    }
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', boot);
     } else {
         boot();
     }
+
+    window.addEventListener('beforeunload', () => {
+        stopAutoLoop();
+        if (AI_STATE.worker) {
+            AI_STATE.worker.terminate();
+            AI_STATE.worker = null;
+        }
+    });
 })();
