@@ -1,37 +1,21 @@
 /* puyoAI.js
- * GTR-first + chain-search AI for Puyo Puyo Simulator
- * - current piece + NEXT1 + NEXT2
- * - GTR opening policy first
- * - Beam search fallback with future-chain biased evaluation
- * - Works with puyoSim.js globals
+ * GTR-opening + beam search AI for Puyo Puyo Simulator
+ * - First 4 turns: GTR-only policy
+ * - After opening: beam search with future-chain evaluation
+ * - Uses current piece + NEXT1 + NEXT2
+ * - Works with the existing puyoSim.js globals
  */
 (function () {
     'use strict';
 
-    // ---------- Settings ----------
+    // ========= Settings =========
     const AI_CONFIG = {
-        SEARCH_DEPTH: 3,
-        BEAM_WIDTH: 12,
-        LEAF_BEAM_WIDTH: 8,
         AUTO_TICK_MS: 120,
-        MAX_PLACE_CANDIDATES: 24,
-        PSEUDO_COLORS: [1, 2, 3, 4],
-        PSEUDO_BRANCH_LIMIT: 8,
-        VISUALIZE_DELAY_MS: 0
+        BEAM_WIDTH: 10,
+        LEAF_BRANCH_LIMIT: 6,
+        VISUALIZE_DELAY_MS: 0,
+        OPENING_TURNS: 4
     };
-
-    const DANGER_CELL_X = 2;
-    const DANGER_CELL_Y = 11;
-
-    const TEMPLATE_LIBRARY = [
-        { name: 'left_stair',   mask: [1, 1, 1, 1, 0, 0], profile: [0, 1, 2, 3, 0, 0], weight: 1.00 },
-        { name: 'right_stair',  mask: [0, 0, 1, 1, 1, 1], profile: [0, 0, 3, 2, 1, 0], weight: 1.00 },
-        { name: 'left_gtr',     mask: [1, 1, 1, 1, 1, 0], profile: [0, 1, 2, 2, 1, 0], weight: 1.25 },
-        { name: 'right_gtr',    mask: [0, 1, 1, 1, 1, 1], profile: [0, 1, 2, 2, 1, 0], weight: 1.25 },
-        { name: 'valley',       mask: [1, 1, 1, 1, 1, 1], profile: [2, 1, 0, 0, 1, 2], weight: 1.10 },
-        { name: 'center_tower', mask: [0, 1, 1, 1, 1, 0], profile: [0, 1, 2, 3, 2, 1], weight: 1.05 },
-        { name: 'bridge',       mask: [1, 1, 1, 1, 1, 1], profile: [1, 2, 1, 1, 2, 1], weight: 0.95 }
-    ];
 
     const MEMO = new Map();
 
@@ -40,7 +24,11 @@
     let busy = false;
     let uiInitialized = false;
 
-    // ---------- Small helpers ----------
+    const openingState = {
+        turn: 0
+    };
+
+    // ========= Safe accessors =========
     const getWidth = () => (typeof WIDTH !== 'undefined' ? WIDTH : 6);
     const getHeight = () => (typeof HEIGHT !== 'undefined' ? HEIGHT : 14);
     const getColors = () => (typeof COLORS !== 'undefined' ? COLORS : {
@@ -52,18 +40,12 @@
         GARBAGE: 5
     });
 
-    function cloneBoard(src) {
-        return src.map(row => row.slice());
-    }
-
     function safeBoard() {
-        if (typeof board === 'undefined' || !Array.isArray(board)) return null;
-        return board;
+        return (typeof board !== 'undefined' && Array.isArray(board)) ? board : null;
     }
 
     function safeCurrentPuyo() {
-        if (typeof currentPuyo === 'undefined' || !currentPuyo) return null;
-        return currentPuyo;
+        return (typeof currentPuyo !== 'undefined' && currentPuyo) ? currentPuyo : null;
     }
 
     function safeQueue() {
@@ -82,16 +64,6 @@
         return 0;
     }
 
-    function getScoreFn() {
-        if (typeof scoreToOjama === 'function') return scoreToOjama;
-        return (v) => Math.floor(Math.max(0, v) / 70);
-    }
-
-    function getAllClearBonus() {
-        if (typeof ALL_CLEAR_SCORE_BONUS !== 'undefined') return ALL_CLEAR_SCORE_BONUS;
-        return 2100;
-    }
-
     function updateStatus(text) {
         const el = document.getElementById('ai-status');
         if (el) el.textContent = text;
@@ -99,8 +71,11 @@
 
     function updateAutoButton() {
         const btn = document.getElementById('ai-auto-button');
-        if (!btn) return;
-        btn.textContent = autoEnabled ? 'AI自動: ON' : 'AI自動: OFF';
+        if (btn) btn.textContent = autoEnabled ? 'AI自動: ON' : 'AI自動: OFF';
+    }
+
+    function cloneBoard(src) {
+        return src.map(row => row.slice());
     }
 
     function boardToKey(b) {
@@ -108,20 +83,17 @@
     }
 
     function pieceFromPair(pair) {
-        if (!pair || !Array.isArray(pair) || pair.length < 2) return null;
+        if (!Array.isArray(pair) || pair.length < 2) return null;
         return { subColor: pair[0], mainColor: pair[1] };
     }
 
     function readPieces() {
         const cur = safeCurrentPuyo();
         if (!cur) return [];
-
         const q = safeQueue();
         const idx = safeQueueIndex();
 
-        const pieces = [
-            { mainColor: cur.mainColor, subColor: cur.subColor }
-        ];
+        const pieces = [{ mainColor: cur.mainColor, subColor: cur.subColor }];
 
         for (let i = 0; i < 2; i++) {
             const p = pieceFromPair(q[idx + i]);
@@ -130,28 +102,20 @@
         return pieces;
     }
 
-    function packState() {
-        return {
-            boardState: cloneBoard(safeBoard() || []),
-            currentPiece: safeCurrentPuyo() ? {
-                mainColor: currentPuyo.mainColor,
-                subColor: currentPuyo.subColor,
-                mainX: currentPuyo.mainX,
-                mainY: currentPuyo.mainY,
-                rotation: currentPuyo.rotation
-            } : null,
-            nextPieces: readPieces().slice(1)
-        };
-    }
-
+    // ========= Geometry =========
+    // rotation:
+    // 0 = sub above main
+    // 1 = sub left of main
+    // 2 = sub below main
+    // 3 = sub right of main
     function getPieceCoords(piece, x, y, rotation) {
         let sx = x;
         let sy = y;
 
-        if (rotation === 0) sy = y + 1;      // sub above main
-        else if (rotation === 1) sx = x - 1; // sub left of main
-        else if (rotation === 2) sy = y - 1; // sub below main
-        else if (rotation === 3) sx = x + 1; // sub right of main
+        if (rotation === 0) sy = y + 1;
+        else if (rotation === 1) sx = x - 1;
+        else if (rotation === 2) sy = y - 1;
+        else if (rotation === 3) sx = x + 1;
 
         return [
             { x, y, color: piece.mainColor },
@@ -186,21 +150,18 @@
     function dropPlacements(boardState, piece) {
         const W = getWidth();
         const placements = [];
-
         for (let rot = 0; rot < 4; rot++) {
             for (let x = 0; x < W; x++) {
                 const y = findRestY(boardState, piece, x, rot);
                 if (y !== null) placements.push({ x, y, rotation: rot });
             }
         }
-
         return placements;
     }
 
     function placePiece(boardState, piece, x, y, rotation) {
         const next = cloneBoard(boardState);
         const coords = getPieceCoords(piece, x, y, rotation);
-
         for (const c of coords) {
             if (c.x >= 0 && c.x < getWidth() && c.y >= 0 && c.y < getHeight()) {
                 next[c.y][c.x] = c.color;
@@ -209,6 +170,7 @@
         return next;
     }
 
+    // ========= Core simulation =========
     function gravityOn(boardState) {
         const W = getWidth();
         const H = getHeight();
@@ -245,7 +207,7 @@
                     const cur = stack.pop();
                     group.push(cur);
 
-                    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+                    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
                     for (const [dx, dy] of dirs) {
                         const nx = cur.x + dx;
                         const ny = cur.y + dy;
@@ -275,7 +237,7 @@
         const toClear = new Set();
 
         for (const { x, y } of erasedCoords) {
-            const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
             for (const [dx, dy] of dirs) {
                 const nx = x + dx;
                 const ny = y + dy;
@@ -291,17 +253,27 @@
         }
     }
 
+    function isBoardEmpty(boardState) {
+        const C = getColors();
+        for (let y = 0; y < getHeight(); y++) {
+            for (let x = 0; x < getWidth(); x++) {
+                if (boardState[y][x] !== C.EMPTY) return false;
+            }
+        }
+        return true;
+    }
+
     function groupBonus(size) {
         const table = (typeof BONUS_TABLE !== 'undefined' && BONUS_TABLE.GROUP)
             ? BONUS_TABLE.GROUP
-            : [0, 0, 0, 0, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+            : [0,0,0,0,0,2,3,4,5,6,7,8,9,10,11,12];
         return table[Math.min(size, table.length - 1)] || 0;
     }
 
     function chainBonus(chainNo) {
         const table = (typeof BONUS_TABLE !== 'undefined' && BONUS_TABLE.CHAIN)
             ? BONUS_TABLE.CHAIN
-            : [0, 8, 16, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448, 480, 512];
+            : [0,8,16,32,64,96,128,160,192,224,256,288,320,352,384,416,448,480,512];
         const idx = Math.max(0, Math.min(chainNo - 1, table.length - 1));
         return table[idx] || 0;
     }
@@ -309,7 +281,7 @@
     function colorBonus(colorCount) {
         const table = (typeof BONUS_TABLE !== 'undefined' && BONUS_TABLE.COLOR)
             ? BONUS_TABLE.COLOR
-            : [0, 0, 3, 6, 12];
+            : [0,0,3,6,12];
         return table[Math.min(colorCount, table.length - 1)] || 0;
     }
 
@@ -333,8 +305,13 @@
 
     function resolveBoard(boardState) {
         const C = getColors();
-        const scoreFn = getScoreFn();
-        const acBonus = getAllClearBonus();
+        const scoreFn = (typeof scoreToOjama === 'function')
+            ? scoreToOjama
+            : (v) => Math.floor(Math.max(0, v) / 70);
+
+        const acBonus = (typeof ALL_CLEAR_SCORE_BONUS !== 'undefined')
+            ? ALL_CLEAR_SCORE_BONUS
+            : 2100;
 
         let totalChains = 0;
         let totalScore = 0;
@@ -343,7 +320,6 @@
         while (true) {
             gravityOn(boardState);
             const groups = findGroups(boardState);
-
             if (groups.length === 0) break;
 
             totalChains++;
@@ -363,9 +339,8 @@
 
         gravityOn(boardState);
 
-        const empty = isBoardEmpty(boardState);
         let allClear = false;
-        if (empty) {
+        if (isBoardEmpty(boardState)) {
             allClear = true;
             totalScore += acBonus;
             totalAttack += scoreFn(acBonus);
@@ -380,16 +355,12 @@
         };
     }
 
-    function isBoardEmpty(boardState) {
-        const C = getColors();
-        for (let y = 0; y < getHeight(); y++) {
-            for (let x = 0; x < getWidth(); x++) {
-                if (boardState[y][x] !== C.EMPTY) return false;
-            }
-        }
-        return true;
+    function simulateMove(boardState, piece, x, y, rotation) {
+        const placed = placePiece(boardState, piece, x, y, rotation);
+        return resolveBoard(placed);
     }
 
+    // ========= Evaluation =========
     function columnHeights(boardState) {
         const W = getWidth();
         const H = getHeight();
@@ -410,11 +381,9 @@
     }
 
     function countHoles(boardState, heights) {
-        const W = getWidth();
         const C = getColors();
         let holes = 0;
-
-        for (let x = 0; x < W; x++) {
+        for (let x = 0; x < getWidth(); x++) {
             for (let y = 0; y < heights[x]; y++) {
                 if (boardState[y][x] === C.EMPTY) holes++;
             }
@@ -430,7 +399,7 @@
         let count = 0;
 
         for (const { x, y } of cells) {
-            const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
             for (const [dx, dy] of dirs) {
                 const nx = x + dx;
                 const ny = y + dy;
@@ -465,7 +434,8 @@
                 while (stack.length) {
                     const cur = stack.pop();
                     cells.push(cur);
-                    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+                    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
                     for (const [dx, dy] of dirs) {
                         const nx = cur.x + dx;
                         const ny = cur.y + dy;
@@ -491,26 +461,31 @@
     function dangerPenalty(boardState) {
         const C = getColors();
         const heights = columnHeights(boardState);
+
         let penalty = 0;
+        const x = 2;
+        const y = 11;
 
-        if (!boardState.length) return 0;
+        if (boardState[y][x] !== C.EMPTY) penalty += 1000000;
+        if (heights[x] >= y + 1) penalty += 250000;
+        if (heights[x] >= y - 1) penalty += 80000;
 
-        if (boardState[DANGER_CELL_Y] && boardState[DANGER_CELL_Y][DANGER_CELL_X] !== C.EMPTY) {
-            penalty += 1000000;
+        for (let yy = Math.max(0, y - 2); yy <= y; yy++) {
+            if (boardState[yy][x] !== C.EMPTY) penalty += 25000;
         }
-        if (heights[DANGER_CELL_X] >= DANGER_CELL_Y + 1) {
-            penalty += 250000;
-        }
-        if (heights[DANGER_CELL_X] >= DANGER_CELL_Y - 1) {
-            penalty += 80000;
-        }
-        for (let y = Math.max(0, DANGER_CELL_Y - 2); y <= DANGER_CELL_Y; y++) {
-            if (boardState[y] && boardState[y][DANGER_CELL_X] !== C.EMPTY) {
-                penalty += 25000;
-            }
-        }
+
         return penalty;
     }
+
+    const TEMPLATE_LIBRARY = [
+        { name: 'left_stair',   mask: [1, 1, 1, 1, 0, 0], profile: [0, 1, 2, 3, 0, 0], weight: 1.00 },
+        { name: 'right_stair',  mask: [0, 0, 1, 1, 1, 1], profile: [0, 0, 3, 2, 1, 0], weight: 1.00 },
+        { name: 'left_gtr',     mask: [1, 1, 1, 1, 1, 0], profile: [0, 1, 2, 2, 1, 0], weight: 1.25 },
+        { name: 'right_gtr',    mask: [0, 1, 1, 1, 1, 1], profile: [0, 1, 2, 2, 1, 0], weight: 1.25 },
+        { name: 'valley',       mask: [1, 1, 1, 1, 1, 1], profile: [2, 1, 0, 0, 1, 2], weight: 1.10 },
+        { name: 'center_tower', mask: [0, 1, 1, 1, 1, 0], profile: [0, 1, 2, 3, 2, 1], weight: 1.05 },
+        { name: 'bridge',       mask: [1, 1, 1, 1, 1, 1], profile: [1, 2, 1, 1, 2, 1], weight: 0.95 }
+    ];
 
     function templateScore(boardState) {
         const heights = columnHeights(boardState);
@@ -519,15 +494,11 @@
 
         for (const t of TEMPLATE_LIBRARY) {
             const masked = [];
-            for (let x = 0; x < getWidth(); x++) {
-                if (t.mask[x]) masked.push(x);
-            }
+            for (let x = 0; x < getWidth(); x++) if (t.mask[x]) masked.push(x);
             if (!masked.length) continue;
 
             let base = Infinity;
-            for (const x of masked) {
-                base = Math.min(base, heights[x] - t.profile[x]);
-            }
+            for (const x of masked) base = Math.min(base, heights[x] - t.profile[x]);
             if (!Number.isFinite(base)) continue;
 
             let s = 0;
@@ -574,22 +545,23 @@
                 if (c === C.EMPTY || c === C.GARBAGE) continue;
 
                 if (x + 2 < W && boardState[y][x + 1] === c && boardState[y][x + 2] === c) {
-                    if ((x - 1 >= 0 && boardState[y][x - 1] === C.EMPTY) || (x + 3 < W && boardState[y][x + 3] === C.EMPTY)) {
+                    if ((x - 1 >= 0 && boardState[y][x - 1] === C.EMPTY) ||
+                        (x + 3 < W && boardState[y][x + 3] === C.EMPTY)) {
                         s += 16;
                     }
                 }
 
                 if (y + 2 < H && boardState[y + 1][x] === c && boardState[y + 2][x] === c) {
-                    if ((y - 1 >= 0 && boardState[y - 1][x] === C.EMPTY) || (y + 3 < H && boardState[y + 3][x] === C.EMPTY)) {
+                    if ((y - 1 >= 0 && boardState[y - 1][x] === C.EMPTY) ||
+                        (y + 3 < H && boardState[y + 3][x] === C.EMPTY)) {
                         s += 16;
                     }
                 }
 
                 if (x + 1 < W && y + 1 < H) {
-                    const a = boardState[y][x];
-                    const b = boardState[y][x + 1];
-                    const d = boardState[y + 1][x];
-                    if (a === c && b === c && d === c) s += 20;
+                    if (boardState[y][x] === c && boardState[y][x + 1] === c && boardState[y + 1][x] === c) {
+                        s += 20;
+                    }
                 }
             }
         }
@@ -604,9 +576,8 @@
         const bumpiness = heights.reduce((sum, h, i) => sum + (i > 0 ? Math.abs(h - heights[i - 1]) : 0), 0);
 
         let s = 0;
-
-        s += templateScore(boardState) * 20;
-        s += seedScore(boardState) * 12;
+        s += templateScore(boardState) * 18;
+        s += seedScore(boardState) * 10;
 
         const comps = findGroupsLoose(boardState);
         for (const g of comps) {
@@ -639,9 +610,9 @@
     }
 
     function chainOutcomeValue(sim) {
-        const chainPart = Math.pow(Math.max(0, sim.chains), 2.4) * 50000;
-        const scorePart = sim.score * 4;
-        const attackPart = sim.attack * 1200;
+        const chainPart = Math.pow(sim.chains, 2.1) * 35000;
+        const scorePart = sim.score * 8;
+        const attackPart = sim.attack * 1800;
         const allClearPart = sim.allClear ? 250000 : 0;
         return chainPart + scorePart + attackPart + allClearPart;
     }
@@ -650,16 +621,11 @@
         return evaluateBoard(boardState) + chainOutcomeValue(sim) * 0.01;
     }
 
-    function simulateMove(boardState, piece, x, y, rotation) {
-        const placed = placePiece(boardState, piece, x, y, rotation);
-        return resolveBoard(placed);
-    }
-
-    function leafPseudoDepth4(boardState) {
+    function leafPseudoDepth(boardState) {
         let best = evaluateBoard(boardState);
 
         const allPlays = [];
-        for (const color of AI_CONFIG.PSEUDO_COLORS) {
+        for (const color of [1, 2, 3, 4]) {
             const dummy = { mainColor: color, subColor: color };
             const placements = dropPlacements(boardState, dummy);
 
@@ -668,19 +634,18 @@
                 const value = sim.chains > 0
                     ? chainOutcomeValue(sim) + evaluateBoard(sim.board) * 0.1
                     : evaluateBoard(sim.board) + seedScore(sim.board) * 3;
+
                 allPlays.push({ value, sim });
             }
         }
 
         allPlays.sort((a, b) => b.value - a.value);
-        const limit = Math.min(AI_CONFIG.PSEUDO_BRANCH_LIMIT, allPlays.length);
 
+        const limit = Math.min(AI_CONFIG.LEAF_BRANCH_LIMIT, allPlays.length);
         for (let i = 0; i < limit; i++) {
             const node = allPlays[i];
             let v = node.value;
-            if (node.sim.chains === 0) {
-                v += evaluateBoard(node.sim.board) * 0.3;
-            }
+            if (node.sim.chains === 0) v += evaluateBoard(node.sim.board) * 0.3;
             if (v > best) best = v;
         }
 
@@ -692,7 +657,7 @@
         if (memo.has(key)) return memo.get(key);
 
         if (depth >= pieces.length) {
-            const score = leafPseudoDepth4(boardState);
+            const score = leafPseudoDepth(boardState);
             const ret = { score, move: rootMove || null };
             memo.set(key, ret);
             return ret;
@@ -700,6 +665,7 @@
 
         const piece = pieces[depth];
         const placements = dropPlacements(boardState, piece);
+
         if (!placements.length) {
             const ret = { score: -1e15, move: rootMove || null };
             memo.set(key, ret);
@@ -725,7 +691,7 @@
             if (c.sim.chains > 0) {
                 total = chainOutcomeValue(c.sim) + evaluateBoard(c.sim.board) * 0.1;
             } else if (depth + 1 >= pieces.length) {
-                total = evaluateBoard(c.sim.board) * 0.25 + leafPseudoDepth4(c.sim.board);
+                total = evaluateBoard(c.sim.board) * 0.25 + leafPseudoDepth(c.sim.board);
             } else {
                 const child = searchBest(c.sim.board, pieces, depth + 1, memo, moveHere);
                 total = evaluateBoard(c.sim.board) * 0.25 + child.score;
@@ -740,474 +706,385 @@
         return best;
     }
 
-    // ---------- GTR policy ----------
-    const GTR_POLICY = (() => {
-        const STATE = {
-            turn: 0,
-            family: null,
-            symbolMap: null,
-            history: [],
-            active: false
-        };
+    // ========= Opening (GTR-only) =========
+    function colorLettersForPieces(pieces) {
+        const map = new Map();
+        const letters = ['A', 'B', 'C', 'D'];
+        let next = 0;
 
-        function reset() {
-            STATE.turn = 0;
-            STATE.family = null;
-            STATE.symbolMap = null;
-            STATE.history = [];
-            STATE.active = false;
+        function letterOf(color) {
+            if (!map.has(color)) {
+                map.set(color, letters[Math.min(next, letters.length - 1)]);
+                next++;
+            }
+            return map.get(color);
         }
 
-        function countOccupied(boardState) {
-            const C = getColors();
-            let n = 0;
-            for (let y = 0; y < boardState.length; y++) {
-                const row = boardState[y] || [];
-                for (let x = 0; x < row.length; x++) {
-                    if (row[x] !== C.EMPTY) n++;
+        return pieces.map(p => ({
+            code: `${letterOf(p.subColor)}${letterOf(p.mainColor)}`
+        }));
+    }
+
+    function openingPatternName(codes) {
+        const a = codes[0]?.code || '';
+        const b = codes[1]?.code || '';
+        const c = codes[2]?.code || '';
+
+        if (a === 'AA' && b.startsWith('A') && b[1] !== 'A') return 'AAAB';
+        if (a === 'AA' && b === 'BB') return 'AABB';
+        if ((a === 'AB' && b === 'AB') || (a === 'AB' && b === 'BA')) return 'ABAB';
+        if (a === 'AB' && b === 'AC') return 'ABAC';
+        if (a === 'AA' && (b === 'AB' || b === 'BB' || b === 'BC' || b === 'BD')) return 'AABC';
+        if (c === 'BB') return 'AAAB';
+        return 'GTR';
+    }
+
+    function legalFromSpecs(boardState, piece, specs) {
+        for (const spec of specs) {
+            const x = spec.x;
+            const rot = spec.rotation;
+            const y = findRestY(boardState, piece, x, rot);
+            if (y !== null) return { x, y, rotation: rot };
+        }
+        return null;
+    }
+
+    function openingSpecs(pattern, turn, codes) {
+        const c0 = codes[0]?.code || '';
+        const c1 = codes[1]?.code || '';
+        const c2 = codes[2]?.code || '';
+        const specs = [];
+
+        // 0-based columns:
+        // 1,2 -> x=0
+        // 2,3 -> x=1
+        // 3 -> x=2
+        // 4,5 -> x=3
+        // 5,6 -> x=4
+        // 6 -> x=5
+
+        if (pattern === 'AAAB') {
+            if (turn === 0) {
+                specs.push({ x: 0, rotation: 3 }); // 1,2 横
+                specs.push({ x: 1, rotation: 1 }); // 1,2 横(逆)
+            } else if (turn === 1) {
+                specs.push({ x: 2, rotation: 0 }); // 3列目, B下
+                specs.push({ x: 2, rotation: 2 }); // 3列目, A下(保険)
+            } else if (turn === 2) {
+                if (c2 === 'AA') {
+                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
+                } else if (c2 === 'AB') {
+                    specs.push({ x: 3, rotation: 2 }); // 4列目, A下
+                } else if (c2 === 'AC') {
+                    specs.push({ x: 1, rotation: 2 }); // 2列目, C下
+                } else if (c2 === 'BB') {
+                    specs.push({ x: 3, rotation: 0 }); // 4列目, 縦
+                    specs.push({ x: 3, rotation: 2 });
+                } else if (c2 === 'BC') {
+                    specs.push({ x: 3, rotation: 2 }); // 4列目, C下
+                } else if (c2 === 'CC') {
+                    specs.push({ x: 0, rotation: 3 }); // 1,2 横
+                } else if (c2 === 'CD') {
+                    specs.push({ x: 4, rotation: 3 }); // 5,6 横
+                    specs.push({ x: 5, rotation: 0 }); // 6列目 縦
+                } else {
+                    specs.push({ x: 4, rotation: 3 });
+                    specs.push({ x: 5, rotation: 0 });
+                }
+            } else {
+                // 4手目: できるだけGTR土台の継続
+                if (c2 === 'CC') {
+                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
+                } else if (c2 === 'BC') {
+                    specs.push({ x: 4, rotation: 3 }); // 5,6 横
+                } else if (c2 === 'CD') {
+                    specs.push({ x: 3, rotation: 3 });
+                    specs.push({ x: 5, rotation: 0 });
+                } else {
+                    specs.push({ x: 3, rotation: 3 });
+                    specs.push({ x: 4, rotation: 3 });
+                    specs.push({ x: 5, rotation: 0 });
                 }
             }
-            return n;
         }
 
-        function boardIsOpeningLike(boardState) {
-            return countOccupied(boardState) <= 4;
-        }
-
-        function buildSymbolMap(pieces) {
-            const map = new Map();
-            const order = ['A', 'B', 'C', 'D'];
-
-            for (const piece of pieces) {
-                if (!piece) continue;
-                const colors = [piece.mainColor, piece.subColor];
-                for (const c of colors) {
-                    if (!map.has(c)) {
-                        map.set(c, order[map.size] || 'D');
-                    }
+        if (pattern === 'AABB') {
+            if (turn === 0) {
+                specs.push({ x: 0, rotation: 3 }); // 1,2 横
+            } else if (turn === 1) {
+                specs.push({ x: 0, rotation: 3 }); // 1,2 横
+            } else if (turn === 2) {
+                if (c2 === 'AA') {
+                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
+                } else if (c2 === 'AB') {
+                    specs.push({ x: 0, rotation: 3 }); // 1,2 横(A右)
+                } else if (c2 === 'AC') {
+                    specs.push({ x: 2, rotation: 0 }); // 3列目 C下
+                } else if (c2 === 'BB') {
+                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
+                } else if (c2 === 'BC') {
+                    specs.push({ x: 0, rotation: 2 }); // 1列目 B下
+                } else if (c2 === 'CC') {
+                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
+                } else if (c2 === 'CD') {
+                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
+                    specs.push({ x: 5, rotation: 0 }); // 6列目 縦
+                } else {
+                    specs.push({ x: 3, rotation: 3 });
+                }
+            } else {
+                if (c2 === 'BC') {
+                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
+                    specs.push({ x: 4, rotation: 3 }); // 5,6 横
+                } else if (c2 === 'CD') {
+                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
+                    specs.push({ x: 1, rotation: 2 }); // 2列目 縦
+                } else if (c2 === 'CC') {
+                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
+                } else {
+                    specs.push({ x: 4, rotation: 3 });
+                    specs.push({ x: 5, rotation: 0 });
                 }
             }
-            return map;
         }
 
-        function symbolOf(color, map) {
-            if (!map) return '?';
-            return map.get(color) || '?';
-        }
-
-        function pieceSymbols(piece, map) {
-            return [symbolOf(piece.mainColor, map), symbolOf(piece.subColor, map)];
-        }
-
-        function pieceType(piece, map) {
-            const [a, b] = pieceSymbols(piece, map);
-            return a <= b ? `${a}${b}` : `${b}${a}`;
-        }
-
-        function visiblePiecesFromState(state) {
-            const out = [];
-            if (state.currentPiece) out.push(state.currentPiece);
-            if (Array.isArray(state.nextPieces)) {
-                if (state.nextPieces[0]) out.push(state.nextPieces[0]);
-                if (state.nextPieces[1]) out.push(state.nextPieces[1]);
+        if (pattern === 'ABAB') {
+            if (turn === 0) {
+                specs.push({ x: 0, rotation: 2 }); // 1列目 A下
+                specs.push({ x: 0, rotation: 0 }); // 1列目 B下(保険)
+            } else if (turn === 1) {
+                specs.push({ x: 1, rotation: 2 }); // 2列目 A下
+                specs.push({ x: 1, rotation: 0 }); // 2列目 B下
+            } else {
+                // 3手目以降は GTR の土台へ寄せる
+                if (c2 === 'AA') {
+                    specs.push({ x: 3, rotation: 3 });
+                } else if (c2 === 'AB') {
+                    specs.push({ x: 0, rotation: 3 }); // A右
+                } else if (c2 === 'AC') {
+                    specs.push({ x: 2, rotation: 0 }); // C下
+                } else if (c2 === 'BB') {
+                    specs.push({ x: 3, rotation: 3 });
+                } else if (c2 === 'BC') {
+                    specs.push({ x: 0, rotation: 2 }); // B下
+                } else if (c2 === 'CC') {
+                    specs.push({ x: 3, rotation: 3 });
+                } else if (c2 === 'CD') {
+                    specs.push({ x: 2, rotation: 3 });
+                    specs.push({ x: 5, rotation: 0 });
+                } else {
+                    specs.push({ x: 3, rotation: 3 });
+                }
             }
-            return out;
         }
 
-        function detectFamily(pieces, map) {
-            if (pieces.length < 2) return null;
-
-            const t0 = pieces[0] ? pieceType(pieces[0], map) : null;
-            const t1 = pieces[1] ? pieceType(pieces[1], map) : null;
-
-            if (t0 === 'AA') {
-                if (t1 === 'AA' || t1 === 'BB') return 'AABB';
-                return 'AAAB';
+        if (pattern === 'ABAC') {
+            if (turn === 0) {
+                specs.push({ x: 1, rotation: 3 }); // 2,3 横（A左）
+                specs.push({ x: 0, rotation: 0 }); // 1列目 縦（A下）
+            } else if (turn === 1) {
+                // 2通りのうち、今の盤面に合うほうを後段で選ぶ
+                if (c1 === 'AA' || c1 === 'AD' || c1 === 'BC' || c1 === 'DD') {
+                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
+                    specs.push({ x: 3, rotation: 2 }); // 4列目 縦
+                } else if (c1 === 'CC' || c1 === 'BD') {
+                    specs.push({ x: 0, rotation: 3 }); // 1,2 横
+                    specs.push({ x: 0, rotation: 2 }); // 1列目 縦
+                } else {
+                    specs.push({ x: 2, rotation: 3 });
+                    specs.push({ x: 0, rotation: 0 });
+                }
+            } else if (turn === 2) {
+                if (c2 === 'AA') {
+                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
+                } else if (c2 === 'AD') {
+                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
+                } else if (c2 === 'BC') {
+                    specs.push({ x: 3, rotation: 2 }); // 4列目 B下
+                } else if (c2 === 'DD') {
+                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
+                } else if (c2 === 'CC') {
+                    specs.push({ x: 0, rotation: 3 }); // 1,2 横
+                } else if (c2 === 'BD') {
+                    specs.push({ x: 0, rotation: 2 }); // 1列目 B下
+                } else if (c2 === 'CD') {
+                    specs.push({ x: 3, rotation: 0 }); // 4列目 D下(= main下)
+                } else if (c2 === 'AC') {
+                    specs.push({ x: 2, rotation: 2 }); // 3列目 A下
+                } else if (c2 === 'AB') {
+                    specs.push({ x: 1, rotation: 3 }); // 2,3 横
+                } else if (c2 === 'BB') {
+                    specs.push({ x: 0, rotation: 3 }); // 1,2 横
+                } else {
+                    specs.push({ x: 2, rotation: 3 });
+                    specs.push({ x: 3, rotation: 3 });
+                }
+            } else {
+                specs.push({ x: 3, rotation: 3 });
+                specs.push({ x: 4, rotation: 3 });
+                specs.push({ x: 5, rotation: 0 });
             }
-
-            if (t0 === 'AB' && t1 === 'AB') {
-                return 'ABAB';
-            }
-
-            const distinct = new Set();
-            for (const p of pieces) {
-                const ss = pieceSymbols(p, map);
-                distinct.add(ss[0]);
-                distinct.add(ss[1]);
-            }
-
-            if (distinct.size === 3) {
-                return (t0 === 'AA') ? 'AABC' : 'ABAC';
-            }
-
-            if (distinct.size >= 4) return 'AABC';
-
-            return null;
         }
 
-        function getPieceCoords(piece, x, y, rotation) {
-            let sx = x;
-            let sy = y;
+        if (pattern === 'AABC') {
+            if (turn === 0) {
+                specs.push({ x: 0, rotation: 3 }); // 1,2 横
+            } else if (turn === 1) {
+                if (c1 === 'AB') {
+                    specs.push({ x: 4, rotation: 1 }); // 5,6 横 (B right)
+                } else if (c1 === 'BB') {
+                    specs.push({ x: 4, rotation: 3 }); // 5,6 横
+                } else if (c1 === 'BC') {
+                    specs.push({ x: 4, rotation: 2 }); // 5列目 縦 (B down)
+                } else if (c1 === 'BD') {
+                    specs.push({ x: 4, rotation: 1 }); // 5,6 横 (B left)
+                } else {
+                    specs.push({ x: 1, rotation: 3 });
+                    specs.push({ x: 4, rotation: 3 });
+                }
+            } else if (turn === 2) {
+                if (c2 === 'AA') {
+                    specs.push({ x: 1, rotation: 3 }); // 2,3 横
+                } else if (c2 === 'AD') {
+                    specs.push({ x: 1, rotation: 3 }); // 2,3 横
+                } else if (c2 === 'DD') {
+                    specs.push({ x: 0, rotation: 3 }); // 1,2 横
+                } else {
+                    specs.push({ x: 1, rotation: 3 });
+                    specs.push({ x: 3, rotation: 3 });
+                }
+            } else {
+                specs.push({ x: 3, rotation: 3 });
+                specs.push({ x: 4, rotation: 3 });
+                specs.push({ x: 5, rotation: 0 });
+            }
+        }
 
-            if (rotation === 0) sy = y + 1;
-            else if (rotation === 1) sx = x - 1;
-            else if (rotation === 2) sy = y - 1;
-            else if (rotation === 3) sx = x + 1;
+        if (pattern === 'GTR') {
+            if (turn === 0) {
+                specs.push({ x: 0, rotation: 3 });
+                specs.push({ x: 0, rotation: 0 });
+            } else if (turn === 1) {
+                specs.push({ x: 2, rotation: 0 });
+                specs.push({ x: 1, rotation: 3 });
+            } else if (turn === 2) {
+                specs.push({ x: 3, rotation: 3 });
+                specs.push({ x: 3, rotation: 2 });
+                specs.push({ x: 4, rotation: 3 });
+                specs.push({ x: 5, rotation: 0 });
+            } else {
+                specs.push({ x: 3, rotation: 3 });
+                specs.push({ x: 4, rotation: 3 });
+                specs.push({ x: 5, rotation: 0 });
+            }
+        }
 
+        return specs;
+    }
+
+    function openingFallbackSpecs(turn) {
+        if (turn === 0) {
             return [
-                { x, y, color: piece.mainColor },
-                { x: sx, y: sy, color: piece.subColor }
+                { x: 0, rotation: 3 },
+                { x: 0, rotation: 0 },
+                { x: 1, rotation: 3 }
             ];
         }
+        if (turn === 1) {
+            return [
+                { x: 2, rotation: 0 },
+                { x: 1, rotation: 3 },
+                { x: 0, rotation: 0 }
+            ];
+        }
+        if (turn === 2) {
+            return [
+                { x: 3, rotation: 3 },
+                { x: 3, rotation: 0 },
+                { x: 4, rotation: 3 },
+                { x: 5, rotation: 0 }
+            ];
+        }
+        return [
+            { x: 3, rotation: 3 },
+            { x: 4, rotation: 3 },
+            { x: 5, rotation: 0 }
+        ];
+    }
 
-        function canPlace(boardState, piece, x, y, rotation) {
-            const W = boardState[0].length;
-            const H = boardState.length;
-            const cells = getPieceCoords(piece, x, y, rotation);
+    function chooseOpeningMove() {
+        const cur = safeCurrentPuyo();
+        const b = safeBoard();
+        if (!cur || !b) return null;
+        if (openingState.turn >= AI_CONFIG.OPENING_TURNS) return null;
 
-            for (const c of cells) {
-                if (c.x < 0 || c.x >= W || c.y < 0 || c.y >= H) return false;
-                if (boardState[c.y][c.x] !== getColors().EMPTY) return false;
+        const pieces = readPieces();
+        if (!pieces.length) return null;
+
+        const codes = colorLettersForPieces(pieces);
+        const pattern = openingPatternName(codes);
+
+        const turn = openingState.turn;
+        const specs = openingSpecs(pattern, turn, codes);
+        const allSpecs = specs.concat(openingFallbackSpecs(turn));
+
+        // まず完全一致の候補を優先
+        for (const spec of allSpecs) {
+            const y = findRestY(b, cur, spec.x, spec.rotation);
+            if (y !== null) {
+                return { x: spec.x, y, rotation: spec.rotation };
             }
-            return true;
         }
 
-        function findRestY(boardState, piece, x, rotation) {
-            const H = boardState.length;
-            let y = H - 2;
-            if (!canPlace(boardState, piece, x, y, rotation)) return null;
+        // 最後の保険: opening の間は seedScore を使わず、
+        // GTRっぽい低い列・危険マス回避を優先
+        const placements = dropPlacements(b, cur);
+        if (!placements.length) return null;
 
-            while (y > 0 && canPlace(boardState, piece, x, y - 1, rotation)) {
-                y--;
-            }
-            return y;
-        }
+        let best = null;
+        let bestScore = -1e18;
 
-        function makeVerticalMove(boardState, piece, col1based, bottomSymbol, map) {
-            const x = col1based - 1;
-            const mainSym = symbolOf(piece.mainColor, map);
-            const subSym = symbolOf(piece.subColor, map);
-
-            let rotation = null;
-            if (mainSym === bottomSymbol) rotation = 0;
-            else if (subSym === bottomSymbol) rotation = 2;
-            else return null;
-
-            const y = findRestY(boardState, piece, x, rotation);
-            if (y === null) return null;
-            return { x, y, rotation };
-        }
-
-        function makeHorizontalMove(boardState, piece, leftCol1based, rightSymbol, map) {
-            const x = leftCol1based - 1;
-            const mainSym = symbolOf(piece.mainColor, map);
-            const subSym = symbolOf(piece.subColor, map);
-
-            let rotation = null;
-            if (mainSym === rightSymbol) rotation = 3;
-            else if (subSym === rightSymbol) rotation = 1;
-            else return null;
-
-            const y = findRestY(boardState, piece, x, rotation);
-            if (y === null) return null;
-            return { x, y, rotation };
-        }
-
-        function makeAnyVertical(boardState, piece, col1based, map) {
-            const a = makeVerticalMove(boardState, piece, col1based, symbolOf(piece.mainColor, map), map);
-            if (a) return a;
-            const b = makeVerticalMove(boardState, piece, col1based, symbolOf(piece.subColor, map), map);
-            if (b) return b;
-
-            const x = col1based - 1;
-            for (const rotation of [0, 2]) {
-                const y = findRestY(boardState, piece, x, rotation);
-                if (y !== null) return { x, y, rotation };
-            }
-            return null;
-        }
-
-        function makeAnyHorizontal(boardState, piece, leftCol1based, map) {
-            const a = makeHorizontalMove(boardState, piece, leftCol1based, symbolOf(piece.mainColor, map), map);
-            if (a) return a;
-            const b = makeHorizontalMove(boardState, piece, leftCol1based, symbolOf(piece.subColor, map), map);
-            if (b) return b;
-
-            const x = leftCol1based - 1;
-            for (const rotation of [1, 3]) {
-                const y = findRestY(boardState, piece, x, rotation);
-                if (y !== null) return { x, y, rotation };
-            }
-            return null;
-        }
-
-        function chooseBestOf(boardState, candidates) {
-            let best = null;
-            let bestScore = -Infinity;
-            const heights = columnHeights(boardState);
+        for (const p of placements) {
+            const sim = simulateMove(b, cur, p.x, p.y, p.rotation);
+            const heights = columnHeights(sim.board);
             const maxH = Math.max(...heights);
+            let score = 0;
 
-            for (const c of candidates) {
-                if (!c) continue;
+            // 左側・中央寄りのGTR土台を優先
+            if (p.x <= 3) score += 5000;
+            if (p.x === 0 || p.x === 1) score += 2500;
+            if (p.x === 2 || p.x === 3) score += 1500;
 
-                const piece = { mainColor: c.mainColor || 0, subColor: c.subColor || 0 };
-                const cells = getPieceCoords(piece, c.x, c.y, c.rotation);
-                const cols = cells.map(v => v.x);
+            // 開幕は3つつなぎ種の評価をしない
+            score += templateScore(sim.board) * 12;
 
-                let score = 0;
-                score -= maxH * 2;
-                if (cols.length >= 2) {
-                    score -= Math.abs((heights[cols[0]] || 0) - (heights[cols[1]] || 0)) * 3;
-                }
-                const centerDist = cols.reduce((sum, x) => sum + Math.abs(x - 2.5), 0) / cols.length;
-                score -= centerDist;
+            // 危険列を強く避ける
+            score -= dangerPenalty(sim.board);
 
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = c;
-                }
+            // 高すぎる置き方を避ける
+            score -= maxH * 25;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = p;
             }
-
-            return best;
         }
 
-        function familyTurn0(boardState, piece, map, family) {
-            const sig = pieceType(piece, map);
+        return best ? { x: best.x, y: best.y, rotation: best.rotation } : null;
+    }
 
-            if (family === 'AAAB') {
-                if (sig === 'AA') return makeAnyHorizontal(boardState, piece, 1, map);
-            }
-
-            if (family === 'AABB') {
-                if (sig === 'AA') return makeAnyHorizontal(boardState, piece, 1, map);
-            }
-
-            if (family === 'ABAB') {
-                if (sig === 'AB') {
-                    const move1 = makeVerticalMove(boardState, piece, 1, 'A', map);
-                    const move2 = makeVerticalMove(boardState, piece, 1, 'B', map);
-                    return chooseBestOf(boardState, [move1, move2]);
-                }
-            }
-
-            if (family === 'ABAC') {
-                if (sig === 'AB' || sig === 'AA') {
-                    const m1 = makeHorizontalMove(boardState, piece, 2, 'A', map);
-                    const m2 = makeVerticalMove(boardState, piece, 1, 'A', map);
-                    return chooseBestOf(boardState, [m1, m2]);
-                }
-            }
-
-            if (family === 'AABC') {
-                if (sig === 'AA') return makeAnyHorizontal(boardState, piece, 1, map);
-            }
-
-            return null;
-        }
-
-        function familyTurn1(boardState, piece, map, family) {
-            const sig = pieceType(piece, map);
-
-            if (family === 'AAAB') {
-                if (sig === 'AB') return makeVerticalMove(boardState, piece, 3, 'B', map);
-            }
-
-            if (family === 'AABB') {
-                if (sig === 'BB') return makeAnyHorizontal(boardState, piece, 1, map);
-                if (sig === 'AB') return makeVerticalMove(boardState, piece, 2, 'A', map) || makeVerticalMove(boardState, piece, 2, 'B', map);
-            }
-
-            if (family === 'ABAB') {
-                if (sig === 'AB') {
-                    const move1 = makeVerticalMove(boardState, piece, 2, 'A', map);
-                    const move2 = makeVerticalMove(boardState, piece, 2, 'B', map);
-                    return chooseBestOf(boardState, [move1, move2]);
-                }
-            }
-
-            if (family === 'ABAC') {
-                if (sig === 'AA' || sig === 'AB' || sig === 'AC') {
-                    const m1 = makeVerticalMove(boardState, piece, 1, 'A', map);
-                    const m2 = makeHorizontalMove(boardState, piece, 2, 'A', map);
-                    return chooseBestOf(boardState, [m1, m2]);
-                }
-            }
-
-            if (family === 'AABC') {
-                if (sig === 'BC') {
-                    const m = makeHorizontalMove(boardState, piece, 3, 'B', map);
-                    if (m) return m;
-                }
-                if (sig === 'AB' || sig === 'BB' || sig === 'BD') {
-                    return makeAnyHorizontal(boardState, piece, 2, map) || makeVerticalMove(boardState, piece, 1, 'B', map);
-                }
-            }
-
-            return null;
-        }
-
-        function familyTurn2(boardState, piece, map, family) {
-            const sig = pieceType(piece, map);
-
-            if (family === 'AAAB') {
-                if (sig === 'AA') return makeAnyHorizontal(boardState, piece, 4, map);
-                if (sig === 'AB') return makeVerticalMove(boardState, piece, 4, 'A', map);
-                if (sig === 'AC') return makeVerticalMove(boardState, piece, 2, 'C', map);
-                if (sig === 'BB') return makeVerticalMove(boardState, piece, 4, 'B', map);
-                if (sig === 'BC') return makeVerticalMove(boardState, piece, 4, 'C', map);
-                if (sig === 'CC') return makeAnyHorizontal(boardState, piece, 1, map);
-                if (sig === 'CD') {
-                    const h56 = makeAnyHorizontal(boardState, piece, 5, map);
-                    const v6 = makeAnyVertical(boardState, piece, 6, map);
-                    return chooseBestOf(boardState, [v6, h56]);
-                }
-            }
-
-            if (family === 'AABB' || family === 'ABAB') {
-                if (sig === 'AA') return makeAnyHorizontal(boardState, piece, 4, map);
-                if (sig === 'AB') return makeAnyHorizontal(boardState, piece, 1, map);
-                if (sig === 'AC') return makeVerticalMove(boardState, piece, 3, 'C', map);
-                if (sig === 'BB') return makeAnyHorizontal(boardState, piece, 4, map);
-                if (sig === 'BC') return makeVerticalMove(boardState, piece, 1, 'B', map);
-                if (sig === 'CC') return makeAnyHorizontal(boardState, piece, 4, map);
-                if (sig === 'CD') {
-                    const h34 = makeAnyHorizontal(boardState, piece, 3, map);
-                    const v2 = makeVerticalMove(boardState, piece, 2, 'C', map);
-                    const v6 = makeVerticalMove(boardState, piece, 6, 'C', map);
-                    const h56 = makeAnyHorizontal(boardState, piece, 5, map);
-                    return chooseBestOf(boardState, [h34, v2, v6, h56]);
-                }
-            }
-
-            if (family === 'ABAC') {
-                if (sig === 'AA') return makeAnyHorizontal(boardState, piece, 3, map);
-                if (sig === 'AD') return makeAnyHorizontal(boardState, piece, 3, map);
-                if (sig === 'BC') return makeVerticalMove(boardState, piece, 4, 'B', map);
-                if (sig === 'DD') return makeAnyHorizontal(boardState, piece, 4, map);
-
-                if (sig === 'CC') return makeAnyHorizontal(boardState, piece, 1, map);
-                if (sig === 'BD') return makeVerticalMove(boardState, piece, 1, 'B', map);
-
-                if (sig === 'CD') return makeVerticalMove(boardState, piece, 4, 'C', map);
-                if (sig === 'AC') return makeVerticalMove(boardState, piece, 3, 'A', map);
-                if (sig === 'AB') return makeHorizontalMove(boardState, piece, 2, 'A', map);
-                if (sig === 'BB') return makeAnyHorizontal(boardState, piece, 1, map);
-
-                return chooseBestOf(boardState, [
-                    makeVerticalMove(boardState, piece, 4, 'B', map),
-                    makeAnyHorizontal(boardState, piece, 3, map),
-                    makeVerticalMove(boardState, piece, 1, 'A', map)
-                ]);
-            }
-
-            if (family === 'AABC') {
-                if (sig === 'AA') return makeAnyHorizontal(boardState, piece, 2, map);
-                if (sig === 'AD') return makeAnyHorizontal(boardState, piece, 2, map);
-                if (sig === 'DD') return makeAnyHorizontal(boardState, piece, 1, map);
-
-                if (sig === 'AB' || sig === 'BB' || sig === 'BD') {
-                    const c1 = makeAnyHorizontal(boardState, piece, 5, map);
-                    const c2 = makeVerticalMove(boardState, piece, 5, 'B', map);
-                    return chooseBestOf(boardState, [c1, c2]);
-                }
-
-                if (sig === 'BC') return makeVerticalMove(boardState, piece, 5, 'B', map);
-                if (sig === 'AC') return makeVerticalMove(boardState, piece, 3, 'A', map);
-                if (sig === 'CD') return makeVerticalMove(boardState, piece, 4, 'C', map);
-
-                return chooseBestOf(boardState, [
-                    makeAnyHorizontal(boardState, piece, 3, map),
-                    makeVerticalMove(boardState, piece, 4, 'B', map),
-                    makeAnyHorizontal(boardState, piece, 5, map)
-                ]);
-            }
-
-            return null;
-        }
-
-        function inferState(state) {
-            const boardState = state.boardState || state.board || [];
-            const currentPiece = state.currentPiece || null;
-            const nextPieces = state.nextPieces || [];
-            const pieces = visiblePiecesFromState({ currentPiece, nextPieces });
-
-            if (!pieces.length) return { boardState, currentPiece, nextPieces, pieces };
-
-            if (boardIsOpeningLike(boardState)) {
-                reset();
-            }
-
-            if (!STATE.symbolMap) {
-                STATE.symbolMap = buildSymbolMap(pieces);
-            }
-
-            if (!STATE.family) {
-                STATE.family = detectFamily(pieces, STATE.symbolMap);
-                STATE.active = !!STATE.family;
-            }
-
-            return { boardState, currentPiece, nextPieces, pieces };
-        }
-
-        function chooseMoveCandidates(state) {
-            const { boardState, currentPiece } = inferState(state);
-            if (!currentPiece) return null;
-            if (!STATE.family) return null;
-
-            const map = STATE.symbolMap;
-            const sig = pieceType(currentPiece, map);
-
-            let move = null;
-
-            if (STATE.turn === 0) {
-                move = familyTurn0(boardState, currentPiece, map, STATE.family);
-            } else if (STATE.turn === 1) {
-                move = familyTurn1(boardState, currentPiece, map, STATE.family);
-            } else if (STATE.turn === 2) {
-                move = familyTurn2(boardState, currentPiece, map, STATE.family);
-            } else {
-                move = null;
-            }
-
-            return move ? { ...move, meta: { family: STATE.family, sig } } : null;
-        }
-
-        function chooseMoveFromState(state) {
-            const boardState = state.boardState || state.board || [];
-            if (!boardState.length) return null;
-
-            const move = chooseMoveCandidates(state);
-            if (move) {
-                STATE.history.push(move.meta ? move.meta.sig : null);
-                STATE.turn++;
-            }
-            return move;
-        }
-
-        return {
-            reset,
-            chooseMoveFromState,
-            getState: () => ({
-                turn: STATE.turn,
-                family: STATE.family,
-                symbolMap: STATE.symbolMap ? Array.from(STATE.symbolMap.entries()) : null,
-                history: STATE.history.slice()
-            })
-        };
-    })();
-
-    window.GTR_POLICY = GTR_POLICY;
-
-    // ---------- AI core ----------
+    // ========= General search =========
     function chooseBestMove() {
         const cur = safeCurrentPuyo();
         const b = safeBoard();
         if (!cur || !b) return null;
         if (typeof gameState !== 'undefined' && gameState !== 'playing') return null;
 
-        const state = packState();
-        const gtrMove = GTR_POLICY.chooseMoveFromState(state);
-        if (gtrMove) return { x: gtrMove.x, y: gtrMove.y, rotation: gtrMove.rotation };
+        // 開幕4手はGTRのみ
+        if (openingState.turn < AI_CONFIG.OPENING_TURNS) {
+            const openingMove = chooseOpeningMove();
+            return openingMove;
+        }
 
         const pieces = readPieces();
         if (!pieces.length) return null;
@@ -1257,19 +1134,17 @@
 
             applyMove(move);
 
-            if (AI_CONFIG.VISUALIZE_DELAY_MS > 0) {
-                setTimeout(() => {
-                    try {
-                        if (typeof hardDrop === 'function') hardDrop();
-                    } finally {
-                        updateStatus('AI実行完了');
-                        busy = false;
-                    }
-                }, AI_CONFIG.VISUALIZE_DELAY_MS);
-            } else {
+            const finish = () => {
                 if (typeof hardDrop === 'function') hardDrop();
+                if (openingState.turn < AI_CONFIG.OPENING_TURNS) openingState.turn++;
                 updateStatus('AI実行完了');
                 busy = false;
+            };
+
+            if (AI_CONFIG.VISUALIZE_DELAY_MS > 0) {
+                setTimeout(finish, AI_CONFIG.VISUALIZE_DELAY_MS);
+            } else {
+                finish();
             }
         } catch (err) {
             console.error('AI error:', err);
@@ -1303,6 +1178,14 @@
         }
     }
 
+    function resetAIState() {
+        openingState.turn = 0;
+        MEMO.clear();
+        busy = false;
+        updateStatus('AI待機中');
+        updateAutoButton();
+    }
+
     function initAIUI() {
         if (uiInitialized) return;
         uiInitialized = true;
@@ -1310,7 +1193,7 @@
         updateStatus('AI待機中');
     }
 
-    // ---------- Public API ----------
+    // ========= Public API =========
     window.runPuyoAI = function () {
         doAI();
     };
@@ -1336,10 +1219,26 @@
         searchBest,
         templateScore,
         seedScore,
-        GTR_POLICY
+        chooseOpeningMove,
+        resetAIState
     };
 
-    // ---------- Init ----------
+    // ========= Hook reset/rematch =========
+    const prevResetGame = window.resetGame;
+    window.resetGame = function () {
+        if (typeof prevResetGame === 'function') prevResetGame();
+        resetAIState();
+    };
+
+    if (typeof window.prepareForRematch === 'function') {
+        const prevPrepare = window.prepareForRematch;
+        window.prepareForRematch = function () {
+            if (typeof prevPrepare === 'function') prevPrepare();
+            resetAIState();
+        };
+    }
+
+    // ========= Init =========
     function boot() {
         initAIUI();
         if (autoEnabled) startAutoLoop();
