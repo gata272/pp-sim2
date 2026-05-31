@@ -1,8 +1,8 @@
 /* puyoAI.js
- * GTR-opening + beam search AI for Puyo Puyo Simulator
- * - First 4 turns: GTR-only policy
+ * GTR opening + beam search AI for Puyo Puyo Simulator
+ * - First 4 turns: GTR-focused opening
+ * - Opening uses current piece + NEXT1 + NEXT2 + NEXT3
  * - After opening: beam search with future-chain evaluation
- * - Uses current piece + NEXT1 + NEXT2
  * - Works with the existing puyoSim.js globals
  */
 (function () {
@@ -24,9 +24,7 @@
     let busy = false;
     let uiInitialized = false;
 
-    const openingState = {
-        turn: 0
-    };
+    let openingTurn = 0;
 
     // ========= Safe accessors =========
     const getWidth = () => (typeof WIDTH !== 'undefined' ? WIDTH : 6);
@@ -64,6 +62,14 @@
         return 0;
     }
 
+    function cloneBoard(src) {
+        return src.map(row => row.slice());
+    }
+
+    function boardToKey(b) {
+        return b.map(row => row.join('')).join('|');
+    }
+
     function updateStatus(text) {
         const el = document.getElementById('ai-status');
         if (el) el.textContent = text;
@@ -74,40 +80,539 @@
         if (btn) btn.textContent = autoEnabled ? 'AI自動: ON' : 'AI自動: OFF';
     }
 
-    function cloneBoard(src) {
-        return src.map(row => row.slice());
-    }
-
-    function boardToKey(b) {
-        return b.map(row => row.join('')).join('|');
-    }
-
-    function pieceFromPair(pair) {
-        if (!Array.isArray(pair) || pair.length < 2) return null;
-        return { subColor: pair[0], mainColor: pair[1] };
-    }
-
-    function readPieces() {
+    function getUpcomingPieces(count = 4) {
         const cur = safeCurrentPuyo();
         if (!cur) return [];
+
         const q = safeQueue();
         const idx = safeQueueIndex();
 
         const pieces = [{ mainColor: cur.mainColor, subColor: cur.subColor }];
-
-        for (let i = 0; i < 2; i++) {
-            const p = pieceFromPair(q[idx + i]);
-            if (p) pieces.push(p);
+        for (let i = 0; i < count - 1; i++) {
+            const p = q[idx + i];
+            if (Array.isArray(p) && p.length >= 2) {
+                pieces.push({ subColor: p[0], mainColor: p[1] });
+            }
         }
         return pieces;
     }
 
-    // ========= Geometry =========
-    // rotation:
-    // 0 = sub above main
-    // 1 = sub left of main
-    // 2 = sub below main
-    // 3 = sub right of main
+    function makeLabelContext(pieces) {
+        const colorToLabel = new Map();
+        const labelToColor = {};
+        const letters = ['A', 'B', 'C', 'D'];
+        let next = 0;
+
+        for (const piece of pieces) {
+            for (const color of [piece.subColor, piece.mainColor]) {
+                if (!colorToLabel.has(color)) {
+                    const label = letters[Math.min(next, letters.length - 1)];
+                    colorToLabel.set(color, label);
+                    labelToColor[label] = color;
+                    next++;
+                }
+            }
+        }
+
+        const codes = pieces.map(piece => `${colorToLabel.get(piece.subColor)}${colorToLabel.get(piece.mainColor)}`);
+        return { colorToLabel, labelToColor, codes };
+    }
+
+    function codeSet(code) {
+        return new Set(code.split(''));
+    }
+
+    function setEqualsCode(code, letters) {
+        const s = codeSet(code);
+        if (s.size !== letters.length) return false;
+        for (const letter of letters) {
+            if (!s.has(letter)) return false;
+        }
+        return true;
+    }
+
+    function hasSameColor(code) {
+        return code[0] === code[1];
+    }
+
+    function classifyOpening(codes) {
+        const c0 = codes[0] || '';
+        const c1 = codes[1] || '';
+        const s0 = codeSet(c0);
+        const s1 = codeSet(c1);
+
+        if (s0.size === 1 && s1.size === 2) {
+            if ([...s1].some(v => s0.has(v))) {
+                return 'AAAB';
+            }
+            return 'AABC';
+        }
+
+        if (s0.size === 1 && s1.size === 1 && c0 !== c1) {
+            return 'AABB';
+        }
+
+        if (s0.size === 2 && s1.size === 2) {
+            const inter = [...s0].filter(v => s1.has(v));
+            if (inter.length === 2) return 'ABAB';
+            if (inter.length === 1) return 'ABAC';
+        }
+
+        return 'GTR';
+    }
+
+    function rotationForLabel(piece, labelToColor, targetLabel, position) {
+        const targetColor = labelToColor[targetLabel];
+        if (targetColor === undefined) return null;
+
+        const isSub = piece.subColor === targetColor;
+        const isMain = piece.mainColor === targetColor;
+
+        if (!isSub && !isMain) return null;
+
+        switch (position) {
+            case 'down':
+                return isSub ? 2 : 0;
+            case 'up':
+                return isSub ? 0 : 2;
+            case 'left':
+                return isSub ? 1 : 3;
+            case 'right':
+                return isSub ? 3 : 1;
+            default:
+                return null;
+        }
+    }
+
+    function addRawCandidate(list, x, rotation, priority = 0) {
+        list.push({ x, rotation, priority });
+    }
+
+    function addLabelCandidate(list, piece, labelToColor, x, targetLabel, position, priority = 0) {
+        const rotation = rotationForLabel(piece, labelToColor, targetLabel, position);
+        if (rotation !== null) {
+            list.push({ x, rotation, priority });
+        }
+    }
+
+    function openingBoardScore(boardState) {
+        const heights = columnHeights(boardState);
+        const holes = countHoles(boardState, heights);
+        const maxH = Math.max(...heights);
+        const bumpiness = heights.reduce((sum, h, i) => sum + (i > 0 ? Math.abs(h - heights[i - 1]) : 0), 0);
+
+        let s = 0;
+
+        s += templateScore(boardState) * 20;
+        s -= holes * 28;
+        s -= bumpiness * 12;
+        s -= maxH * 40;
+
+        // GTRっぽい左寄せ・低重心を優先
+        s += Math.max(0, 6 - heights[0]) * 45;
+        s += Math.max(0, 6 - heights[1]) * 28;
+        s += Math.max(0, 5 - heights[2]) * 14;
+
+        // 危険列を避ける
+        s -= dangerPenalty(boardState) * 0.12;
+
+        return s;
+    }
+
+    function sameColorCount(piece) {
+        return piece.subColor === piece.mainColor;
+    }
+
+    function applyPlacementOnly(boardState, piece, x, y, rotation) {
+        const next = placePiece(boardState, piece, x, y, rotation);
+        gravityOn(next);
+        return next;
+    }
+
+    function searchOpening(boardState, pieces, turn, context, rootMove) {
+        if (turn >= Math.min(AI_CONFIG.OPENING_TURNS, pieces.length)) {
+            return { score: openingBoardScore(boardState), move: rootMove };
+        }
+
+        const piece = pieces[turn];
+        const pattern = context.pattern;
+        const candidates = openingCandidates(pattern, turn, pieces, context);
+
+        if (!candidates.length) {
+            return { score: -1e15, move: rootMove };
+        }
+
+        let best = { score: -1e15, move: rootMove };
+
+        for (const cand of candidates) {
+            const y = findRestY(boardState, piece, cand.x, cand.rotation);
+            if (y === null) continue;
+
+            const nextBoard = applyPlacementOnly(boardState, piece, cand.x, y, cand.rotation);
+            const nextRoot = rootMove || { x: cand.x, y, rotation: cand.rotation };
+            const child = searchOpening(nextBoard, pieces, turn + 1, context, nextRoot);
+
+            if (!child) continue;
+
+            const total = openingBoardScore(nextBoard) + child.score + (cand.priority || 0);
+            if (total > best.score) {
+                best = { score: total, move: child.move };
+            }
+        }
+
+        return best;
+    }
+
+    function openingCandidates(pattern, turn, pieces, context) {
+        const list = [];
+        const codes = context.codes;
+        const piece = pieces[turn];
+        const labelToColor = context.labelToColor;
+
+        const c0 = codes[0] || '';
+        const c1 = codes[1] || '';
+        const c2 = codes[2] || '';
+        const c3 = codes[3] || '';
+
+        const s0 = codeSet(c0);
+        const s1 = codeSet(c1);
+        const s2 = codeSet(c2);
+        const s3 = codeSet(c3);
+
+        // ---- AAAB ----
+        if (pattern === 'AAAB') {
+            const A = [...s0][0];
+            const B = [...s1].find(v => !s0.has(v)) || [...s1][0];
+
+            if (turn === 0) {
+                addRawCandidate(list, 0, 3, 1000); // 1,2 横
+            } else if (turn === 1) {
+                addLabelCandidate(list, piece, labelToColor, 2, B, 'down', 1000); // 3列目 B下
+            } else if (turn === 2) {
+                if (hasSameColor(c2) && c2[0] === A) {
+                    addRawCandidate(list, 3, 3, 1000); // AA -> 4,5 横
+                }
+                if (setEqualsCode(c2, [A, B])) {
+                    addLabelCandidate(list, piece, labelToColor, 3, A, 'down', 1000); // AB -> A下
+                }
+                if (setEqualsCode(c2, [A, 'C'])) {
+                    addLabelCandidate(list, piece, labelToColor, 1, 'C', 'down', 1000); // AC -> C下
+                }
+                if (hasSameColor(c2) && c2[0] === B) {
+                    addRawCandidate(list, 3, 0, 1000); // BB -> 4列目縦
+                }
+                if (setEqualsCode(c2, [B, 'C'])) {
+                    addLabelCandidate(list, piece, labelToColor, 3, 'C', 'down', 1000); // BC -> C下
+                }
+                if (hasSameColor(c2) && c2[0] === 'C') {
+                    addRawCandidate(list, 0, 3, 1000); // CC -> 1,2 横
+                }
+                if (setEqualsCode(c2, ['C', 'D'])) {
+                    addRawCandidate(list, 4, 3, 800); // CD -> 5,6 横
+                    addRawCandidate(list, 5, 0, 750); // or 6列目縦
+                }
+            } else if (turn === 3) {
+                // 4手目の具体分岐
+                if (setEqualsCode(c2, ['C', 'D'])) {
+                    if (hasSameColor(c3) && c3[0] === 'C') {
+                        addLabelCandidate(list, piece, labelToColor, 5, 'C', 'up', 1000);   // 6列目縦、C上
+                        addRawCandidate(list, 3, 3, 950);                                     // 4,5横
+                    } else if (setEqualsCode(c3, ['B', 'C'])) {
+                        addLabelCandidate(list, piece, labelToColor, 4, 'C', 'left', 1000);  // 5,6横、C左
+                    } else {
+                        addRawCandidate(list, 3, 3, 800);
+                        addRawCandidate(list, 4, 3, 780);
+                        addRawCandidate(list, 5, 0, 760);
+                    }
+                } else {
+                    addRawCandidate(list, 3, 3, 700);
+                    addRawCandidate(list, 4, 3, 680);
+                    addRawCandidate(list, 5, 0, 660);
+                }
+            }
+        }
+
+        // ---- AABB ----
+        else if (pattern === 'AABB') {
+            const A = [...s0][0];
+            const B = [...s1][0];
+
+            if (turn === 0) {
+                addRawCandidate(list, 0, 3, 1000); // AA -> 1,2 横
+            } else if (turn === 1) {
+                addRawCandidate(list, 0, 3, 1000); // BB -> 1,2 横
+            } else if (turn === 2) {
+                if (hasSameColor(c2) && c2[0] === A) {
+                    addRawCandidate(list, 3, 3, 1000); // AA -> 4,5 横
+                }
+                if (setEqualsCode(c2, [A, B])) {
+                    addLabelCandidate(list, piece, labelToColor, 0, A, 'right', 1000); // AB -> A右
+                }
+                if (setEqualsCode(c2, [A, 'C'])) {
+                    addLabelCandidate(list, piece, labelToColor, 2, 'C', 'down', 1000); // AC -> C下
+                }
+                if (hasSameColor(c2) && c2[0] === B) {
+                    addRawCandidate(list, 3, 3, 1000); // BB -> 4,5 横
+                }
+                if (setEqualsCode(c2, [B, 'C'])) {
+                    addLabelCandidate(list, piece, labelToColor, 0, B, 'down', 1000); // BC -> B下
+                }
+                if (hasSameColor(c2) && c2[0] === 'C') {
+                    addRawCandidate(list, 3, 3, 1000); // CC -> 4,5 横
+                }
+                if (setEqualsCode(c2, ['C', 'D'])) {
+                    addRawCandidate(list, 2, 3, 900); // 3,4 横
+                    addRawCandidate(list, 5, 0, 880); // 6列目縦
+                }
+            } else if (turn === 3) {
+                if (setEqualsCode(c2, ['C', 'D'])) {
+                    if (setEqualsCode(c3, [B, 'C'])) {
+                        addRawCandidate(list, 2, 3, 1000); // 3手目CD -> 3,4 横
+                        addRawCandidate(list, 4, 3, 980);  // 4手目BC -> 5,6 横
+                    } else if (setEqualsCode(c3, ['C', 'D'])) {
+                        addRawCandidate(list, 2, 3, 1000); // 3手目CD -> 3,4 横
+                        addRawCandidate(list, 1, 2, 980);  // 4手目CD -> 2列目縦
+                    } else if (hasSameColor(c3) && c3[0] === 'C') {
+                        addRawCandidate(list, 5, 2, 1000); // 3手目CD -> C下で6列目縦
+                        addRawCandidate(list, 3, 3, 980);  // 4手目CC -> 4,5 横
+                    } else {
+                        addRawCandidate(list, 4, 3, 850);
+                        addRawCandidate(list, 5, 0, 830);
+                    }
+                } else {
+                    addRawCandidate(list, 3, 3, 700);
+                    addRawCandidate(list, 4, 3, 680);
+                    addRawCandidate(list, 5, 0, 660);
+                }
+            }
+        }
+
+        // ---- ABAB ----
+        else if (pattern === 'ABAB') {
+            const A = [...s0][0];
+            const B = [...s0][1];
+
+            if (turn === 0) {
+                addLabelCandidate(list, piece, labelToColor, 0, A, 'down', 1000); // 1列目 A下
+                addLabelCandidate(list, piece, labelToColor, 0, B, 'down', 980);   // 1列目 B下
+            } else if (turn === 1) {
+                addLabelCandidate(list, piece, labelToColor, 1, A, 'down', 1000); // 2列目 A下
+                addLabelCandidate(list, piece, labelToColor, 1, B, 'down', 980);   // 2列目 B下
+            } else if (turn === 2) {
+                if (hasSameColor(c2) && c2[0] === A) {
+                    addRawCandidate(list, 3, 3, 1000); // AA -> 4,5 横
+                }
+                if (setEqualsCode(c2, [A, B])) {
+                    addLabelCandidate(list, piece, labelToColor, 0, A, 'right', 1000); // AB -> A右
+                }
+                if (setEqualsCode(c2, [A, 'C'])) {
+                    addLabelCandidate(list, piece, labelToColor, 2, 'C', 'down', 1000); // AC -> C下
+                }
+                if (hasSameColor(c2) && c2[0] === B) {
+                    addRawCandidate(list, 3, 3, 1000); // BB -> 4,5 横
+                }
+                if (setEqualsCode(c2, [B, 'C'])) {
+                    addLabelCandidate(list, piece, labelToColor, 0, B, 'down', 1000); // BC -> B下
+                }
+                if (hasSameColor(c2) && c2[0] === 'C') {
+                    addRawCandidate(list, 3, 3, 1000); // CC -> 4,5 横
+                }
+                if (setEqualsCode(c2, ['C', 'D'])) {
+                    addRawCandidate(list, 2, 3, 900);
+                    addRawCandidate(list, 5, 0, 880);
+                }
+            } else if (turn === 3) {
+                if (setEqualsCode(c2, ['C', 'D'])) {
+                    if (setEqualsCode(c3, [B, 'C'])) {
+                        addRawCandidate(list, 2, 3, 1000); // 3手目CD -> 3,4 横
+                        addRawCandidate(list, 4, 3, 980);  // 4手目BC -> 5,6 横
+                    } else if (setEqualsCode(c3, ['C', 'D'])) {
+                        addRawCandidate(list, 2, 3, 1000); // 3手目CD -> 3,4 横
+                        addRawCandidate(list, 1, 2, 980);  // 4手目CD -> 2列目縦
+                    } else if (hasSameColor(c3) && c3[0] === 'C') {
+                        addRawCandidate(list, 5, 2, 1000); // 3手目CD -> C下で6列目縦
+                        addRawCandidate(list, 3, 3, 980);  // 4手目CC -> 4,5 横
+                    } else {
+                        addRawCandidate(list, 4, 3, 850);
+                        addRawCandidate(list, 5, 0, 830);
+                    }
+                } else {
+                    addRawCandidate(list, 3, 3, 700);
+                    addRawCandidate(list, 4, 3, 680);
+                    addRawCandidate(list, 5, 0, 660);
+                }
+            }
+        }
+
+        // ---- ABAC ----
+        else if (pattern === 'ABAC') {
+            const A = [...s0].find(v => s1.has(v)) || [...s0][0];
+            const other0 = [...s0].find(v => v !== A);
+            const other1 = [...s1].find(v => v !== A);
+            const B = other0 || other1 || 'B';
+            const C = [...new Set([...s0, ...s1])].find(v => v !== A && v !== B) || 'C';
+
+            if (turn === 0) {
+                // 2通り
+                addLabelCandidate(list, piece, labelToColor, 1, A, 'left', 1000); // 2,3 横（A左）
+                addLabelCandidate(list, piece, labelToColor, 0, A, 'down', 990);  // 1列目縦（A下）
+            } else if (turn === 1) {
+                // 2手目は初手分岐を包含して幅広く候補化
+                addRawCandidate(list, 2, 3, 1000); // 3,4 横
+                addRawCandidate(list, 0, 3, 980);   // 1,2 横
+                addLabelCandidate(list, piece, labelToColor, 3, B, 'down', 1000);   // B下縦
+                addRawCandidate(list, 3, 3, 980);   // 4,5 横
+                addLabelCandidate(list, piece, labelToColor, 3, C, 'up', 1000);      // C上縦
+                addLabelCandidate(list, piece, labelToColor, 2, A, 'down', 980);     // A下縦
+                addLabelCandidate(list, piece, labelToColor, 1, A, 'right', 980);     // A右横
+            } else if (turn === 2) {
+                if (hasSameColor(c2) && c2[0] === A) {
+                    addRawCandidate(list, 2, 3, 1000); // AA -> 3,4 横
+                }
+                if (setEqualsCode(c2, [A, 'D'])) {
+                    addLabelCandidate(list, piece, labelToColor, 2, A, 'left', 1000); // AD -> A左
+                }
+                if (setEqualsCode(c2, [B, 'C'])) {
+                    addLabelCandidate(list, piece, labelToColor, 3, B, 'down', 1000); // BC -> B下
+                }
+                if (hasSameColor(c2) && c2[0] === 'D') {
+                    addRawCandidate(list, 3, 3, 1000); // DD -> 4,5 横
+                }
+                if (hasSameColor(c2) && c2[0] === 'C') {
+                    addRawCandidate(list, 0, 3, 1000); // CC -> 1,2 横
+                }
+                if (setEqualsCode(c2, [B, 'D'])) {
+                    addLabelCandidate(list, piece, labelToColor, 0, B, 'down', 1000); // BD -> B下
+                }
+                if (setEqualsCode(c2, ['C', 'D'])) {
+                    addLabelCandidate(list, piece, labelToColor, 3, 'C', 'up', 1000); // CD -> C上で縦
+                }
+                if (setEqualsCode(c2, [A, 'C'])) {
+                    addLabelCandidate(list, piece, labelToColor, 2, A, 'down', 1000); // AC -> A下
+                }
+                if (setEqualsCode(c2, [A, B])) {
+                    addLabelCandidate(list, piece, labelToColor, 1, A, 'right', 1000); // AB -> A右
+                }
+                if (hasSameColor(c2) && c2[0] === B) {
+                    addRawCandidate(list, 0, 3, 980); // BB -> 1,2 横
+                }
+            } else if (turn === 3) {
+                addRawCandidate(list, 3, 3, 800);
+                addRawCandidate(list, 4, 3, 780);
+                addRawCandidate(list, 5, 0, 760);
+            }
+        }
+
+        // ---- AABC ----
+        else if (pattern === 'AABC') {
+            const A = [...s0][0];
+
+            if (turn === 0) {
+                addRawCandidate(list, 0, 3, 1000); // AA -> 1,2 横
+            } else if (turn === 1) {
+                // 基本形 + 特殊形を幅広く
+                addRawCandidate(list, 2, 3, 1000); // BC -> 3,4 横
+                addRawCandidate(list, 1, 3, 980);  // 2,3 横（後続依存）
+                addRawCandidate(list, 0, 3, 970);  // 1,2 横
+                addRawCandidate(list, 3, 3, 960);  // 4,5 横
+            } else if (turn === 2) {
+                if (setEqualsCode(c2, [A, 'B'])) {
+                    addLabelCandidate(list, piece, labelToColor, 4, B, 'left', 1000); // AB -> B左で5,6横
+                }
+                if (hasSameColor(c2) && c2[0] === 'B') {
+                    addRawCandidate(list, 4, 3, 1000); // BB -> 5,6横
+                }
+                if (setEqualsCode(c2, [A, 'C'])) {
+                    addLabelCandidate(list, piece, labelToColor, 4, B, 'down', 1000); // BC -> B下で5列縦
+                }
+                if (setEqualsCode(c2, [A, 'D'])) {
+                    addLabelCandidate(list, piece, labelToColor, 4, B, 'left', 1000); // BD -> B左で5,6横
+                }
+
+                // 特殊分岐
+                if (hasSameColor(c2) && c2[0] === A) {
+                    addRawCandidate(list, 1, 3, 980); // AA -> 2,3横
+                }
+                if (setEqualsCode(c2, [A, 'D'])) {
+                    addRawCandidate(list, 2, 3, 980); // AD -> 2,3横
+                }
+                if (hasSameColor(c2) && c2[0] === 'D') {
+                    addRawCandidate(list, 0, 3, 980); // DD -> 1,2横
+                }
+            } else if (turn === 3) {
+                addRawCandidate(list, 3, 3, 800);
+                addRawCandidate(list, 4, 3, 780);
+                addRawCandidate(list, 5, 0, 760);
+            }
+        }
+
+        // ---- GTR fallback ----
+        else {
+            if (turn === 0) {
+                addRawCandidate(list, 0, 3, 1000);
+            } else if (turn === 1) {
+                addRawCandidate(list, 2, 0, 900);
+                addRawCandidate(list, 1, 3, 880);
+            } else if (turn === 2) {
+                addRawCandidate(list, 3, 3, 800);
+                addRawCandidate(list, 4, 3, 780);
+                addRawCandidate(list, 5, 0, 760);
+            } else {
+                addRawCandidate(list, 3, 3, 800);
+                addRawCandidate(list, 4, 3, 780);
+                addRawCandidate(list, 5, 0, 760);
+            }
+        }
+
+        return list;
+    }
+
+    function chooseOpeningMove() {
+        const cur = safeCurrentPuyo();
+        const b = safeBoard();
+        if (!cur || !b) return null;
+        if (openingTurn >= AI_CONFIG.OPENING_TURNS) return null;
+
+        const pieces = getUpcomingPieces(4);
+        if (pieces.length < 4) return null;
+
+        const ctx = makeLabelContext(pieces);
+        ctx.pattern = classifyOpening(ctx.codes);
+
+        const snapshot = cloneBoard(b);
+        const result = searchOpening(snapshot, pieces, 0, ctx, null);
+        return result && result.move ? result.move : null;
+    }
+
+    // ========= Board simulation =========
+    function gravityOn(boardState) {
+        const W = getWidth();
+        const H = getHeight();
+        const C = getColors();
+
+        for (let x = 0; x < W; x++) {
+            const col = [];
+            for (let y = 0; y < H; y++) {
+                if (boardState[y][x] !== C.EMPTY) col.push(boardState[y][x]);
+            }
+            for (let y = 0; y < H; y++) {
+                boardState[y][x] = y < col.length ? col[y] : C.EMPTY;
+            }
+        }
+    }
+
+    function placePiece(boardState, piece, x, y, rotation) {
+        const next = cloneBoard(boardState);
+        const coords = getPieceCoords(piece, x, y, rotation);
+
+        for (const c of coords) {
+            if (c.x >= 0 && c.x < getWidth() && c.y >= 0 && c.y < getHeight()) {
+                next[c.y][c.x] = c.color;
+            }
+        }
+        return next;
+    }
+
     function getPieceCoords(piece, x, y, rotation) {
         let sx = x;
         let sy = y;
@@ -124,13 +629,11 @@
     }
 
     function canPlace(boardState, piece, x, y, rotation) {
-        const W = getWidth();
-        const H = getHeight();
         const C = getColors();
         const coords = getPieceCoords(piece, x, y, rotation);
 
         for (const c of coords) {
-            if (c.x < 0 || c.x >= W || c.y < 0 || c.y >= H) return false;
+            if (c.x < 0 || c.x >= getWidth() || c.y < 0 || c.y >= getHeight()) return false;
             if (boardState[c.y][c.x] !== C.EMPTY) return false;
         }
         return true;
@@ -139,8 +642,8 @@
     function findRestY(boardState, piece, x, rotation) {
         const H = getHeight();
         let y = H - 2;
-        if (!canPlace(boardState, piece, x, y, rotation)) return null;
 
+        if (!canPlace(boardState, piece, x, y, rotation)) return null;
         while (y > 0 && canPlace(boardState, piece, x, y - 1, rotation)) {
             y--;
         }
@@ -148,43 +651,14 @@
     }
 
     function dropPlacements(boardState, piece) {
-        const W = getWidth();
         const placements = [];
         for (let rot = 0; rot < 4; rot++) {
-            for (let x = 0; x < W; x++) {
+            for (let x = 0; x < getWidth(); x++) {
                 const y = findRestY(boardState, piece, x, rot);
                 if (y !== null) placements.push({ x, y, rotation: rot });
             }
         }
         return placements;
-    }
-
-    function placePiece(boardState, piece, x, y, rotation) {
-        const next = cloneBoard(boardState);
-        const coords = getPieceCoords(piece, x, y, rotation);
-        for (const c of coords) {
-            if (c.x >= 0 && c.x < getWidth() && c.y >= 0 && c.y < getHeight()) {
-                next[c.y][c.x] = c.color;
-            }
-        }
-        return next;
-    }
-
-    // ========= Core simulation =========
-    function gravityOn(boardState) {
-        const W = getWidth();
-        const H = getHeight();
-        const C = getColors();
-
-        for (let x = 0; x < W; x++) {
-            const col = [];
-            for (let y = 0; y < H; y++) {
-                if (boardState[y][x] !== C.EMPTY) col.push(boardState[y][x]);
-            }
-            for (let y = 0; y < H; y++) {
-                boardState[y][x] = y < col.length ? col[y] : C.EMPTY;
-            }
-        }
     }
 
     function findGroups(boardState) {
@@ -383,6 +857,7 @@
     function countHoles(boardState, heights) {
         const C = getColors();
         let holes = 0;
+
         for (let x = 0; x < getWidth(); x++) {
             for (let y = 0; y < heights[x]; y++) {
                 if (boardState[y][x] === C.EMPTY) holes++;
@@ -461,17 +936,16 @@
     function dangerPenalty(boardState) {
         const C = getColors();
         const heights = columnHeights(boardState);
-
         let penalty = 0;
         const x = 2;
         const y = 11;
 
-        if (boardState[y][x] !== C.EMPTY) penalty += 1000000;
+        if (boardState[y] && boardState[y][x] !== C.EMPTY) penalty += 1000000;
         if (heights[x] >= y + 1) penalty += 250000;
         if (heights[x] >= y - 1) penalty += 80000;
 
         for (let yy = Math.max(0, y - 2); yy <= y; yy++) {
-            if (boardState[yy][x] !== C.EMPTY) penalty += 25000;
+            if (boardState[yy] && boardState[yy][x] !== C.EMPTY) penalty += 25000;
         }
 
         return penalty;
@@ -494,11 +968,15 @@
 
         for (const t of TEMPLATE_LIBRARY) {
             const masked = [];
-            for (let x = 0; x < getWidth(); x++) if (t.mask[x]) masked.push(x);
+            for (let x = 0; x < getWidth(); x++) {
+                if (t.mask[x]) masked.push(x);
+            }
             if (!masked.length) continue;
 
             let base = Infinity;
-            for (const x of masked) base = Math.min(base, heights[x] - t.profile[x]);
+            for (const x of masked) {
+                base = Math.min(base, heights[x] - t.profile[x]);
+            }
             if (!Number.isFinite(base)) continue;
 
             let s = 0;
@@ -576,6 +1054,7 @@
         const bumpiness = heights.reduce((sum, h, i) => sum + (i > 0 ? Math.abs(h - heights[i - 1]) : 0), 0);
 
         let s = 0;
+
         s += templateScore(boardState) * 18;
         s += seedScore(boardState) * 10;
 
@@ -602,6 +1081,7 @@
                 if (v >= 1 && v <= 4) counts[v]++;
             }
         }
+
         const sorted = counts.slice(1).sort((a, b) => b - a);
         s += (sorted[0] + sorted[1]) * 0.6;
         s -= (sorted[2] + sorted[3]) * 0.8;
@@ -665,7 +1145,6 @@
 
         const piece = pieces[depth];
         const placements = dropPlacements(boardState, piece);
-
         if (!placements.length) {
             const ret = { score: -1e15, move: rootMove || null };
             memo.set(key, ret);
@@ -706,387 +1185,19 @@
         return best;
     }
 
-    // ========= Opening (GTR-only) =========
-    function colorLettersForPieces(pieces) {
-        const map = new Map();
-        const letters = ['A', 'B', 'C', 'D'];
-        let next = 0;
-
-        function letterOf(color) {
-            if (!map.has(color)) {
-                map.set(color, letters[Math.min(next, letters.length - 1)]);
-                next++;
-            }
-            return map.get(color);
-        }
-
-        return pieces.map(p => ({
-            code: `${letterOf(p.subColor)}${letterOf(p.mainColor)}`
-        }));
-    }
-
-    function openingPatternName(codes) {
-        const a = codes[0]?.code || '';
-        const b = codes[1]?.code || '';
-        const c = codes[2]?.code || '';
-
-        if (a === 'AA' && b.startsWith('A') && b[1] !== 'A') return 'AAAB';
-        if (a === 'AA' && b === 'BB') return 'AABB';
-        if ((a === 'AB' && b === 'AB') || (a === 'AB' && b === 'BA')) return 'ABAB';
-        if (a === 'AB' && b === 'AC') return 'ABAC';
-        if (a === 'AA' && (b === 'AB' || b === 'BB' || b === 'BC' || b === 'BD')) return 'AABC';
-        if (c === 'BB') return 'AAAB';
-        return 'GTR';
-    }
-
-    function legalFromSpecs(boardState, piece, specs) {
-        for (const spec of specs) {
-            const x = spec.x;
-            const rot = spec.rotation;
-            const y = findRestY(boardState, piece, x, rot);
-            if (y !== null) return { x, y, rotation: rot };
-        }
-        return null;
-    }
-
-    function openingSpecs(pattern, turn, codes) {
-        const c0 = codes[0]?.code || '';
-        const c1 = codes[1]?.code || '';
-        const c2 = codes[2]?.code || '';
-        const specs = [];
-
-        // 0-based columns:
-        // 1,2 -> x=0
-        // 2,3 -> x=1
-        // 3 -> x=2
-        // 4,5 -> x=3
-        // 5,6 -> x=4
-        // 6 -> x=5
-
-        if (pattern === 'AAAB') {
-            if (turn === 0) {
-                specs.push({ x: 0, rotation: 3 }); // 1,2 横
-                specs.push({ x: 1, rotation: 1 }); // 1,2 横(逆)
-            } else if (turn === 1) {
-                specs.push({ x: 2, rotation: 0 }); // 3列目, B下
-                specs.push({ x: 2, rotation: 2 }); // 3列目, A下(保険)
-            } else if (turn === 2) {
-                if (c2 === 'AA') {
-                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
-                } else if (c2 === 'AB') {
-                    specs.push({ x: 3, rotation: 2 }); // 4列目, A下
-                } else if (c2 === 'AC') {
-                    specs.push({ x: 1, rotation: 2 }); // 2列目, C下
-                } else if (c2 === 'BB') {
-                    specs.push({ x: 3, rotation: 0 }); // 4列目, 縦
-                    specs.push({ x: 3, rotation: 2 });
-                } else if (c2 === 'BC') {
-                    specs.push({ x: 3, rotation: 2 }); // 4列目, C下
-                } else if (c2 === 'CC') {
-                    specs.push({ x: 0, rotation: 3 }); // 1,2 横
-                } else if (c2 === 'CD') {
-                    specs.push({ x: 4, rotation: 3 }); // 5,6 横
-                    specs.push({ x: 5, rotation: 0 }); // 6列目 縦
-                } else {
-                    specs.push({ x: 4, rotation: 3 });
-                    specs.push({ x: 5, rotation: 0 });
-                }
-            } else {
-                // 4手目: できるだけGTR土台の継続
-                if (c2 === 'CC') {
-                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
-                } else if (c2 === 'BC') {
-                    specs.push({ x: 4, rotation: 3 }); // 5,6 横
-                } else if (c2 === 'CD') {
-                    specs.push({ x: 3, rotation: 3 });
-                    specs.push({ x: 5, rotation: 0 });
-                } else {
-                    specs.push({ x: 3, rotation: 3 });
-                    specs.push({ x: 4, rotation: 3 });
-                    specs.push({ x: 5, rotation: 0 });
-                }
-            }
-        }
-
-        if (pattern === 'AABB') {
-            if (turn === 0) {
-                specs.push({ x: 0, rotation: 3 }); // 1,2 横
-            } else if (turn === 1) {
-                specs.push({ x: 0, rotation: 3 }); // 1,2 横
-            } else if (turn === 2) {
-                if (c2 === 'AA') {
-                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
-                } else if (c2 === 'AB') {
-                    specs.push({ x: 0, rotation: 3 }); // 1,2 横(A右)
-                } else if (c2 === 'AC') {
-                    specs.push({ x: 2, rotation: 0 }); // 3列目 C下
-                } else if (c2 === 'BB') {
-                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
-                } else if (c2 === 'BC') {
-                    specs.push({ x: 0, rotation: 2 }); // 1列目 B下
-                } else if (c2 === 'CC') {
-                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
-                } else if (c2 === 'CD') {
-                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
-                    specs.push({ x: 5, rotation: 0 }); // 6列目 縦
-                } else {
-                    specs.push({ x: 3, rotation: 3 });
-                }
-            } else {
-                if (c2 === 'BC') {
-                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
-                    specs.push({ x: 4, rotation: 3 }); // 5,6 横
-                } else if (c2 === 'CD') {
-                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
-                    specs.push({ x: 1, rotation: 2 }); // 2列目 縦
-                } else if (c2 === 'CC') {
-                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
-                } else {
-                    specs.push({ x: 4, rotation: 3 });
-                    specs.push({ x: 5, rotation: 0 });
-                }
-            }
-        }
-
-        if (pattern === 'ABAB') {
-            if (turn === 0) {
-                specs.push({ x: 0, rotation: 2 }); // 1列目 A下
-                specs.push({ x: 0, rotation: 0 }); // 1列目 B下(保険)
-            } else if (turn === 1) {
-                specs.push({ x: 1, rotation: 2 }); // 2列目 A下
-                specs.push({ x: 1, rotation: 0 }); // 2列目 B下
-            } else {
-                // 3手目以降は GTR の土台へ寄せる
-                if (c2 === 'AA') {
-                    specs.push({ x: 3, rotation: 3 });
-                } else if (c2 === 'AB') {
-                    specs.push({ x: 0, rotation: 3 }); // A右
-                } else if (c2 === 'AC') {
-                    specs.push({ x: 2, rotation: 0 }); // C下
-                } else if (c2 === 'BB') {
-                    specs.push({ x: 3, rotation: 3 });
-                } else if (c2 === 'BC') {
-                    specs.push({ x: 0, rotation: 2 }); // B下
-                } else if (c2 === 'CC') {
-                    specs.push({ x: 3, rotation: 3 });
-                } else if (c2 === 'CD') {
-                    specs.push({ x: 2, rotation: 3 });
-                    specs.push({ x: 5, rotation: 0 });
-                } else {
-                    specs.push({ x: 3, rotation: 3 });
-                }
-            }
-        }
-
-        if (pattern === 'ABAC') {
-            if (turn === 0) {
-                specs.push({ x: 1, rotation: 3 }); // 2,3 横（A左）
-                specs.push({ x: 0, rotation: 0 }); // 1列目 縦（A下）
-            } else if (turn === 1) {
-                // 2通りのうち、今の盤面に合うほうを後段で選ぶ
-                if (c1 === 'AA' || c1 === 'AD' || c1 === 'BC' || c1 === 'DD') {
-                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
-                    specs.push({ x: 3, rotation: 2 }); // 4列目 縦
-                } else if (c1 === 'CC' || c1 === 'BD') {
-                    specs.push({ x: 0, rotation: 3 }); // 1,2 横
-                    specs.push({ x: 0, rotation: 2 }); // 1列目 縦
-                } else {
-                    specs.push({ x: 2, rotation: 3 });
-                    specs.push({ x: 0, rotation: 0 });
-                }
-            } else if (turn === 2) {
-                if (c2 === 'AA') {
-                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
-                } else if (c2 === 'AD') {
-                    specs.push({ x: 2, rotation: 3 }); // 3,4 横
-                } else if (c2 === 'BC') {
-                    specs.push({ x: 3, rotation: 2 }); // 4列目 B下
-                } else if (c2 === 'DD') {
-                    specs.push({ x: 3, rotation: 3 }); // 4,5 横
-                } else if (c2 === 'CC') {
-                    specs.push({ x: 0, rotation: 3 }); // 1,2 横
-                } else if (c2 === 'BD') {
-                    specs.push({ x: 0, rotation: 2 }); // 1列目 B下
-                } else if (c2 === 'CD') {
-                    specs.push({ x: 3, rotation: 0 }); // 4列目 D下(= main下)
-                } else if (c2 === 'AC') {
-                    specs.push({ x: 2, rotation: 2 }); // 3列目 A下
-                } else if (c2 === 'AB') {
-                    specs.push({ x: 1, rotation: 3 }); // 2,3 横
-                } else if (c2 === 'BB') {
-                    specs.push({ x: 0, rotation: 3 }); // 1,2 横
-                } else {
-                    specs.push({ x: 2, rotation: 3 });
-                    specs.push({ x: 3, rotation: 3 });
-                }
-            } else {
-                specs.push({ x: 3, rotation: 3 });
-                specs.push({ x: 4, rotation: 3 });
-                specs.push({ x: 5, rotation: 0 });
-            }
-        }
-
-        if (pattern === 'AABC') {
-            if (turn === 0) {
-                specs.push({ x: 0, rotation: 3 }); // 1,2 横
-            } else if (turn === 1) {
-                if (c1 === 'AB') {
-                    specs.push({ x: 4, rotation: 1 }); // 5,6 横 (B right)
-                } else if (c1 === 'BB') {
-                    specs.push({ x: 4, rotation: 3 }); // 5,6 横
-                } else if (c1 === 'BC') {
-                    specs.push({ x: 4, rotation: 2 }); // 5列目 縦 (B down)
-                } else if (c1 === 'BD') {
-                    specs.push({ x: 4, rotation: 1 }); // 5,6 横 (B left)
-                } else {
-                    specs.push({ x: 1, rotation: 3 });
-                    specs.push({ x: 4, rotation: 3 });
-                }
-            } else if (turn === 2) {
-                if (c2 === 'AA') {
-                    specs.push({ x: 1, rotation: 3 }); // 2,3 横
-                } else if (c2 === 'AD') {
-                    specs.push({ x: 1, rotation: 3 }); // 2,3 横
-                } else if (c2 === 'DD') {
-                    specs.push({ x: 0, rotation: 3 }); // 1,2 横
-                } else {
-                    specs.push({ x: 1, rotation: 3 });
-                    specs.push({ x: 3, rotation: 3 });
-                }
-            } else {
-                specs.push({ x: 3, rotation: 3 });
-                specs.push({ x: 4, rotation: 3 });
-                specs.push({ x: 5, rotation: 0 });
-            }
-        }
-
-        if (pattern === 'GTR') {
-            if (turn === 0) {
-                specs.push({ x: 0, rotation: 3 });
-                specs.push({ x: 0, rotation: 0 });
-            } else if (turn === 1) {
-                specs.push({ x: 2, rotation: 0 });
-                specs.push({ x: 1, rotation: 3 });
-            } else if (turn === 2) {
-                specs.push({ x: 3, rotation: 3 });
-                specs.push({ x: 3, rotation: 2 });
-                specs.push({ x: 4, rotation: 3 });
-                specs.push({ x: 5, rotation: 0 });
-            } else {
-                specs.push({ x: 3, rotation: 3 });
-                specs.push({ x: 4, rotation: 3 });
-                specs.push({ x: 5, rotation: 0 });
-            }
-        }
-
-        return specs;
-    }
-
-    function openingFallbackSpecs(turn) {
-        if (turn === 0) {
-            return [
-                { x: 0, rotation: 3 },
-                { x: 0, rotation: 0 },
-                { x: 1, rotation: 3 }
-            ];
-        }
-        if (turn === 1) {
-            return [
-                { x: 2, rotation: 0 },
-                { x: 1, rotation: 3 },
-                { x: 0, rotation: 0 }
-            ];
-        }
-        if (turn === 2) {
-            return [
-                { x: 3, rotation: 3 },
-                { x: 3, rotation: 0 },
-                { x: 4, rotation: 3 },
-                { x: 5, rotation: 0 }
-            ];
-        }
-        return [
-            { x: 3, rotation: 3 },
-            { x: 4, rotation: 3 },
-            { x: 5, rotation: 0 }
-        ];
-    }
-
-    function chooseOpeningMove() {
-        const cur = safeCurrentPuyo();
-        const b = safeBoard();
-        if (!cur || !b) return null;
-        if (openingState.turn >= AI_CONFIG.OPENING_TURNS) return null;
-
-        const pieces = readPieces();
-        if (!pieces.length) return null;
-
-        const codes = colorLettersForPieces(pieces);
-        const pattern = openingPatternName(codes);
-
-        const turn = openingState.turn;
-        const specs = openingSpecs(pattern, turn, codes);
-        const allSpecs = specs.concat(openingFallbackSpecs(turn));
-
-        // まず完全一致の候補を優先
-        for (const spec of allSpecs) {
-            const y = findRestY(b, cur, spec.x, spec.rotation);
-            if (y !== null) {
-                return { x: spec.x, y, rotation: spec.rotation };
-            }
-        }
-
-        // 最後の保険: opening の間は seedScore を使わず、
-        // GTRっぽい低い列・危険マス回避を優先
-        const placements = dropPlacements(b, cur);
-        if (!placements.length) return null;
-
-        let best = null;
-        let bestScore = -1e18;
-
-        for (const p of placements) {
-            const sim = simulateMove(b, cur, p.x, p.y, p.rotation);
-            const heights = columnHeights(sim.board);
-            const maxH = Math.max(...heights);
-            let score = 0;
-
-            // 左側・中央寄りのGTR土台を優先
-            if (p.x <= 3) score += 5000;
-            if (p.x === 0 || p.x === 1) score += 2500;
-            if (p.x === 2 || p.x === 3) score += 1500;
-
-            // 開幕は3つつなぎ種の評価をしない
-            score += templateScore(sim.board) * 12;
-
-            // 危険列を強く避ける
-            score -= dangerPenalty(sim.board);
-
-            // 高すぎる置き方を避ける
-            score -= maxH * 25;
-
-            if (score > bestScore) {
-                bestScore = score;
-                best = p;
-            }
-        }
-
-        return best ? { x: best.x, y: best.y, rotation: best.rotation } : null;
-    }
-
-    // ========= General search =========
     function chooseBestMove() {
         const cur = safeCurrentPuyo();
         const b = safeBoard();
         if (!cur || !b) return null;
         if (typeof gameState !== 'undefined' && gameState !== 'playing') return null;
 
-        // 開幕4手はGTRのみ
-        if (openingState.turn < AI_CONFIG.OPENING_TURNS) {
+        // 最初の4手はGTR優先
+        if (openingTurn < AI_CONFIG.OPENING_TURNS) {
             const openingMove = chooseOpeningMove();
-            return openingMove;
+            if (openingMove) return openingMove;
         }
 
-        const pieces = readPieces();
+        const pieces = getUpcomingPieces(3);
         if (!pieces.length) return null;
 
         MEMO.clear();
@@ -1136,7 +1247,7 @@
 
             const finish = () => {
                 if (typeof hardDrop === 'function') hardDrop();
-                if (openingState.turn < AI_CONFIG.OPENING_TURNS) openingState.turn++;
+                if (openingTurn < AI_CONFIG.OPENING_TURNS) openingTurn++;
                 updateStatus('AI実行完了');
                 busy = false;
             };
@@ -1179,7 +1290,7 @@
     }
 
     function resetAIState() {
-        openingState.turn = 0;
+        openingTurn = 0;
         MEMO.clear();
         busy = false;
         updateStatus('AI待機中');
@@ -1214,16 +1325,16 @@
 
     window.PuyoAI = {
         chooseBestMove,
+        chooseOpeningMove,
         evaluateBoard,
         resolveBoard,
         searchBest,
         templateScore,
         seedScore,
-        chooseOpeningMove,
         resetAIState
     };
 
-    // ========= Hook reset/rematch =========
+    // ========= Hook reset / rematch =========
     const prevResetGame = window.resetGame;
     window.resetGame = function () {
         if (typeof prevResetGame === 'function') prevResetGame();
