@@ -6,6 +6,8 @@
  */
 (function () {
     'use strict';
+    // puyo-ai-worker.js
+    importScripts('./puyoAI.js');
 
     const DEFAULT_COLORS = {
         EMPTY: 0,
